@@ -649,6 +649,22 @@ from greekocr.glyphs.lines_api import separate_lines
 lines = separate_lines(Image.open("crop.png"), min_visible=.5)
 ```
 
+### `greekocr.glyphs.page_lines.PageTextLine`
+
+```python
+from greekocr.glyphs.page_lines import PageTextLine
+lines = page_lines(page, boxes)  # list[PageTextLine]
+```
+
+### `greekocr.glyphs.page_lines.page_lines`
+
+`def page_lines(page: Image.Image | NDArray[Any], boxes: list[tuple[int, int, int, int]], *, margin: float=0.25) -> list[PageTextLine]`
+
+```python
+from greekocr.glyphs.page_lines import page_lines
+lines = page_lines(page, boxes, margin=0.25)
+```
+
 ### `greekocr.glyphs.readability.Readability`
 
 ```python

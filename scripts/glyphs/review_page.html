@@ -64,6 +64,13 @@ svg.fig { display: block; }
 svg text { font-family: var(--font-data); font-size: 11px; fill: var(--muted); }
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: .88rem; }
 .toolbar label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.review { display: grid; gap: 6px; border-top: 1px solid var(--rule); padding-top: 10px; }
+.review .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.review textarea { width: 100%; min-height: 3.2rem; font: inherit; font-size: .9rem; padding: 6px 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); color: var(--fg); box-sizing: border-box; }
+.review button { font: inherit; font-size: .85rem; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--rule); background: var(--surface); color: var(--fg); cursor: pointer; }
+.review button.on.ok { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.review button.on.problem { border-color: var(--cut); color: var(--cut); font-weight: 600; }
+.review .status { font-size: .8rem; color: var(--muted); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 </style>
 
@@ -256,7 +263,68 @@ function card(r, scale, showMarks) {
   const sc = document.createElement('div'); sc.className = 'scroll';
   sc.appendChild(figure(r, scale, showMarks));
   art.appendChild(sc);
+  if (DATA.reviews) art.appendChild(reviewBlock(r.id));
   return art;
+}
+
+// ---- reviews: one shared document per line in the page's database (reviews/<line id>) ----
+const REV = {}, DRAFT = {};
+let DB = null, DB_STATE = 'connecting';
+function reviewBlock(id) {
+  const box = document.createElement('div'); box.className = 'review'; box.dataset.review = id;
+  const row = document.createElement('div'); row.className = 'row';
+  const lab = document.createElement('b'); lab.textContent = 'Your review'; lab.style.fontSize = '.85rem';
+  const ta = document.createElement('textarea');
+  ta.placeholder = 'What is right or wrong on this line?';
+  ta.value = DRAFT[id] ?? ((REV[id] || {}).note || '');
+  ta.addEventListener('input', () => { DRAFT[id] = ta.value; status.textContent = 'not saved yet'; });
+  const status = document.createElement('span'); status.className = 'status';
+  const btn = (v, text) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.className = v; b.dataset.v = v;
+    b.addEventListener('click', () => save(id, v, ta.value, status));
+    return b;
+  };
+  row.append(lab, btn('ok', 'Looks right'), btn('problem', 'Problem'), btn('note', 'Save note'), status);
+  box.append(row, ta);
+  paintReview(box);
+  return box;
+}
+function paintReview(box) {
+  const r = REV[box.dataset.review] || {};
+  for (const b of box.querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === r.verdict);
+  const st = box.querySelector('.status');
+  if (DB_STATE !== 'ready') st.textContent = DB_STATE === 'connecting' ? 'connecting…' : 'reviews cannot be saved in this view';
+  else if (!(box.dataset.review in DRAFT)) st.textContent = r.at ? `saved ${r.at.slice(0, 16).replace('T', ' ')}` : '';
+}
+async function save(id, verdict, note, status) {
+  if (!DB) { status.textContent = 'reviews cannot be saved in this view'; return; }
+  const prev = REV[id] || {};
+  const body = { line_id: id, verdict: verdict === 'note' ? (prev.verdict || '') : verdict, note, at: new Date().toISOString() };
+  status.textContent = 'saving…';
+  try { await DB.doc('reviews/' + id).set(body); delete DRAFT[id]; status.textContent = 'saved'; }
+  catch (e) { status.textContent = 'not saved: ' + (e && e.code || 'error'); }
+}
+function countReviews() {
+  const el = document.getElementById('reviewcount'); if (!el) return;
+  const n = Object.values(REV).filter(r => r.verdict || r.note).length;
+  const bad = Object.values(REV).filter(r => r.verdict === 'problem').length;
+  el.textContent = DB_STATE === 'ready' ? `${n} of ${DATA.lines.length} lines reviewed · ${bad} marked as a problem` : '';
+}
+if (DATA.reviews) {
+  const use = window.claude && window.claude.use ? window.claude.use('db') : Promise.resolve(null);
+  use.then(db => {
+    if (!db) { DB_STATE = 'unavailable'; document.querySelectorAll('[data-review]').forEach(paintReview); return; }
+    DB = db; DB_STATE = 'ready';
+    db.collection('reviews').onSnapshot(snap => {
+      for (const d of snap.docs) REV[d.id] = d.data();
+      document.querySelectorAll('[data-review]').forEach(box => {
+        const ta = box.querySelector('textarea'); const id = box.dataset.review;
+        if (!(id in DRAFT) && document.activeElement !== ta) ta.value = (REV[id] || {}).note || '';
+        paintReview(box);
+      });
+      countReviews();
+    }, () => { DB_STATE = 'unavailable'; document.querySelectorAll('[data-review]').forEach(paintReview); });
+  }).catch(() => { DB_STATE = 'unavailable'; document.querySelectorAll('[data-review]').forEach(paintReview); });
 }
 
 function render() {
@@ -267,7 +335,11 @@ function render() {
   const heads = { fixes: ['Earlier lines, with the fixes', `Every line from the two earlier batches (${DATA.lines.length}), re-run with the current tools. Each card shows what the earlier page reported and what the tools say now.`],
     new: ['New lines', `${DATA.lines.length} lines not shown before, picked after running every check on ${DATA.pool} unseen crops: the strongest examples of each issue, plus three quiet lines.`],
     fixes_lede: 'Third page of the reference-free glyph tools: the earlier lines again, after two independent review rounds and your notes on bends, broken letters, double lines and cropped neighbour lines.',
-    new_lede: 'Fourth page of the reference-free glyph tools: 40 new lines, chosen by issue after running every check on the unseen crops.' };
+    new_lede: 'Fourth page of the reference-free glyph tools: 40 new lines, chosen by issue after running every check on the unseen crops.',
+    left: ['Left column', 'Every text-layer segment whose box starts in the left column, top to bottom. Boxes that span both columns are here too (the tools split them at the rule).'],
+    right: ['Right column', 'Every text-layer segment of the right column, top to bottom.'],
+    heading: ['Headings and page furniture', 'Title, session heading, date, page numbers.'],
+    page_lede: DATA.lede || '' };
   document.getElementById('lede').textContent = heads[DATA.mode + '_lede'];
   let last = '';
   for (const r of DATA.lines) {
@@ -283,6 +355,7 @@ function render() {
   }
 }
 document.getElementById('built').textContent = `built ${DATA.built} · ${DATA.lines.length} lines`;
+if (DATA.reviews) { const c = document.createElement('span'); c.id = 'reviewcount'; c.className = 'muted'; document.getElementById('built').after(c); }
 document.getElementById('zoom').addEventListener('change', render);
 document.getElementById('marks').addEventListener('change', render);
 let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 150); });

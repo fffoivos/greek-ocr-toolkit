@@ -1,6 +1,6 @@
 """Per column of one page: every line's own baseline (fitted alone, on its letters), then compare across lines:
 skew angle, straightness (departure from a straight line through the line's central part), where curving starts, and
-the shape of the curve once skew is removed. Usage: line_geometry.py PAGE.png BOXES.json OUT_PREFIX"""
+the shape of the curve once skew is removed. Usage: column_line_geometry.py PAGE.png BOXES.json OUT_PREFIX [MIN_W_XH MIN_LETTERS]"""
 import json, sys
 from pathlib import Path
 import numpy as np
@@ -12,6 +12,8 @@ from greekocr.glyphs.components import EIGHT, binarise                      # no
 from greekocr.glyphs.recut import fit_box                                   # noqa: E402
 
 page = Image.open(sys.argv[1]).convert('L'); gray = np.asarray(page, np.float64)
+MIN_W = float(sys.argv[4]) if len(sys.argv) > 4 else 18.0       # x-heights; ~half a column by default
+MIN_LETTERS = int(sys.argv[5]) if len(sys.argv) > 5 else 15
 rows = json.load(open(sys.argv[2])); out = sys.argv[3]
 H, W = gray.shape
 boxes = [tuple(r['box']) for r in rows]
@@ -73,7 +75,7 @@ for name, (c0, c1) in COLS.items():
     lines = []
     for f in fits:
         a, b = max(f.x0, c0), min(f.x1, c1)
-        if b - a < .5 * (c1 - c0) * .9:                                   # body lines only (half the column or more)
+        if b - a < MIN_W * xh:                                            # every line at least MIN_W x-heights long
             continue
         if any(abs(np.median(f.base) - np.median(g['init'])) < .5 * xh for g in lines):
             continue                                                       # the same line seen by two boxes
@@ -83,19 +85,21 @@ for name, (c0, c1) in COLS.items():
     res = []
     for L in lines:
         # 2. each line on its own: letters sitting on its baseline, own smooth curve
-        base = L['init']; xs = L['xs']
+        base = L['init']; xs = L['xs']; grid = None
         for it in range(3):
             sel = (comps[:, 0] >= xs[0]) & (comps[:, 0] < xs[-1]) & (comps[:, 2] >= .5 * xh) & (comps[:, 2] <= 2.4 * xh)
             cx, cb = comps[sel, 0], comps[sel, 1]
             d = cb - np.interp(cx, xs, base)
             ok = np.abs(d) <= .3 * xh
-            if ok.sum() < 8: break
+            if ok.sum() < MIN_LETTERS: break
             px, py = cx[ok], cb[ok]
             grid = xs[(xs >= px.min()) & (xs <= px.max())]
             base_g = smooth_curve(px, py, grid, xh)
             base = np.interp(xs, grid, base_g)
+        if grid is None:
+            failed.setdefault(name, []).append((L['box'], 0, 0.0, 0.0)); continue
         gx = grid; gy = base_g
-        if ok.sum() < 15 or np.abs(np.diff(gy)).max() > 2 or abs(np.polyfit(gx, gy, 1)[0]) > .1:
+        if ok.sum() < MIN_LETTERS or np.abs(np.diff(gy)).max() > 2 or abs(np.polyfit(gx, gy, 1)[0]) > .1:
             failed.setdefault(name, []).append((L['box'], int(ok.sum()), round(float(np.abs(np.diff(gy)).max()), 1), round(float(np.degrees(np.arctan(np.polyfit(gx, gy, 1)[0]))), 1))); continue
         if any(abs(float(np.median(gy)) - R['y']) < .5 * xh for R in res):
             continue                                                       # the same line seen by two boxes
@@ -108,6 +112,7 @@ for name, (c0, c1) in COLS.items():
         onset_l = float(gx[np.nonzero(bad[:n // 2])[0].max()]) if bad[:n // 2].any() else None   # curving starts left of here
         onset_r = float(gx[n // 2 + np.nonzero(bad[n // 2:])[0].min()]) if bad[n // 2:].any() else None
         res.append(dict(box=L['box'], y=round(float(np.median(gy))), x0=int(gx[0]), x1=int(gx[-1]), n_letters=int(len(px)),
+                        curve=[round(float(v), 1) for v in gy],
                         skew_deg=round(float(np.degrees(np.arctan(k))), 3), max_dev_px=round(float(np.abs(dev).max()), 1),
                         rms_dev_px=round(float(np.sqrt((dev ** 2).mean())), 1),
                         dev_left_end_px=round(float(dev[:max(1, n // 20)].mean()), 1), dev_right_end_px=round(float(dev[-max(1, n // 20):].mean()), 1),

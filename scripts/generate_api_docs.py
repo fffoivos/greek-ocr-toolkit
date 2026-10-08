@@ -209,6 +209,8 @@ CALLS={
 'PageLine':'lines = fix_page(page, boxes)  # list[PageLine]',
 'fix_page':'lines = fix_page(page, boxes, only=None, margin=0.25, mode="curve")',
 'region':'mask = recut.region',
+'PageTextLine':'lines = page_lines(page, boxes)  # list[PageTextLine]',
+'page_lines':'lines = page_lines(page, boxes, margin=0.25)',
 }
 
 
