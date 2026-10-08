@@ -68,6 +68,10 @@ svg text { font-family: var(--font-data); font-size: 11px; fill: var(--muted); }
 .review .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .review textarea { width: 100%; min-height: 3.2rem; font: inherit; font-size: .9rem; padding: 6px 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); color: var(--fg); box-sizing: border-box; }
 .review button { font: inherit; font-size: .85rem; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--rule); background: var(--surface); color: var(--fg); cursor: pointer; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tags button.tag { font: inherit; font-size: .8rem; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--surface); color: var(--muted); cursor: pointer; }
+.tags button.tag[aria-pressed="true"] { border-color: var(--cut); color: var(--cut); background: color-mix(in srgb, var(--cut) 10%, transparent); font-weight: 600; }
+.tags button.tag.good[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .review button.on.ok { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .review button.on.problem { border-color: var(--cut); color: var(--cut); font-weight: 600; }
 .review .status { font-size: .8rem; color: var(--muted); }
@@ -286,13 +290,28 @@ function reviewBlock(id) {
     return b;
   };
   row.append(lab, btn('ok', 'Looks right'), btn('problem', 'Problem'), status);
-  box.append(row, ta);
+  const tagrow = document.createElement('div'); tagrow.className = 'tags'; tagrow.setAttribute('role', 'group'); tagrow.setAttribute('aria-label', 'issues');
+  for (const [k, text] of TAGS) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.dataset.tag = k;
+    b.className = k === 'ok' ? 'tag good' : 'tag';
+    b.addEventListener('click', () => {
+      let cur = new Set((REV[id] || {}).tags || []);
+      if (cur.has(k)) cur.delete(k);                       // toggle off
+      else if (k === 'ok') cur = new Set(['ok']);          // "Looks right" clears every issue
+      else { cur.add(k); cur.delete('ok'); }               // an issue clears "Looks right"
+      REV[id] = Object.assign({}, REV[id] || {}, { tags: [...cur] }); paintReview(box);
+      save(id, 'tags', ta.value, status, [...cur]);
+    });
+    tagrow.appendChild(b);
+  }
+  box.append(row, tagrow, ta);
   paintReview(box);
   return box;
 }
 function paintReview(box) {
   const r = REV[box.dataset.review] || {};
   for (const b of box.querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === r.verdict);
+  for (const b of box.querySelectorAll('button[data-tag]')) b.setAttribute('aria-pressed', String((r.tags || []).includes(b.dataset.tag)));
   const st = box.querySelector('.status');
   if (DB_STATE !== 'ready') st.textContent = DB_STATE === 'connecting' ? 'connecting…' : 'reviews cannot be saved in this view';
   else if (!(box.dataset.review in DRAFT)) st.textContent = r.at ? `saved ${r.at.slice(0, 16).replace('T', ' ')}` : '';
@@ -314,10 +333,13 @@ async function autosave(id, status) {
 function flushAll() { for (const id of Object.keys(DRAFT)) { clearTimeout(TIMER[id]); autosave(id, { set textContent(v) {} }); } }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushAll(); });
 window.addEventListener('pagehide', flushAll);
-async function save(id, verdict, note, status) {
+const TAGS = [['ok', 'Looks right'], ['curve', 'Curve not followed'], ['bottoms', 'Not on the letter bottoms'], ['jagged', 'Jagged line'],
+  ['ends', 'Misses start or end'], ['rule', 'Crosses the column rule'], ['break', 'Broken inside a column'], ['missed', 'Line missed'],
+  ['wrongline', 'Follows the wrong line'], ['capitals', 'Capitals wrong']];   // from the owner's first 29 comments (8 Oct)
+async function save(id, verdict, note, status, tags) {
   if (!DB) { status.textContent = 'reviews cannot be saved in this view'; return; }
   const prev = REV[id] || {};
-  const body = { line_id: id, verdict: verdict === 'note' ? (prev.verdict || '') : verdict, note, at: new Date().toISOString() };
+  const body = { line_id: id, verdict: (verdict === 'note' || verdict === 'tags') ? (prev.verdict || '') : verdict, tags: tags || prev.tags || [], note, at: new Date().toISOString() };
   status.textContent = 'saving…';
   try { await DB.doc('reviews/' + id).set(body); status.textContent = 'saved'; }
   catch (e) { status.textContent = 'not saved: ' + (e && e.code || 'error'); }
