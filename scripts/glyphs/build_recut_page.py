@@ -108,15 +108,15 @@ for r, label in picked:
         if l['added'][0] or l['added'][1]:
             chips.append(f'<span class="chip">+{l["added"][0]} px left · +{l["added"][1]} px right · stops {l["stops"][0].replace("_", " ")} / {l["stops"][1].replace("_", " ")}</span>')
     img = RUN / 'img'
-    ctx, cw, ch = jpg(img / f'{lid}.context.jpg', 1100, 55, 'RGB')
-    org, ow, oh = jpg(img / f'{lid}.orig.png', 1300)
+    ctx, cw, ch = jpg(img / f'{lid}.context.jpg', 1000, 50, 'RGB')
+    org, ow, oh = jpg(img / f'{lid}.orig.png', 1200, 50)
     figs = [f'<figure><img loading="lazy" src="data:image/jpeg;base64,{ctx}" width="{cw}" height="{ch}" alt="page context"><figcaption>page: text-layer box (red), output lines (green)</figcaption></figure>',
             f'<figure><img loading="lazy" src="data:image/jpeg;base64,{org}" width="{ow}" height="{oh}" alt="text-layer crop"><figcaption>text-layer crop (before)</figcaption></figure>']
     for n, l in enumerate(r['lines']):
         p = img / f'{lid}.line{n}.png'
         if not p.exists():
             continue
-        b, w, h = jpg(p, 1300)
+        b, w, h = jpg(p, 1200, 50)
         what = 'straightened along its curve, own ink only' if l['fixed'] else 'unchanged box'
         figs.append(f'<figure><img loading="lazy" src="data:image/jpeg;base64,{b}" width="{w}" height="{h}" alt="output line"><figcaption>output {n + 1} ({l["kind"]}): {what}</figcaption></figure>')
     feat = ' featured' if label == 'Your case' else ''
