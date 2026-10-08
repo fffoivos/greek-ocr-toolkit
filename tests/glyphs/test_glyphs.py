@@ -548,3 +548,38 @@ def test_recut_page_keeps_each_line_and_excludes_its_neighbours():
         assert (tgt & shown).sum() >= .95 * tgt.sum(), li
         ink = (lab > 0) & shown
         assert (ink & ~tgt).sum() <= .02 * ink.sum(), li
+
+
+def _synth_page(seed, hard):
+    import importlib.util, os, random as _r
+    os.environ['HARD'] = '1' if hard else ''
+    spec = importlib.util.spec_from_file_location('rsp', Path(__file__).parents[2] / 'scripts/glyphs/eval/recut_synth_pages.py')
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    rng = _r.Random(seed)
+    page, lab, info, ang, pitch = m.make_page(rng, DIDOT, 34, 'rule')
+    return m, rng, page, lab, [li for li in info if (lab == li['id']).sum() >= 200]
+
+
+def test_fix_page_keeps_uncut_boxes_and_splits_boxes_holding_two_lines():
+    """Owner 8 Oct 18:40, whole-page steps: a line whose box holds all of its ink keeps its box; a box holding two
+    lines is broken into both lines (the second has no box of its own)."""
+    from greekocr.glyphs.recut import fix_page
+    m, rng, page, lab, info = _synth_page(5, False)
+    boxes = []
+    for li in info:                                    # generous boxes: the whole line's ink ± 0.3 x-heights
+        ys, xs = np.nonzero(lab == li['id']); a = int(.3 * li['xh'])
+        boxes.append((int(xs.min() - a), int(ys.min() - a), int(xs.max() + 1 + a), int(ys.max() + 1 + a)))
+    lines = fix_page(page, boxes)
+    mains = [pl for pl in lines if pl.kind == 'main']
+    assert sum(not pl.cut_sides for pl in mains) >= .9 * len(mains)
+    # merge line 2's box into line 1's (same column): one box, two lines; line 2 loses its own box
+    a_, b_ = info[1], info[2]
+    i, j = 1, 2
+    merged = (min(boxes[i][0], boxes[j][0]), boxes[i][1], max(boxes[i][2], boxes[j][2]), boxes[j][3])
+    boxes2 = [b for k, b in enumerate(boxes) if k != j]
+    boxes2[i] = merged
+    lines2 = fix_page(page, boxes2, only={i})
+    assert [pl.kind for pl in lines2].count('split') == 1, [pl.reason for pl in lines2]
+    for li in (a_, b_):                                # both lines come out whole, each in its own output line
+        tgt = lab == li['id']
+        assert max((tgt & pl.recut.region).sum() for pl in lines2) >= .95 * tgt.sum(), li

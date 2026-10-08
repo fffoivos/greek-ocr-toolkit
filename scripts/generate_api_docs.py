@@ -206,6 +206,9 @@ CALLS={
 'recut_lines':'lines = recut_lines(page, (x0, y0, x1, y1), mode="curve", margin=0.25)',
 'recut_page':'per_box = recut_page(page, [(x0, y0, x1, y1), ...], mode="curve")',
 'base_at':'rows = fit.base_at(np.arange(x0, x1, dtype=float))',
+'PageLine':'lines = fix_page(page, boxes)  # list[PageLine]',
+'fix_page':'lines = fix_page(page, boxes, only=None, margin=0.25, mode="curve")',
+'region':'mask = recut.region',
 }
 
 
