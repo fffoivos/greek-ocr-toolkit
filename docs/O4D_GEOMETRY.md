@@ -300,3 +300,16 @@ CLI readback, retained rejects and refusal to overwrite prior output.
 - No automatic label correction, cross-line substring assignment, adjudication,
   training import, production extraction or replacement of the existing gate is
   performed. Rejected and dropped evidence remains in the returned receipts.
+
+## Real-page measurement (8 Oct 2026, 400 parliament lines, CLLG readings scored against the text layer)
+
+| version | exact (400) | exact on 100 silver | median CER | mean CER | improved / worsened |
+| --- | --- | --- | --- | --- | --- |
+| text-layer crops (baseline) | 100 | 100 | 0.042 | 0.106 | |
+| G1 v1 | 27 | 20 | 0.082 | 0.136 | 67 / 272 |
+| G1 v2 | 98 | 76 | 0.039 | 0.129 | 129 / 115 |
+
+Gate (set before measuring): exact ≥ 100 and improved > worsened. v2 passes the second, fails the first (and regresses 24 silver lines),
+so G1 is NOT adopted as a replacement extraction. Use: `refine_line` diagnostics (curl, baselines, clipping, ink checks) as record features
+for weighting; the segmentation arm moves to G2 (Kraken baseline segmentation), which image-only sources (Anemi) need regardless.
+Receipts: docs/O4D_G1_measure_v1.json, docs/O4D_G1_measure_v2.json.
