@@ -260,6 +260,18 @@ def _track(xs: NDArray[np.float64], ys: NDArray[np.float64], inl: NDArray[np.boo
     while ascender tops and descender bottoms (≥ 0.4 x-height off) stay out."""
     acc = inl.copy()
     tol = .25 * xh + 1
+    # strays at the ends: 1–2 accepted points cut off by a gap > 3 x-heights at either end of the accepted set (a stray
+    # that sat on the first straight fit, e.g. one letter inside a curled line end) become ordinary candidates again, so tracking
+    # walks through the region between them instead of believing the line already reaches them (owner review 8 Oct)
+    ai = np.nonzero(acc)[0]
+    if len(ai) >= 4:
+        o = ai[np.argsort(xs[ai])]
+        cuts = np.nonzero(np.diff(xs[o]) > 3 * xh)[0]
+        if len(cuts):
+            groups = np.split(o, cuts + 1)
+            for gi in (0, -1):                       # only tiny groups (1–2 points) at either end are set aside
+                if len(groups) > 1 and len(groups[gi]) <= 2:
+                    acc[groups[gi]] = False
     order = np.argsort(xs)
     changed = True
     while changed:
@@ -282,8 +294,10 @@ def _track(xs: NDArray[np.float64], ys: NDArray[np.float64], inl: NDArray[np.boo
                     c = np.array([0.0, np.median(ys[near])])
                 if abs(ys[i] - np.polyval(c, xs[i])) <= tol:
                     acc[i] = True; changed = True
-                elif abs(xs[i] - xs[near].mean()) > 6 * xh:
-                    break     # a gap of several letters without agreement: stop tracking on this side
+                elif abs(xs[i] - (lo if direction < 0 else hi)) > 3 * xh:
+                    break     # 3 x-heights past the line's current end without agreement: stop on this side (measured
+                    # from the end, owner review 8 Oct: measured from the mean of the predicting letters, it stopped
+                    # after one rejected descender and left left-edge curls unfollowed)
     return acc
 
 
@@ -412,7 +426,10 @@ def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int = 0, xh_prior: fl
             curve, cdeg = _smooth_curve(sx, sy, w, xh)
             lin = np.polyfit(sx, sy, 1)
             r_lin = np.abs(sy - np.polyval(lin, sx)); r_cur = np.abs(sy - curve[np.clip(sx.astype(int), 0, w - 1)])
-            if np.percentile(r_cur, 90) < SEL_RATIO * np.percentile(r_lin, 90) and np.percentile(r_lin, 90) > SEL_FLOOR * xh:
+            gtol = .22 * xh + 1
+            end_bend = (r_lin > gtol).sum() >= 3 and (r_cur <= gtol).mean() >= .97   # a curl the line cannot follow
+            if (np.percentile(r_cur, 90) < SEL_RATIO * np.percentile(r_lin, 90) and np.percentile(r_lin, 90) > SEL_FLOOR * xh) \
+                    or end_bend:
                 inl, bottom, deg = tracked, curve, cdeg
             elif (r_lin <= .22 * xh + 1).all():
                 inl, bottom, deg = tracked, np.polyval(lin, np.arange(w, dtype=np.float64)), 1
