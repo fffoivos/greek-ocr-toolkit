@@ -112,7 +112,7 @@ paper padding, and tight output cropped to its ink ± 0.5 / 0.3 / 0.2 x-heights.
   (taken by 37 of the 40 level strips) reads identically to the resampled tight m0.3 output.
 - Every skew bin: tight m0.2 holds E1 at 0.028–0.042 median NFD (original 0.188 at 1° → 0.860 at 5°); mean over all
   240 strips 0.396 → 0.045, mark F1 0.53 → 0.86. CLLG 0.000 in every bin and variant.
-- Decision: recogniser-facing output = ; margin stays a parameter; the
+- Decision: recogniser-facing output = `separate_lines(..., tight=True, margin=0.2)`; margin stays a parameter; the
   padded form is for display.
 
 ## Real crops under the CLLG limits (444 crops: 400 parliament sample + 44 fixtures)
