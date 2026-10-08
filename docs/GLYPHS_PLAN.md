@@ -16,17 +16,27 @@ Written 8 Oct 2026 14:30 Athens. Owner = the project owner; requirements quoted 
 6. **Validation instruments**: rendered truth lines (`glyphs.synthetic`, `glyphs.evaluate`), known-defect injector
    (planned), owner blind review sheets, Luna as an independent second check.
 
-State 16:05 (after CP-G1c2 HOLD fixes; 30 glyph tests; raw outputs review_scratch/CP-G1c3-evidence/):
-- skew (100 straight rendered lines): high-confidence fits (95) max 0.217°; all fits p99 0.98°, max 4.55° (low-confidence
-  short line). Bent lines: lines with any column > 0.25 x-heights off 34 %.
-- marks: separate accents found 98.7 %, all accents found 75.4 % (23.6 % fused into their letter in these renders),
-  mark precision 95.2 %; neighbour ink: 97.1 % of visible truth pixels called neighbour.
-- letter states, two truths reported (no tuning to either): PRINT (physical ink) — merged precision 3.6 % undamaged /
-  27 % with defects; VISIBLE (noise-free scan, ≥ ¼ of paper→ink) — merged precision 87 % / 85 %, recall 64 % / 80 %;
-  broken recall 53 % / 63 %, under precision 41 % / 65 %. 'Merged' = visibly touching in the scan; 'broken' moderate.
-- double lines: real fixtures 7/7 double, 0/20 single, 2/17 partial flagged (docs/glyphs_fixture_labels.json; threshold
-  in-sample); rendered crops recall 93 %, precision 76 %.
-Artifact (v2, to be rebuilt): https://claude.ai/artifact/FrYMi9ra4boVf6auGm3arm
+State 16:20 (after CP-G1c3 HOLD fix and the four-line model; 34 glyph tests; raw outputs in
+review_scratch/CP-G1c3-evidence/: evals_v7.txt, neighbour_eval.txt, fixture_double.txt):
+- skew (100 straight rendered lines): high-confidence fits (95) max 0.217°; all fits median 0.009°, p99 0.98°, max 4.55°.
+  Bent lines: lines with any column > 0.25 x-heights off 34 %.
+- owner example (original crop): 31.6–31.8 % of the letter body inside the crop over the first 180 columns (the bend
+  fit now follows the start); angle 2.209° with the document prior (26 px), 1.820° with the re-cut's 21 px.
+- marks: separate accents found 98.7 %, all accents 75.4 % (23.6 % fused into their letter), precision 95.2 %;
+  neighbour ink: 97.1 % of visible truth pixels called neighbour.
+- letter states, two truths fixed before measurement (print = physical ink; visible = noise-free scan ≥ ¼ of
+  paper→ink), ordinary renders / with injected defects:
+  PRINT   broken recall 25.3 % / 41.4 %, under precision 42.6 % / 43.4 %, merged precision 3.6 % / 26.8 %;
+  VISIBLE broken recall 56.9 % / 61.5 %, under precision 44.6 % / 48.6 %, merged precision 87.1 % / 84.5 %,
+          merged recall 63.8 % / 79.5 %.
+  Letters truly gone from the print: 0 / 282 (253 missed, no warning yet). 'Merged' = visibly touching in the scan.
+- four guide lines for every line: neighbours borrow the main line's shape; on 150 rendered crops 96 % of visible
+  neighbour lines found, median placement error 0.056 x-heights, 74 % within 0.25, 87 % within 0.5 (the rest:
+  tall-letter tops taken for short-letter tops; a per-document line pitch would resolve it).
+- double lines: real fixtures 7/7 double, 0/20 single, 2/17 partial flagged (in-sample threshold); rendered recall 93 %,
+  precision 76 %.
+Earlier figures on the review page v2 (84 %→45 % bends, broken 82 %/78 %, merged 99.5 %/74 %) used the
+detector-dependent evaluator and are superseded.
 
 ## Owner requirements
 
@@ -83,7 +93,8 @@ Artifact (v2, to be rebuilt): https://claude.ai/artifact/FrYMi9ra4boVf6auGm3arm
   are not flagged; the double-line check fits one band across the whole crop.
 - Rendered neighbour tips are more prominent than real ones (double-line precision 74 % rendered vs 0/20 false on
   real singles): the neighbour leading in the renderer should be calibrated to real pages.
-- Owner example original crop (resolved in part by bend tracking): before x ≈ 180 the band is extrapolated (no supporting letters pass the evidence filter)
+- Owner example original crop — RESOLVED by bend tracking (31.6 % inside at the start, where about 25 % is visible).
+  Historical note: before x ≈ 180 the band was extrapolated (no supporting letters pass the evidence filter)
   and reads 0–6 % of the body inside where about 25 % is visible; the line likely curls there. Relaxing the filter for
   edge-cut slivers did not fix it and cost 1.8 % lost letters on the rendered set, so it was reverted (P2: end curl).
 - The document prior for that crop is the median of the document's complete crops (26 px); the same line's re-cut crop

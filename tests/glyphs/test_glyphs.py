@@ -49,6 +49,10 @@ def test_font_gate_accepts_polytonic_and_rejects_missing_glyphs():
 
 
 def test_f6_render_refuses_text_the_font_cannot_draw():
+    # CP-G1c2 F2: a supported breathing must not hide an unsupported combining macron
+    assert not font_covers(DIDOT, 'ἀ\u0304')[0]
+    with pytest.raises(UnsupportedText):
+        render_truth_line('ἀ\u0304', DIDOT, degrade=False)
     assert not font_covers(FONTS / 'XCharter-Regular.otf', 'ἀἁ')[0]
     with pytest.raises(UnsupportedText):
         render_truth_line('ἀἁἄἅ', FONTS / 'XCharter-Regular.otf', degrade=False)
@@ -123,6 +127,14 @@ def test_f1c2_letter_truth_does_not_depend_on_the_detector():
     true_states = lambda S: {k.split('->')[0]: 0 for k in S['state_confusion']} | {}
     count = lambda S: {t: sum(v for k, v in S['state_confusion'].items() if k.split('->')[0] == t) for t in true_states(S)}
     assert count(a) == count(b) and a['letters_true'] == b['letters_true']
+
+
+@pytest.mark.parametrize('truth', ['print', 'visible'])
+def test_c3_faded_but_visible_letters_are_not_counted_vanished_or_missed(truth):
+    """CP-G1c3 probe: a fade leaving 36 % contrast is above the visible threshold and in the print."""
+    r = render_truth_line(TEXTS[0], DIDOT, size=40, degrade=False, ink_defects=[(.2, .6, 'fade', .8)])
+    S = summarise(score_rendered(r, state_truth=truth))
+    assert S['vanished'] == 0 and S['letters_missed'] == 0
 
 
 @pytest.mark.parametrize('neighbours', [False, True])
@@ -287,3 +299,28 @@ def test_line_record_uses_document_prior_for_the_owner_example():
     assert rec['prior'] == {'xh': 21.0, 'n': 1} and rec['xh'] == 21.0
     assert rec['cut_spans'] and rec['letters'] and len(rec['visible']) > 300
     assert max(rec['visible'][:30]) < .5 and max(rec['visible']) > .9   # unreadable at the start, readable later
+
+
+def test_four_guide_lines_for_main_and_neighbour_lines():
+    """Neighbours borrow the main line's shape; the renderer's true neighbour baselines check the placement."""
+    from greekocr.glyphs.baseline import text_lines
+    errs = []
+    for i in range(6):
+        r = render_truth_line(TEXTS[i % 4], DIDOT, size=36, rng=random.Random(900 + i), neighbours=(TEXTS[(i + 1) % 4], TEXTS[(i + 2) % 4]))
+        L = text_lines(line_glyphs(r.image))
+        main = L[0]
+        assert main.side == 'main' and np.all(main.ascender < main.mean) and np.all(main.base < main.descender)
+        cols = np.nonzero((r.truth == LETTER).any(axis=0))[0]
+        for side, tb in r.other_base_truth:
+            pred = [l for l in L if l.side == ('below' if side > 0 else 'above')]
+            if pred:
+                errs.append(min(float(np.median(np.abs(l.base[cols] - tb[cols]))) for l in pred) / r.xh)
+    assert len(errs) >= 8 and np.median(errs) < .2
+
+
+def test_owner_b1ce_four_lines_in_one_crop():
+    """Owner 8 Oct: b1ce…l00068 holds four lines; above, main, and tips above and below are all placed."""
+    from greekocr.glyphs.baseline import text_lines
+    L = text_lines(line_glyphs(Image.open(Path(__file__).parents[1] / 'fixtures' / 'o4d_sample400' / 'crops' / 's2-b1ce8959da62cc55c839-p00009-l00068.png')))
+    sides = sorted(round(l.shift_xh) for l in L)
+    assert sides == [-5, -3, 0, 2]

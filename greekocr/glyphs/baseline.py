@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 from greekocr.glyphs.components import LineGlyphs, _fit_curve, _ransac_line
 from greekocr.glyphs.letters import LetterBox, letter_boxes
 
-__all__ = ['DOUBLE_RATIO', 'Crossing', 'CutLetter', 'CutSpan', 'SecondLine', 'SkewLine', 'second_line', 'skew_line']
+__all__ = ['DOUBLE_RATIO', 'Crossing', 'CutLetter', 'CutSpan', 'GuideLines', 'SecondLine', 'SkewLine', 'second_line', 'skew_line', 'text_lines']
 
 # A second text line inside the crop: its band's letter support ≥ DOUBLE_RATIO × the main band's. Set on the 44
 # o4d_lines fixtures against the implementer's provisional labels (7 double: 0.27–0.61; 20 single: ≤ 0.22) and
@@ -185,3 +185,89 @@ def skew_line(glyphs: LineGlyphs, boxes: list[LetterBox] | None = None) -> SkewL
                     support_x=(float(sx.min()), float(sx.max())) if len(sx) else (0.0, 0.0), n_support=band.n_support,
                     residual_px=None if resid is None else round(resid, 2), xh=band.xh, xh_source=band.xh_source, crossings=tuple(crossings),
                     cut_spans=tuple(spans), cut_letters=tuple(cut_letters), second=second_line(glyphs))
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Four guide lines for every text line in the crop (owner, 8 Oct 16:00): top of tall letters, mean line (top of the
+# short letters), baseline, bottom of hanging letters. Neighbour lines are often cut to their accents or letter
+# edges; they borrow the main line's shape and letter height (lines on a page are near-parallel and share one type
+# size) and only their vertical shift is estimated, by votes: each kind of fragment points at one guide line.
+# ---------------------------------------------------------------------------------------------------------------
+
+RISE, DROP = .51, .57     # median rise of tall letters / drop of hanging letters on 213 real lines (x-heights)
+ACCENT_GAP = .1           # accents sit ~0.1 x-heights above the mean line (rendered evidence, CP-G1 mark gaps)
+
+
+@dataclass(frozen=True)
+class GuideLines:
+    side: str                         # 'main' | 'above' | 'below'
+    shift_xh: float                   # vertical offset from the main baseline, in x-heights (0 for main)
+    ascender: NDArray[np.float64]     # per column rows
+    mean: NDArray[np.float64]
+    base: NDArray[np.float64]
+    descender: NDArray[np.float64]
+    x0: int                           # columns with evidence for this line
+    x1: int
+    votes: float                      # weight of the fragments that placed it (main: support points)
+    visible: float                    # mean fraction of its letter body inside the crop over x0..x1
+
+
+def _rise_drop(glyphs: LineGlyphs) -> tuple[float, float]:
+    xh = glyphs.band.xh
+    r, d = [], []
+    for c in glyphs.components:
+        if c.role != 'letter' or {'top', 'bottom'} & set(c.touches):
+            continue
+        t, b = glyphs.band.at(c.cx)
+        if (t - c.y0) / xh > .25:
+            r.append((t - c.y0) / xh)
+        if (c.y1 - b) / xh > .25:
+            d.append((c.y1 - b) / xh)
+    return (float(np.median(r)) if len(r) >= 3 else RISE), (float(np.median(d)) if len(d) >= 3 else DROP)
+
+
+def text_lines(glyphs: LineGlyphs, *, max_per_side: int = 2) -> list[GuideLines]:
+    """The main line and every neighbour line (above / below), each with its four guide lines."""
+    xh, w, h = glyphs.band.xh, glyphs.width, glyphs.height
+    B, M = glyphs.band.bottom, glyphs.band.top
+    rise, drop = _rise_drop(glyphs)
+
+    def make(side: str, shift: float, x0: int, x1: int, votes: float) -> GuideLines:
+        base = B + shift
+        vis = np.clip(np.minimum(base, h) - np.maximum(base - xh, 0), 0, xh) / xh
+        return GuideLines(side, round(shift / xh, 3), base - (1 + rise) * xh, base - xh, base, base + drop * xh,
+                          x0, x1, round(votes, 1), round(float(vis[x0:x1 + 1].mean()) if x1 > x0 else 0.0, 3))
+
+    sx = [p[0] for p in glyphs.band.support]
+    out = [make('main', 0.0, int(min(sx)) if sx else 0, int(max(sx)) if sx else w - 1, float(glyphs.band.n_support))]
+    votes: list[tuple[float, float, float]] = []      # (shift rows, x, weight)
+    for c in glyphs.components:
+        if c.role == 'rule' or c.area < 6:
+            continue
+        i = int(np.clip(c.cx, 0, w - 1))
+        if M[i] - .6 * xh <= (c.y0 + c.y1) / 2 <= B[i] + .6 * xh:
+            continue                                   # the main line itself
+        small = c.h < .5 * xh and c.w < .8 * xh
+        if c.y0 > 0:     # a free top: the mean line, or the top of a tall letter
+            votes += [(c.y0 - M[i], c.cx, 1.0), (c.y0 - (M[i] - rise * xh), c.cx, .6)]
+        if c.y1 < h:     # a free bottom: the baseline, a hanging letter's bottom, or an accent just above the mean line
+            votes += [(c.y1 - B[i], c.cx, 1.0), (c.y1 - (B[i] + drop * xh), c.cx, .6)]
+            if small:
+                votes.append((c.y1 - (M[i] - ACCENT_GAP * xh), c.cx, .8))
+    for side, lo, hi in (('above', -6.0, -1.3), ('below', 1.3, 6.0)):   # up to two line pitches away
+        v = [t for t in votes if lo * xh <= t[0] <= hi * xh]
+        for _ in range(max_per_side):
+            if len(v) < 3:
+                break
+            s = np.array([t[0] for t in v]); wt = np.array([t[2] for t in v])
+            hist, edges = np.histogram(s, bins=np.arange(lo * xh, hi * xh + 1, .1 * xh), weights=wt)
+            hist = np.convolve(hist, [.25, .5, 1, .5, .25], mode='same')
+            k = int(np.argmax(hist))
+            near = np.abs(s - (edges[k] + edges[k + 1]) / 2) <= .25 * xh
+            if wt[near].sum() < 3:
+                break
+            shift = float(np.average(s[near], weights=wt[near]))
+            xs = np.array([t[1] for t, n in zip(v, near) if n])
+            out.append(make(side, shift, int(xs.min()), int(xs.max()), float(wt[near].sum())))
+            v = [t for t in v if abs(t[0] - shift) > 1.8 * xh]     # the next line: ≥ 1.8 x-heights further (pitch ≈ 2.2–2.7)
+    return out

@@ -189,6 +189,8 @@ CALLS={
 'line_record':'record = line_record("crop.png", priors=priors)',
 'middle_mask':'mid = middle_mask(line_glyphs(Image.open("crop.png")))',
 'visible':'seen = rendered.visible(.25)',
+'GuideLines':'main_line = text_lines(glyphs)[0]',
+'text_lines':'lines = text_lines(line_glyphs(Image.open("crop.png")))',
 }
 
 

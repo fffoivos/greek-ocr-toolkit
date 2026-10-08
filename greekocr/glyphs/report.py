@@ -14,7 +14,7 @@ from typing import Any, Iterable, Mapping
 import numpy as np
 from PIL import Image
 
-from greekocr.glyphs.baseline import skew_line
+from greekocr.glyphs.baseline import skew_line, text_lines
 from greekocr.glyphs.components import LineGlyphs, line_glyphs
 from greekocr.glyphs.ink import FAINT, ink_profile
 from greekocr.glyphs.letters import letter_boxes
@@ -101,6 +101,9 @@ def line_record(path: PathLike, *, priors: Mapping[str, Mapping[str, float]] | N
         n_broken=sum(l.state == 'broken' for l in ink.letters), n_faint=sum(l.state == 'faint' for l in ink.letters),
         n_merged=sum(l.state == 'merged' for l in ink.letters), faint_threshold=FAINT,
         double_line=sk.double_line,
+        lines=[dict(side=t.side, shift_xh=t.shift_xh, x0=t.x0, x1=t.x1, votes=t.votes, visible=t.visible,
+                    ascender=_sample(t.ascender, step), mean=_sample(t.mean, step), base=_sample(t.base, step),
+                    descender=_sample(t.descender, step)) for t in text_lines(g)],
         second=None if sk.second is None else dict(support=sk.second.support, ratio=sk.second.ratio,
                                                     offset_xh=sk.second.offset_xh, visible=sk.second.visible,
                                                     baseline=_sample(sk.second.baseline, step)),

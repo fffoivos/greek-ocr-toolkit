@@ -7,8 +7,8 @@ baseline and x-height, and the noise-free degraded image thresholded midway betw
 - neighbour:  visible NEIGHBOUR truth pixels: share inside components called 'neighbour' (detection recall), and the
               same among pixels the detector inked (classification only).
 - letters:    each reliable truth letter is one / split / merged / lost against the letter boxes.
-- states:     each reliable truth letter has a true state from the renderer: vanished when < .05 xh² of it is
-              visible in the oracle image; otherwise from the PHYSICAL PRINT (clean ink after injected defects, before
+- states:     each reliable truth letter has a true state from the renderer under the declared truth (print or
+              visible): vanished when < .05 xh² of it exists under that truth; otherwise from the PHYSICAL PRINT (clean ink after injected defects, before
               blur/gain/noise) inside the TRUE middle region — broken (≥ 2 pieces ≥ .02 xh²), merged (its printed blob
               carries another letter), else intact. (A midpoint threshold of the blurred image cuts hairlines and made
               17 % of undamaged letters 'broken', so it is used for visibility only.) — and a predicted state from the boxes overlapping it (under = broken|faint, merged,
@@ -129,11 +129,15 @@ def score_rendered(sample: Rendered, glyphs: LineGlyphs | None = None,
             continue
         own_ids = ndi.binary_dilation(sample.glyph_ids == k + 1, iterations=1)
         gid_grown[k] = own_ids
-        own = own_ids & oracle
-        if own.sum() < .05 * xh * xh:
-            per_glyph.append((k, own_ids, set(), 'vanished'))
-            continue
+        # the declared truth decides both visibility and state (CP-G1c3: the midpoint mask had been used for
+        # 'vanished' in both modes, and vanished letters were forced to 'missed' even when a box had found them)
         phys = own_ids & printed
+        if phys.sum() < .05 * xh * xh:
+            votes = Counter(box_of[own_ids & (box_of > 0)].tolist())
+            hits = {b for b, v in votes.items() if v >= .25 * max(1, (own_ids & g.ink).sum())}
+            per_glyph.append((k, own_ids, hits, 'vanished'))
+            continue
+        own = phys
         pl, pn = ndi.label(phys & true_mid, structure=EIGHT)
         sizes = np.bincount(pl.ravel())[1:] if pn else np.zeros(0, int)
         truth_state = 'broken' if int((sizes >= .02 * xh * xh).sum()) >= 2 else 'intact'

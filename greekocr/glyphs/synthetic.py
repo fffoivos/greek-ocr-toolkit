@@ -10,7 +10,7 @@ the image; letter boxes are taken from the final letter-id map.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 import random
 import unicodedata as ud
@@ -70,6 +70,7 @@ class Rendered:
             return self.truth > 0
         return self.clean_gray < self.paper - fraction * (self.paper - self.ink_tone)
     second_line: bool = False                   # a full second text line was rendered inside the crop
+    other_base_truth: list = field(default_factory=list)  # [(side −1 / +1, per-column true baseline)] other lines
 
     @property
     def ink_truth(self) -> NDArray[np.float64]:
@@ -227,9 +228,11 @@ def render_truth_line(text: str, font_path: PathLike, *, size: int = 40, rng: ra
     lines = list(zip(neighbours, (-1, 1))) if neighbours else []
     if second_line:
         lines.append((second_line, 0))
+    offsets: list[tuple[int, float]] = []          # (side −1 above / +1 below, baseline offset in rows)
     for text_n, sign in lines:
         im = Image.new('L', (width, height), 0)
         lead = size * rng.uniform(1.05, 1.45) if sign else size * rng.uniform(1.15, 1.4)
+        offsets.append((sign or 1, (sign or 1) * lead))
         ImageDraw.Draw(im).text((pad + rng.uniform(-size, size) if sign else pad, y + (sign or 1) * lead), text_n,
                                 font=font, fill=255)
         other = (np.asarray(im) > 127) & ~main
@@ -273,7 +276,10 @@ def render_truth_line(text: str, font_path: PathLike, *, size: int = 40, rng: ra
     a = np.deg2rad(skew)
     cx0, cy0 = width / 2, height / 2
     dyb = baseline - cy0
-    base_truth = cy0 - (np.arange(width) - cx0 - dyb * np.sin(a)) * np.tan(a) + dyb * np.cos(a)
+    def _rot_baseline(dyb_: float) -> NDArray[np.float64]:
+        return cy0 - (np.arange(width) - cx0 - dyb_ * np.sin(a)) * np.tan(a) + dyb_ * np.cos(a)
+    base_truth = _rot_baseline(dyb)
+    others = [(side, _rot_baseline(dyb + off)) for side, off in offsets]
     if degrade:
         ink_im = ink_im.filter(ImageFilter.GaussianBlur(rng.uniform(.3, 1.4)))
         arr = np.clip(np.asarray(ink_im, np.float64) * rng.uniform(.75, 1.4), 0, 255)   # gain < 1 faint, > 1 heavy
@@ -301,6 +307,7 @@ def render_truth_line(text: str, font_path: PathLike, *, size: int = 40, rng: ra
         truth, gid = _shift_columns(truth, dy, 0), _shift_columns(gid, dy, 0)
         dkind, dint = _shift_columns(dkind, dy, 0), _shift_columns(dint, dy, 0)
         base_truth = base_truth + dy
+        others = [(side, b + dy) for side, b in others]
     if neighbours or second_line:
         # cut like a page-line cutter: the main line's ink extent (plus the second line if requested) + a small margin
         keep = (LETTER, MARK, PUNCT, IGNORE)
@@ -314,6 +321,7 @@ def render_truth_line(text: str, font_path: PathLike, *, size: int = 40, rng: ra
         clean_gray = clean_gray[r0:r1]
         dkind, dint = dkind[r0:r1], dint[r0:r1]
         base_truth = base_truth - r0
+        others = [(side, b - r0) for side, b in others]
     glyphs = []
     for k, (g, kind, reliable) in enumerate(glyph_meta):
         ys_, xs_ = np.nonzero(gid == k + 1)
@@ -323,7 +331,7 @@ def render_truth_line(text: str, font_path: PathLike, *, size: int = 40, rng: ra
     return Rendered(image=image, truth=truth, glyphs=glyphs, glyph_ids=gid, xh=xh, base_truth=base_truth,
                     skew_deg=skew, font=Path(font_path).name, defect_kind=dkind, defect_intensity=dint,
                     oracle_ink=oracle, print_ink=printed, clean_gray=clean_gray, paper=float(paper),
-                    ink_tone=float(inkgray), second_line=bool(second_line))
+                    ink_tone=float(inkgray), second_line=bool(second_line), other_base_truth=others)
 
 
 def usable_fonts(paths: Sequence[PathLike]) -> tuple[list[Path], dict[str, str]]:

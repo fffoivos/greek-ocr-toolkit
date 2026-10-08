@@ -411,6 +411,24 @@ from greekocr.glyphs.baseline import skew_line
 line = skew_line(line_glyphs(Image.open("crop.png")))
 ```
 
+### `greekocr.glyphs.baseline.GuideLines`
+
+```python
+from greekocr.glyphs.baseline import GuideLines
+main_line = text_lines(glyphs)[0]
+```
+
+### `greekocr.glyphs.baseline.text_lines`
+
+`def text_lines(glyphs: LineGlyphs, *, max_per_side: int=2) -> list[GuideLines]`
+
+The main line and every neighbour line (above / below), each with its four guide lines.
+
+```python
+from greekocr.glyphs.baseline import text_lines
+lines = text_lines(line_glyphs(Image.open("crop.png")))
+```
+
 ### `greekocr.glyphs.components.to_gray`
 
 `def to_gray(crop: Image.Image | NDArray[Any]) -> NDArray[np.float64]`
