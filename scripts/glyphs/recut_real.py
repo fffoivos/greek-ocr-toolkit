@@ -3,8 +3,8 @@ page PDFs (GPU node), never on the MacBook.
 
 Usage: recut_real.py TARGETS.json OUT_DIR [N_PROC]
   TARGETS.json: list of line ids (s2-<doc20>-pNNNNN-lNNNNN).
-Per target page: render the PDF page in the frame of bbox_pixel (scale = pixel width / PDF width), check the frame
-and the page index against the stored crop, fit every text-layer box on the page, recut the targets
+Per target page: render the PDF page exactly as the extractor did (bench.extract_lines.SCALE, grayscale=True), check
+the frame and the page index against the stored crop (mean abs difference 0 when right), fit every text-layer box on the page, recut the targets
 (greekocr.glyphs.recut.fix_page). Writes OUT/img/<id>.orig.png (stored crop), .line<N>.png (output lines), .context.jpg (page region
 with the original box in red and the recut region in green), and OUT/meta.jsonl.
 """
@@ -22,6 +22,8 @@ sys.path.insert(0, str(ROOT))
 from greekocr.glyphs.recut import fix_page                                # noqa: E402
 
 VOULI = Path.home() / 'work/greek-page-ocr/out/e2d/vouli_v6'
+sys.path.insert(1, str(Path.home() / 'work/greek-page-ocr'))
+from bench.extract_lines import SCALE as EXTRACT_SCALE        # noqa: E402
 KEEP = ('line_id', 'source_doc_id', 'page', 'bbox_pixel', 'bbox_pdf', 'crop_path', 'text')
 ID = re.compile(r'"line_id":\s*"(s2-[0-9a-f]+-p\d+)-l\d+"')
 
@@ -47,7 +49,7 @@ def best_index(pdf, page: int, row: dict, scale: float):
     for idx in {page, page - 1}:
         if not 0 <= idx < len(pdf):
             continue
-        img = pdf[idx].render(scale=scale).to_pil().convert('L')
+        img = pdf[idx].render(scale=scale, grayscale=True).to_pil().convert('L')   # as the extractor renders
         cut = np.asarray(img, np.float64)[y0:y1, x0:x1]
         if cut.shape != stored.shape:
             h, w = min(cut.shape[0], stored.shape[0]), min(cut.shape[1], stored.shape[1])
@@ -70,8 +72,8 @@ def do_page(args):
     try:
         r0 = next(r for r in rows if r['line_id'] in targets)
         pdf = pdfium.PdfDocument(h2p[r0['source_doc_id']])
-        bp, bd = r0['bbox_pixel'], r0['bbox_pdf']
-        scale = (bp[2] - bp[0]) / max(1e-6, bd[2] - bd[0])
+        scale = EXTRACT_SCALE        # the extractor's fixed render scale (bench.extract_lines.SCALE = 200 DPI / 72);
+        #                              a scale derived from bbox_pixel / bbox_pdf is ~0.5 % off (≈ 17 px at a page bottom)
         d, idx, img, cut_shape, stored_shape = best_index(pdf, int(r0['page']), r0, scale)
         pdf.close()
         gray = np.asarray(img, np.float64)
