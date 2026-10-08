@@ -1,75 +1,92 @@
-"""Build the review-page data: (1) the owner's cases with the fixes, (2) interesting cases selected after running the
-tools on every crop of the pool (400 parliament sample crops + 44 fixture lines + regression pairs).
-Usage: build_review_data.py OUT.json"""
+"""Build review-page data. Usage: build_review_data.py MODE OUT.json [PREVIOUS.json ...]
+
+MODE fixes : every line shown in earlier batches (docs/glyphs_shown_batches.json), re-run with the current tools, with
+             a before → now summary taken from the previous batches' data files (PREVIOUS.json, newest first)
+MODE new   : 40 lines never shown before, selected per issue after running every check on the whole pool
+             (400 parliament sample crops + 44 fixture lines + regression pairs)
+"""
 import glob, json, sys, time
 from pathlib import Path
+import numpy as np
 from greekocr.glyphs.report import document_priors, line_record
 
-ROOT = Path(__file__).resolve().parents[2] / 'tests' / 'fixtures'
-REG = ROOT / 'o4d_lines' / 'regressions'
-SAMPLE = ROOT / 'o4d_sample400' / 'crops'
-OWNER = 's2-60f24a3d8a2d714767f2-p00003-l00024'
+ROOT = Path(__file__).resolve().parents[2]
+FIX = ROOT / 'tests' / 'fixtures'
+mode, out_path, previous = sys.argv[1], sys.argv[2], sys.argv[3:]
 t0 = time.time()
-pool = sorted(glob.glob(str(SAMPLE / '*.png'))) + sorted(glob.glob(str(ROOT / 'o4d_lines' / 'line*.png'))) + sorted(glob.glob(str(REG / '*.png')))
+pool = sorted(glob.glob(str(FIX / 'o4d_sample400' / 'crops' / '*.png'))) + \
+    sorted(glob.glob(str(FIX / 'o4d_lines' / 'line*.png'))) + sorted(glob.glob(str(FIX / 'o4d_lines' / 'regressions' / '*.png')))
 priors = document_priors(pool)
-records = {}
-for p in pool:
-    records[p] = line_record(p, priors=priors)
-print(len(records), 'crops measured in', round(time.time() - t0, 1), 's', file=sys.stderr)
+by_stem = {}
+for p in pool:                                    # a stem can exist twice (sample crop and fixture copy): keep the first
+    by_stem.setdefault(Path(p).stem, p)
+line_id = lambda stem: stem.replace('_old', '').replace('_new', '')
+shown = json.loads((ROOT / 'docs' / 'glyphs_shown_batches.json').read_text())
+shown_ids = list(dict.fromkeys(shown['batch2'] + shown['batch1']))
 
-fixes = [
-    (REG / f'{OWNER}_old.png', 'Owner example, original crop: start a quarter visible (inside-the-crop curve)'),
-    (REG / f'{OWNER}_new.png', 'Owner example, re-cut: faint letters, broken pieces now grouped per letter'),
-    (ROOT / 'o4d_lines' / 'line04_medium.png', 'Owner note: first two words had no underline (bend at the line start)'),
-    (ROOT / 'o4d_lines' / 'line08_medium.png', 'Owner note: two lines in one crop'),
-    (SAMPLE / 's2-49598b2e848ab1f0ee1e-p00001-l00054.png', 'Owner note: a bit of a second line, and the line curves down at first'),
-    (ROOT / 'o4d_lines' / 'line01_large.png', 'Two lines in one crop'),
-]
-chosen = {str(p) for p, _ in fixes}
-line_id = lambda p: Path(p).stem.replace('_old', '').replace('_new', '')
-shown_ids = {line_id(p) for p, _ in fixes}
-out = [dict(records[str(p)], section='fixes', label=lab) for p, lab in fixes]
-
-
-def take(key, label, n, cond=lambda r: True):
-    ranked = sorted(((p, r) for p, r in records.items() if p not in chosen and line_id(p) not in shown_ids and cond(r)),
-                    key=lambda pr: key(pr[1]), reverse=True)
-    for p, r in ranked[:n]:
-        chosen.add(p); shown_ids.add(line_id(p))
-        out.append(dict(r, section='interesting', label=label))
-
-
-def bend_px(r):
-    import numpy as np
-    b = np.array(r['baseline']); x = np.arange(len(b))
-    lo, hi = (int(v / r['step']) for v in r['support_x'])
-    if hi - lo < 4:
-        return 0.0
-    lin = np.polyval(np.polyfit(x[lo:hi], b[lo:hi], 1), x[lo:hi])
-    return float(np.abs(b[lo:hi] - lin).max())
-
-
-take(lambda r: abs(r['angle_deg']), 'Steepest skew in the pool', 3, lambda r: r['confidence'] == 'high')
-take(bend_px, 'Strongest bend (curved fit)', 3, lambda r: r['degree'] == 2)
-take(lambda r: r['second']['ratio'] if r['second'] else 0, 'Second line inside the crop', 3, lambda r: r['double_line'])
-take(lambda r: len(r['cut_spans']) + sum(c['body_cut'] for c in r['cut_letters']) / 10, 'Most letter body cut by the crop edge', 3)
-take(lambda r: r['n_broken'] / max(1, len(r['letters'])), 'Highest share of broken letters', 3, lambda r: len(r['letters']) >= 15)
-take(lambda r: r['n_faint'], 'Most faint letters', 2, lambda r: r['n_faint'] > 0)
-take(lambda r: r['n_merged'], 'Most merged (touching) letters', 2, lambda r: r['n_merged'] > 0)
-take(lambda r: -abs(r['angle_deg']) - r['n_broken'] - r['n_merged'], 'Quiet line for comparison (no issues found)', 1,
-     lambda r: not r['double_line'] and not r['cut_spans'])
-# implementer's inspection notes on the rendered page (8 Oct, after looking at each selected card)
 NOTES = {
-    's2-7534648e60694be1d180-p00023-l00013': 'Fit failure: two separate pieces of text at different heights ("οἱ ἑξῆς καρποί·" and the heading "Α. Σῖτος") are joined into one steep line. The real lines are each level.',
-    'line42_large': 'The main line is right; the second-line fit slants across the crop because the other text ("(θόρυβος.)") sits only at the left.',
-    's2-49598b2e848ab1f0ee1e-p00001-l00054': 'The target line is followed, including where it comes down into the crop at the start (x≈97–221). The partial second line at the lower left ("μάτων.") is NOT flagged: it covers about a quarter of the width and curves, and the double-line check needs a band across the line.',
+    's2-7534648e60694be1d180-p00023-l00013': 'Fit failure kept from batch 2: two separate pieces of text at different heights are joined into one steep line.',
 }
-for r in out:
-    if r['id'] in NOTES:
-        r['note'] = NOTES[r['id']]
-json.dump(dict(built=time.strftime('%Y-%m-%d %H:%M'), pool=len(records), n_priors=len(priors), lines=out),
-          open(sys.argv[1], 'w'), ensure_ascii=False, allow_nan=False)
+
+
+def summary(r: dict) -> str:
+    parts = [f"skew {r['angle_deg']:+.2f}°", f"{len(r['cut_spans'])} cut span(s)"]
+    if 'n_broken' in r:
+        parts.append(f"{r['n_broken']} broken, {r.get('n_faint', 0)} faint, {r.get('n_merged', 0)} merged")
+    else:
+        parts.append(f"{r.get('n_under', 0)} under / {r.get('n_over', 0)} over (old ink score)")
+    if 'double_line' in r:
+        parts.append('two lines' if r['double_line'] else 'one line')
+    if 'lines' in r:
+        parts.append(f"{len(r['lines']) - 1} neighbour line(s) placed")
+    return ', '.join(parts)
+
+
+if mode == 'fixes':
+    before = {}
+    for path in previous:                          # newest first: the latest earlier version of each line wins
+        for r in json.loads(Path(path).read_text())['lines']:
+            before.setdefault(r['id'], r)
+    out = []
+    for sid in shown_ids:
+        r = line_record(by_stem[sid], priors=priors)
+        old = before[sid]
+        r.update(section='fixes', label=old.get('label', ''), before=summary(old), now=summary(r))
+        if sid in NOTES:
+            r['note'] = NOTES[sid]
+        out.append(r)
+    pool_n = len(shown_ids)
+else:
+    seen = {line_id(s) for s in shown_ids}
+    records = {p: line_record(p, priors=priors) for p in pool if line_id(Path(p).stem) not in seen}
+    print(len(records), 'unseen crops measured in', round(time.time() - t0, 1), 's', file=sys.stderr)
+    chosen, out = set(), []
+
+    def bend_px(r):
+        b = np.array(r['baseline']); x = np.arange(len(b))
+        lo, hi = (int(v / r['step']) for v in r['support_x'])
+        return float(np.abs(b[lo:hi] - np.polyval(np.polyfit(x[lo:hi], b[lo:hi], 1), x[lo:hi])).max()) if hi - lo >= 4 else 0.0
+
+    def take(key, label, n, cond=lambda r: True):
+        ranked = sorted(((p, r) for p, r in records.items() if line_id(Path(p).stem) not in chosen and cond(r)),
+                        key=lambda pr: key(pr[1]), reverse=True)
+        for p, r in ranked[:n]:
+            chosen.add(line_id(Path(p).stem))
+            out.append(dict(r, section='new', label=label))
+
+    take(lambda r: abs(r['angle_deg']), 'Steep skew', 5, lambda r: r['confidence'] == 'high')
+    take(bend_px, 'Strong bend in the line', 5, lambda r: r['degree'] == 2)
+    take(lambda r: len(r['lines']), 'Several lines in one crop (neighbours placed)', 6, lambda r: len(r['lines']) >= 3)
+    take(lambda r: r['second']['ratio'] if r['second'] else 0, 'Second line inside the crop', 5, lambda r: r['double_line'])
+    take(lambda r: len(r['cut_spans']) + sum(c['body_cut'] for c in r['cut_letters']) / 10, 'Letters cut by the crop edge', 5)
+    take(lambda r: r['n_broken'] / max(1, len(r['letters'])), 'Many broken letters', 4, lambda r: len(r['letters']) >= 15)
+    take(lambda r: r['n_faint'], 'Faint letters', 3, lambda r: r['n_faint'] > 0)
+    take(lambda r: r['n_merged'], 'Letters run together', 4, lambda r: r['n_merged'] > 0)
+    take(lambda r: -abs(r['angle_deg']) - r['n_broken'] - r['n_merged'] - len(r['lines']), 'Quiet line (nothing found)', 3,
+         lambda r: not r['double_line'] and not r['cut_spans'])
+    pool_n = len(records)
+json.dump(dict(built=time.strftime('%Y-%m-%d %H:%M'), mode=mode, pool=pool_n, n_priors=len(priors), lines=out),
+          open(out_path, 'w'), ensure_ascii=False, allow_nan=False)
 print(len(out), 'lines on the page', file=sys.stderr)
 for r in out:
-    print(r['section'][:4], r['id'][:44], '|', r['label'][:44], '| angle', r['angle_deg'], 'double', r['double_line'],
-          'broken', r['n_broken'], 'faint', r['n_faint'], 'merged', r['n_merged'], 'cuts', len(r['cut_spans']), file=sys.stderr)
+    print(r['section'][:5], r['id'][:44], '|', r['label'][:40], '|', r.get('now') or summary(r), file=sys.stderr)

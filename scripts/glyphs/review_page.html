@@ -70,10 +70,7 @@ svg text { font-family: var(--font-data); font-size: 11px; fill: var(--muted); }
 <div class="wrap">
   <header class="intro">
     <h1>Line Skew and Ink Check</h1>
-    <p>Second iteration of the reference-free glyph tools on real parliament crops, after the independent review (CP-G1)
-      and your notes. Each line shows the fitted underline, where the letter body leaves the crop, a box per detected
-      letter and, when present, a second text line; below it, how much of the letter body is inside the crop and one ink
-      state per letter: broken or faint below zero, merged with its neighbours above zero.</p>
+    <p id="lede"></p>
     <p class="muted">No OCR reading and no PDF text layer is used anywhere on this page. Everything comes from the pixels of each crop,
       plus the median letter height of the same document for crops too clipped to measure their own.</p>
     <div class="key" aria-label="Legend">
@@ -83,15 +80,16 @@ svg text { font-family: var(--font-data); font-size: 11px; fill: var(--muted); }
       <span><i class="sw box" style="border-color:var(--under)"></i>letter broken into pieces, or faint</span>
       <span><i class="sw box" style="border-color:var(--over)"></i>letter run into its neighbour (merged blob)</span>
       <span><i class="sw box" style="border-color:var(--muted)"></i>intact letter</span>
-      <span><i class="sw" style="border-color:var(--second);border-top-style:dashed"></i>baseline of a second text line in the crop</span>
+      <span><i class="sw" style="border-color:var(--second)"></i>neighbour lines in the crop, with their four guide lines</span>
+      <span><i class="sw" style="border-color:var(--accent);border-top-style:dotted"></i>top of tall letters / bottom of hanging letters</span>
     </div>
     <div class="facts">
-      <div><b>Skew</b>Angle of a straight fit through the letters' baseline evidence; positive means the line rises to the right. On 100 rendered straight lines rotated by a known ±2°: median error 0.01°; for the 95 fits marked high confidence the worst is 0.52°. The two large misses (3.8° and 10.4°) were short lines between full-width neighbours, marked medium/low confidence.</div>
-      <div><b>Bends</b>The underline now follows a bend at either end, tracking letter to letter from the straight core. On 100 rendered lines with a known end bend, lines with any column more than a quarter letter-height off fell from 84% to 45%; straight lines are unaffected. Sharp curls in the last one to three letters are still missed.</div>
-      <div><b>Ink state</b>Your rule: a letter is one piece in the middle region, and neighbours do not share columns there. Pieces sharing columns, or fitting one letter width across a small gap, are one broken letter. Rendered lines with injected defects: broken letters caught 82%, calls right 78%. Merged blobs: calls right 99.5%, caught 74%. Faint letters, once invisible to the ink mask, are now detected and flagged.</div>
-      <div><b>Letter vs accent</b>Corrected after the review: rates now count every true accent, including lost ones. 97.95% of separate accents are found, at 96.1% precision. In heavily inked renders a quarter of accents touch their letter and become part of it; this does not change the underline or the ink state, which use the middle region.</div>
-      <div><b>Two lines in one crop</b>A second band fitted to the ink the main line does not explain. Real fixtures, labelled by me: 7 of 7 double and 0 of 20 single (threshold set on those same lines). Rendered crops: 95% caught, but only 74% of flags right, since rendered neighbour tips are more prominent than real ones. Partial second lines covering a small part of the width are not yet flagged.</div>
-      <div><b>Known limits</b>Fits can join two separate pieces of text at different heights (see the −7.2° case). Short lines between full-width neighbours give low-confidence fits. A uniformly faint line is compared with itself, so it reads as intact.</div>
+      <div><b>Four guide lines</b>Every line found in the crop gets four lines: top of the tall letters (dotted), top of the short letters (dashed), baseline (solid), bottom of the hanging letters (dotted). Neighbour lines, often cut to their accents or letter edges, borrow the main line's shape and are placed by those fragments. On 150 rendered crops: 96% of visible neighbour lines found, typical placement error 0.06 letter heights, 74% within a quarter letter height.</div>
+      <div><b>Skew and bends</b>Positive skew means the line rises to the right. On 100 rendered straight lines the worst high-confidence error is 0.22°. On lines with a known bend at one end, 34% still have some column off by more than a quarter letter height (sharp curls in the last letters).</div>
+      <div><b>Letter ink state</b>Your rule: a letter is one piece in the middle region, and neighbours do not share columns there. Checked against what a reader would see in the scan: "merged" calls are right 85–87% of the time; about 57–62% of visibly broken letters are caught, and 45–49% of "broken or faint" calls are right. Against the physical print, "merged" is weaker, because scanner blur makes separate letters touch.</div>
+      <div><b>Accents and neighbours</b>98.7% of separate accents are found, at 95% precision; a quarter of accents touch their letter in heavy ink and become part of it. 97% of visible neighbour-line ink is recognised as such.</div>
+      <div><b>Two lines in one crop</b>On the 27 fixture lines I labelled clearly double or single: 7 of 7 double lines flagged, 0 of 20 single (threshold set on those same lines). On rendered crops 93% caught, 76% of flags right.</div>
+      <div><b>Known limits</b>Letters that faded completely get no warning yet. A neighbour line can be placed about half a letter height off when only some of its letters show (e.g. the second line of c0b02…l00060). Wide capitals such as Φ and Κ are sometimes called "merged". Fits can join two separate pieces of text at different heights.</div>
     </div>
     <div class="toolbar">
       <label for="zoom"><input id="zoom" type="checkbox"> Show crops at 2× (scroll sideways)</label>
@@ -105,7 +103,7 @@ svg text { font-family: var(--font-data); font-size: 11px; fill: var(--muted); }
 <script>
 const DATA = /*__DATA__*/null;
 const NS = 'http://www.w3.org/2000/svg';
-const LEFT = 64, PAD = 34, VIS_H = 34, INK_H = 96, GAP = 14;
+const LEFT = 64, PAD = 46, VIS_H = 34, INK_H = 96, GAP = 14;
 function el(tag, attrs, parent) {
   const e = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
@@ -161,9 +159,20 @@ function figure(r, scale, showMarks) {
   const sup = base.filter(([x]) => x >= r.support_x[0] && x <= r.support_x[1]);
   if (sup.length > 1) el('path', { d: path(sup), fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2.5 }, lines);
   el('path', { d: path(mean), fill: 'none', stroke: 'var(--accent)', 'stroke-width': 1.2, 'stroke-dasharray': '3 4' }, lines);
-  if (r.second && r.double_line) {
-    const sec = sampled(r.second.baseline, r.step, W).map(([x, y]) => [x, y + top]);
-    el('path', { d: path(sec), fill: 'none', stroke: 'var(--second)', 'stroke-width': 2, 'stroke-dasharray': '7 4' }, lines);
+  for (const L of (r.lines || [])) {
+    const col = L.side === 'main' ? 'var(--accent)' : 'var(--second)';
+    const pts = k => sampled(L[k], r.step, W).map(([x, y]) => [x, y + top]);
+    const inRange = k => pts(k).filter(([x]) => x >= L.x0 && x <= L.x1);
+    if (L.side !== 'main') {
+      el('path', { d: path(inRange('base')), fill: 'none', stroke: col, 'stroke-width': 2 }, lines);
+      el('path', { d: path(inRange('mean')), fill: 'none', stroke: col, 'stroke-width': 1.2, 'stroke-dasharray': '4 4' }, lines);
+    }
+    el('path', { d: path(inRange('ascender')), fill: 'none', stroke: col, 'stroke-width': 1, 'stroke-dasharray': '1 3' }, lines);
+    el('path', { d: path(inRange('descender')), fill: 'none', stroke: col, 'stroke-width': 1, 'stroke-dasharray': '1 3' }, lines);
+    if (L.side !== 'main') {
+      const lab = el('text', { x: Math.max(4, L.x0) + 2, y: Math.min(Math.max(L.base[0] + top - 4, 12), H + 2 * PAD - 4), style: 'fill:var(--second)' }, lines);
+      lab.textContent = `${L.side} ${L.shift_xh > 0 ? '+' : ''}${L.shift_xh.toFixed(1)}`;
+    }
   }
   // crossings
   for (const c of r.crossings) {
@@ -202,7 +211,7 @@ function figure(r, scale, showMarks) {
 }
 
 function card(r, scale, showMarks) {
-  const featured = r.section === 'fixes' && r.label.startsWith('Owner example, original');
+  const featured = r.section === 'fixes' && (r.label || '').startsWith('Owner example, original');
   const art = document.createElement('article');
   art.className = 'line' + (featured ? ' featured' : '');
   art.id = r.id.replace(/[^A-Za-z0-9_.~-]/g, '');
@@ -221,12 +230,19 @@ function card(r, scale, showMarks) {
   add(`${r.n_faint} faint`, r.n_faint ? 'under' : '');
   add(`${r.n_merged} merged`, r.n_merged ? 'over' : '');
   add(`${r.cut_spans.length} cut span${r.cut_spans.length === 1 ? '' : 's'}`, r.cut_spans.length ? 'warn' : '');
-  if (r.double_line) add(`two lines · second at ${fmt(r.second.offset_xh, 1)} letter heights`, 'second');
+  if (r.double_line) add('two lines in the crop', 'second');
+  const nb = (r.lines || []).filter(l => l.side !== 'main').length;
+  add(`${nb} neighbour line${nb === 1 ? '' : 's'} placed`, nb ? 'second' : '');
   art.append(head, chips);
   if (featured) {
     const n = document.createElement('p'); n.className = 'note';
-    n.textContent = 'The first letters are only about a quarter visible. This crop is too clipped to measure its own letter height, so it uses the median of complete crops from the same document. The "inside" strip shows how much of the letter body is inside the crop along the line.';
+    n.textContent = 'Your example: the first letters are only about a quarter visible. The bend-following fit now reads about 32% of the letter body inside the crop at the start (earlier: 0–6%), rising to full visibility and falling again where the line leaves through the top.';
     art.appendChild(n);
+  }
+  if (r.before) {
+    const b = document.createElement('p'); b.className = 'events';
+    b.textContent = `Before: ${r.before}  →  now: ${r.now}`;
+    art.appendChild(b);
   }
   if (r.note) {
     const n = document.createElement('p'); n.className = 'note'; n.textContent = 'Inspection note: ' + r.note; art.appendChild(n);
@@ -247,8 +263,11 @@ function render() {
   main.textContent = '';
   const zoom = document.getElementById('zoom').checked, marks = document.getElementById('marks').checked;
   const width = main.clientWidth || 1200;
-  const heads = { fixes: ['Your cases, after the fixes', 'The crops from your notes and the owner example, re-run with the bend-following fit, the broken-letter rule and the double-line check.'],
-    interesting: ['Interesting cases', `Selected after running every check on all ${DATA.pool} crops (400 parliament sample crops, 44 fixture lines, regression pairs): for each issue, the strongest examples.`] };
+  const heads = { fixes: ['Earlier lines, with the fixes', `Every line from the two earlier batches (${DATA.lines.length}), re-run with the current tools. Each card shows what the earlier page reported and what the tools say now.`],
+    new: ['New lines', `${DATA.lines.length} lines not shown before, picked after running every check on ${DATA.pool} unseen crops: the strongest examples of each issue, plus three quiet lines.`],
+    fixes_lede: 'Third page of the reference-free glyph tools: the earlier lines again, after two independent review rounds and your notes on bends, broken letters, double lines and cropped neighbour lines.',
+    new_lede: 'Fourth page of the reference-free glyph tools: 40 new lines, chosen by issue after running every check on the unseen crops.' };
+  document.getElementById('lede').textContent = heads[DATA.mode + '_lede'];
   let last = '';
   for (const r of DATA.lines) {
     if (r.section !== last) {
@@ -262,7 +281,7 @@ function render() {
     main.appendChild(card(r, zoom ? 2 : fit, marks));
   }
 }
-document.getElementById('built').textContent = `built ${DATA.built} · ${DATA.lines.length} lines shown of ${DATA.pool} measured`;
+document.getElementById('built').textContent = `built ${DATA.built} · ${DATA.lines.length} lines`;
 document.getElementById('zoom').addEventListener('change', render);
 document.getElementById('marks').addEventListener('change', render);
 let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 150); });
