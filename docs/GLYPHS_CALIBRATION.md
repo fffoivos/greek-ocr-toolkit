@@ -65,25 +65,30 @@ the tools' measured skew, E1's median CER on clean strips is 0.075 (< 0.5°), 0.
 every bin. E1 also degrades steadily with every cut and with fading (contrast < 45: CER 0.42–0.54).
 
 **Straightening removes it.** The same 240 clean and skew strips, straightened by
-`greekocr.glyphs.lines_api.separate_lines` (baseline flattened, height normalised from the four guide lines) and read
-again (`strips_v2_straight/`, median CER before → after):
+ (baseline flattened) and read again; "padded" = height-normalised with paper
+padding (1.9 x-heights above, 1.0 below the baseline), "tight" = then cropped to its own ink ± 0.3 x-heights (the
+calibration crops' margin). Median CER per bin (NFC scoring), mean in the last row:
 
-| strips | n | E1 | CLLG |
-|---|---|---|---|
-| clean, measured skew < 0.5° | 6 | 0.075 → 0.067 | 0.000 → 0.000 |
-| clean, 0.5–1° | 12 | 0.139 → 0.070 | 0.000 → 0.000 |
-| clean, 1–1.5° | 3 | 0.370 → 0.067 | 0.000 → 0.000 |
-| clean, 1.5–2° | 19 | 0.533 → 0.083 | 0.000 → 0.000 |
-| rotated 0° | 40 | 0.033 → 0.083 | 0.000 → 0.000 |
-| rotated 1° | 40 | 0.208 → 0.085 | 0.000 → 0.000 |
-| rotated 2° | 40 | 0.533 → 0.097 | 0.000 → 0.000 |
-| rotated 3° | 40 | 0.683 → 0.093 | 0.000 → 0.000 |
-| rotated 5° | 40 | 0.846 → 0.097 | 0.050 → 0.000 |
-| all 240 (mean) | 240 | 0.411 → 0.109 | 0.016 → 0.007 |
+| strips | n | E1 original | E1 straightened (padded) | E1 straightened (tight) | CLLG original | CLLG tight |
+|---|---|---|---|---|---|---|
+| clean, measured skew < 0.5° | 6 | 0.075 | 0.067 | 0.058 | 0.000 | 0.000 |
+| clean, measured skew 0.5–1° | 12 | 0.139 | 0.070 | 0.032 | 0.000 | 0.000 |
+| clean, measured skew 1–1.5° | 3 | 0.370 | 0.067 | 0.017 | 0.000 | 0.000 |
+| clean, measured skew 1.5–2° | 19 | 0.533 | 0.083 | 0.050 | 0.000 | 0.000 |
+| rotated 0° | 40 | 0.033 | 0.083 | 0.051 | 0.000 | 0.000 |
+| rotated 1° | 40 | 0.208 | 0.085 | 0.050 | 0.000 | 0.000 |
+| rotated 2° | 40 | 0.533 | 0.097 | 0.050 | 0.000 | 0.000 |
+| rotated 3° | 40 | 0.683 | 0.093 | 0.050 | 0.000 | 0.000 |
+| rotated 5° | 40 | 0.846 | 0.097 | 0.053 | 0.050 | 0.000 |
+| all 240, median | 240 | 0.408 | 0.084 | 0.050 | 0.000 | 0.000 |
+| all 240, mean | 240 | 0.411 | 0.109 | 0.063 | 0.016 | 0.006 |
 
-Cost: exactly level, tightly cropped lines read slightly worse by E1 after straightening (0.033 → 0.083), because the
-straightened image is height-normalised with paper padding (1.9 x-heights above, 1.0 below the baseline) rather than
-E1's usual tight crop. CLLG is not harmed anywhere.
+Reading: straightening makes E1 nearly skew-invariant (≈ 0.05 at every skew up to 5°; mean 0.411 → 0.063 tight).
+The padded form costs level lines (0.033 → 0.083); the tight form mostly recovers it but not fully under this NFC
+scoring (0.033 → 0.051 on exactly level tight crops; the coordinator's NFD scoring gives 0.041). The "level lines do
+not regress" bar is therefore not yet cleared for E1; the remaining gap is likely margin / height normalisation and
+is the next thing to test. CLLG is unharmed (5° 0.050 → 0.000). Recogniser-facing output uses tight=True; the padded
+form is for display.
 
 ## Real crops under the CLLG limits (444 crops: 400 parliament sample + 44 fixtures)
 
