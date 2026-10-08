@@ -38,6 +38,27 @@ review_scratch/CP-G1c3-evidence/: evals_v7.txt, neighbour_eval.txt, fixture_doub
 Earlier figures on the review page v2 (84 %→45 % bends, broken 82 %/78 %, merged 99.5 %/74 %) used the
 detector-dependent evaluator and are superseded.
 
+## Owner direction, 8 Oct 16:40 (autonomous from here; owner reviews from the phone)
+- Deliver a final review page of ≥ 200 lines. "The lines have a good shape; we are close."
+- (1) Readability and OCR relevance per line: is it clear which text in the crop is the target (several lines, columns,
+  dominant line)? Is the line readable: cut-offs at the top and at the bottom (separate thresholds), under- and over-ink?
+  Thresholds come from the synthetic line generator's parameter ranges: measure the same quantities on synthetic lines
+  with known degradation, read them with an OCR model, and set limits where the error rises; place real lines on
+  that scale (the distribution).
+- (2) API on top: (a) separate the lines when a crop holds more than one (per line and per column; e.g. for Google
+  Document AI text), (b) fix the geometry (straighten along the fitted baseline, normalise height from the four guide
+  lines; re-cutting clipped text needs the page image, via greekocr.real.geometry).
+- Owner notes kept: lines are hierarchically above letters (a letter box never leaves its line); be careful with
+  capitals (speaker names in capitals are common); split columns at rules and very wide gaps, never force alignment.
+- Reviews batched: one independent review per completed step (letter/line fixes + columns + capitals; API; readability).
+
+| step | content | review |
+|---|---|---|
+| S1 | CP-G2 findings, letters bounded by their line, line count, column split (rules + gaps), capitals | CP-G3 |
+| S2 | lines API: separate_lines, straighten | CP-G4 (with S3) |
+| S3 | readability: target clarity, top/bottom cut, ink; synthetic calibration with an OCR reader on the GPU node | CP-G4 |
+| S4 | final page ≥ 200 lines with readability verdicts | in CP-G4 |
+
 ## Owner requirements
 
 ### Hard constraints
