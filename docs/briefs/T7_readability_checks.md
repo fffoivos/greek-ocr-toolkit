@@ -15,6 +15,17 @@ A. `greekocr.verify.image_checks(crop) -> ImageChecks` (CPU, < 20 ms per crop, n
    very large/long components, rules, blobs with low aspect regularity, bleed-through = faint mirrored ink), crowding (neighbour-line ink
    fraction in the top/bottom 20%), residual anomaly score (distance of the crop's feature vector from the sample distribution). Every field
    documented with its unit and a threshold suggestion. Reuse greekocr.real.geometry diagnostics where they exist.
+A2. LOCALISATION (owner, 14:15): "we should also be able to say with accuracy which parts of the line have these issues, and to what
+   intensity, as simple 2d functions." Every image check is a function of position along the line, not only a scalar:
+   `readability_profile(crop) -> Profile` with per-column arrays (length = crop width, also downsampled to 64 bins): visible_fraction[x]
+   (fraction of the expected glyph band that contains ink support; the band is estimated from the line's own letters where they are complete),
+   clip_top[x], clip_bottom[x] (ink touching the border at that column), baseline_offset[x] (the trail), local_contrast[x], blur[x],
+   obstruction[x] (foreign ink density), neighbour[x] (ink in the top/bottom margins); plus `quality_map` = a low-resolution 2-D map (e.g.
+   16 rows × 64 cols) combining them, and `segments`: contiguous x-ranges where readability < threshold with their intensity. The per-line
+   scalars in A are summaries of these functions. Required test (owner's example): fixture
+   tests/fixtures/o4d_lines/regressions/s2-60f24a3d8a2d714767f2-p00003-l00024_old.png — a well-cut crop whose first letters are only about
+   a quarter visible: the profile must mark the first ~20% of the width as unreadable (visible_fraction low, clip flagged) and the rest as
+   readable. Provide `render_overlay(crop, profile) -> PNG` (the crop with the quality map/segments drawn) for the owner's artifact.
 B. `greekocr.verify.vlm_annotate(crops, *, model='gpt-6-luna', schema=READABILITY_SCHEMA)`: one Codex call per crop (or small batches of
    ≤4 crops per call with numbered images) returning JSON: readable {yes, partly, no}, defects ⊂ {skew, trails_up, trails_down,
    touches_top, touches_bottom, cut_left, cut_right, blurred, low_contrast, obstructed, neighbour_intrusion, two_lines, empty, other},
