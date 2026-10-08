@@ -62,7 +62,54 @@ def test_page_replacement_boundary(tmp_path, monkeypatch):
     assert model.unsupported_counts == {"no_textlayer_lines": 1}
     options.mode = "detector"
     assert list(model(SimpleNamespace(input=SimpleNamespace(file=Path("doc.pdf"))), [pages[0]])) == [pages[0]]
-    assert model.unsupported_counts["detector_out_of_scope"] == 1
+    assert model.call_log[-1]['status'] == 'replaced'
+    assert model.call_log[-1]['output_line_count'] == 0  # blank raster has no lines
+    assert pages[0].parsed_page.textline_cells == []
+
+
+def test_detector_recovers_raster_lines_before_layout(tmp_path, monkeypatch):
+    pytest.importorskip('docling')
+    import numpy as np
+    from PIL import Image
+    from docling.datamodel.accelerator_options import AcceleratorOptions
+    from greekocr.glyphs.synthetic import render_truth_line
+    from greekocr.deploy.docling_plugin.model import GlossapiOcrModel
+    from greekocr.deploy.docling_plugin.options import GlossapiOcrOptions
+
+    image = Image.new('L', (700, 300), 255)
+    font = Path(__file__).parent / 'fixtures/fonts/GFSDidot-Regular.ttf'
+    for i in range(3):
+        r = render_truth_line('ἀνδρώας κύστεως καὶ λόγος', font, size=32, degrade=False)
+        image.paste(r.image, (20, i * 85))
+    parsed = SimpleNamespace(textline_cells=[], word_cells=[], char_cells=[], has_lines=False,
+                             has_words=False, has_chars=False)
+    page = SimpleNamespace(page_no=1, parsed_page=parsed, size=SimpleNamespace(height=100),
+                           get_image=lambda **kwargs: image)
+    options = GlossapiOcrOptions(checkpoint=tmp_path/'unused.pt', codec=tmp_path/'unused.json',
+                                replace_policy='all', mode='detector')
+    model = GlossapiOcrModel(enabled=True, artifacts_path=None, options=options,
+                            accelerator_options=AcceleratorOptions(device='cpu'))
+    seen = []
+    def recognise(strips):
+        seen.extend(strips)
+        return [('λόγος', .9)] * len(strips)
+    monkeypatch.setattr(model, '_get_recognizer', lambda: SimpleNamespace(recognize=recognise))
+    assert list(model(SimpleNamespace(input=SimpleNamespace(file=Path('scan.pdf'))), [page])) == [page]
+    assert len(seen) == len(parsed.textline_cells) == 3
+    assert all(s.shape[0] == 48 and s.min() < .5 for s in seen)
+    assert all(c.from_ocr and c.text == 'λόγος' for c in parsed.textline_cells)
+    assert parsed.has_lines and model.call_log[-1]['source_line_count'] == 0
+    # Layout coordinates are unscaled PDF points, not rendered pixels.
+    assert max(c.rect.to_bounding_box().r for c in parsed.textline_cells) < image.width / 3
+    # A failed geometric fit must preserve the page and must not send an
+    # inverted crop to recognition. This does not alter detector evaluation.
+    import greekocr.glyphs.page_text_lines as detector
+    monkeypatch.setattr(detector, 'page_line_segments', lambda *a: [SimpleNamespace(
+        top=np.array([10.]), bottom=np.array([9.]))])
+    before = parsed.textline_cells
+    list(model(SimpleNamespace(input=SimpleNamespace(file=Path('scan.pdf'))), [page]))
+    assert parsed.textline_cells is before and len(seen) == 3
+    assert model.call_log[-1]['reason'] == 'invalid_line_geometry'
 
 
 @pytest.mark.parametrize("chars,decision,image_ratio,unsupported", [
@@ -158,5 +205,3 @@ def test_checkpoint_pin_rejects_changed_artifact(tmp_path):
                             accelerator_options=AcceleratorOptions(device="cpu"))
     with pytest.raises(ValueError,match="sha256 mismatch"):
         model._get_recognizer()
-
-

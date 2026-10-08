@@ -1,4 +1,4 @@
-"""Mode A: replace routed native textline cells before Docling layout."""
+"""Replace routed line cells before layout, from native boxes or page detection."""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,8 @@ from time import perf_counter
 
 import numpy as np
 from docling.models.base_ocr_model import BaseOcrModel
-from docling_core.types.doc.page import TextCell
+from docling_core.types.doc import BoundingBox
+from docling_core.types.doc.page import BoundingRectangle, TextCell
 
 from .options import GlossapiOcrOptions
 from .recognizer.ckpt_io import sha256_file
@@ -91,6 +92,67 @@ class GlossapiOcrModel(BaseOcrModel):
         parsed.has_words = bool(parsed.word_cells)
         parsed.has_chars = bool(parsed.char_cells)
 
+    def _detect(self, page, record):
+        from greekocr.glyphs.page_text_lines import page_line_segments, extract_line_image
+
+        parsed = page.parsed_page
+        if parsed is None:
+            record['reason'] = 'no_parsed_page'
+            return
+        source = list(parsed.textline_cells)
+        record['source_line_count'] = len(source)
+        scale = self.options.crop_scale
+        start = perf_counter()
+        image = page.get_image(scale=scale)
+        record['timings_s']['render'] = perf_counter() - start
+        if image is None:
+            record['reason'] = 'no_page_image'
+            return
+        boxes = [c.rect.to_bounding_box().to_top_left_origin(page_height=page.size.height).scaled(scale).as_tuple()
+                 for c in source]
+        start = perf_counter()
+        lines = page_line_segments(image, boxes)
+        record['timings_s']['detect'] = perf_counter() - start
+        if any(not np.isfinite(l.top).all() or not np.isfinite(l.bottom).all()
+               or np.any(l.bottom <= l.top) for l in lines):
+            record['reason'] = 'invalid_line_geometry'
+            return
+        strips, rects = [], []
+        start = perf_counter()
+        for line in lines:
+            crop = np.asarray(extract_line_image(image, line), dtype=np.float32) / 255.
+            strip = extract_strip(crop, (0, 0, crop.shape[1], crop.shape[0]))
+            if strip is None:
+                record['reason'] = 'invalid_line_crop'
+                return
+            strips.append(strip)
+            # Docling's cell is a rectangle; retain the curve in the detector
+            # output, and give layout a tight envelope of its visible font band.
+            top = np.maximum(line.top, line.font_top - .3 * line.xheight)
+            bottom = np.minimum(line.bottom, line.font_bottom + .3 * line.xheight)
+            rects.append(BoundingRectangle.from_bounding_box(BoundingBox(
+                l=line.x0 / scale, t=float(top.min()) / scale,
+                r=line.x1 / scale, b=float(bottom.max()) / scale)))
+        record['timings_s']['crop'] = perf_counter() - start
+        predictions = []
+        if strips:
+            start = perf_counter()
+            recognizer = self._get_recognizer()
+            record['timings_s']['recognizer_setup'] = perf_counter() - start
+            start = perf_counter()
+            predictions = recognizer.recognize(strips)
+            record['timings_s']['recognise'] = perf_counter() - start
+            if len(predictions) != len(lines):
+                raise ValueError('recognizer returned a different number of lines')
+        ours = [TextCell(index=i, from_ocr=True, rect=rect, text=text, orig=text, confidence=confidence)
+                for i, (rect, (text, confidence)) in enumerate(zip(rects, predictions))]
+        self._install(ours, page)
+        record.update(status='replaced', installed=True, output_line_count=len(ours),
+                      recognition_performed=bool(strips),
+                      lines=[dict(rect=c.rect.model_dump(mode='json'), text=c.text, confidence=c.confidence,
+                                  segment_indices=list(l.segment_indices), hint_indices=list(l.hint_indices), column=l.column,
+                                  geometry_source=l.geometry_source) for c, l in zip(ours, lines)])
+
     def __call__(self, conv_res, page_batch):
         if not self.enabled:
             yield from page_batch
@@ -106,7 +168,7 @@ class GlossapiOcrModel(BaseOcrModel):
                       "mode": self.options.mode, "crop_scale": self.options.crop_scale,
                       "status": "unsupported", "timings_s": {}}
             if self.options.mode == "detector":
-                record["reason"] = "detector_out_of_scope"
+                self._detect(page, record)
                 self._record(record)
                 yield page
                 continue

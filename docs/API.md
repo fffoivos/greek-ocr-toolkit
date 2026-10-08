@@ -516,7 +516,7 @@ glyphs = line_glyphs(Image.open("crop.png"))
 
 ### `greekocr.glyphs.components.line_glyphs`
 
-`def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int=0, xh_prior: float | None=None) -> LineGlyphs`
+`def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int=0, xh_prior: float | None=None, focus: tuple[float, float] | None=None) -> LineGlyphs`
 
 Components with descriptors and roles plus the letter band they define. CPU, a few ms for a 1500×80 strip.
 
@@ -663,6 +663,79 @@ lines = page_lines(page, boxes)  # list[PageTextLine]
 ```python
 from greekocr.glyphs.page_lines import page_lines
 lines = page_lines(page, boxes, margin=0.25)
+```
+
+### `greekocr.glyphs.page_text_lines.LineSegment`
+
+One printed line; all curves use page pixel coordinates, x1 exclusive.
+
+```python
+from greekocr.glyphs.page_text_lines import LineSegment
+line = LineSegment(**measured_line_geometry)
+```
+
+### `greekocr.glyphs.page_text_lines.LineSegment.unroll`
+
+`def unroll(self, page: Image.Image | NDArray[Any], *, xheight: int=32) -> Image.Image`
+
+Return a grayscale strip with meanline at 1.5 and baseline at 2.5 x-heights.
+
+```python
+from greekocr.glyphs.page_text_lines import LineSegment
+image = line.unroll(page_image, xheight=32)
+```
+
+### `greekocr.glyphs.page_text_lines.LineSegment.to_record`
+
+`def to_record(self) -> dict`
+
+JSON-ready review record, including the once-built neighbour graph.
+
+```python
+from greekocr.glyphs.page_text_lines import LineSegment
+record = line.to_record()
+```
+
+### `greekocr.glyphs.page_text_lines.PageSegmentation`
+
+Final lines and their pixel-segment provenance, with measurable diagnostics.
+
+```python
+from greekocr.glyphs.page_text_lines import PageSegmentation
+result = PageSegmentation(**measured_page_geometry)
+```
+
+### `greekocr.glyphs.page_text_lines.segment_page`
+
+`def segment_page(page: Image.Image | NDArray[Any], hints: Sequence[Sequence[float]] | None=None) -> PageSegmentation`
+
+Analyse pixels and return rough segments, final lines, and diagnostic counts.
+
+```python
+from greekocr.glyphs.page_text_lines import segment_page
+result = segment_page(page_image, hints=None)
+```
+
+### `greekocr.glyphs.page_text_lines.page_line_segments`
+
+`def page_line_segments(page: Image.Image | NDArray[Any], hints: Sequence[Sequence[float]] | None=None) -> list[LineSegment]`
+
+Return one curved segment per detected printed line, starting from pixels.
+
+```python
+from greekocr.glyphs.page_text_lines import page_line_segments
+lines = page_line_segments(page_image, hints=None)
+```
+
+### `greekocr.glyphs.page_text_lines.extract_line_image`
+
+`def extract_line_image(page: Image.Image | NDArray[Any], line: LineSegment, *, xheight: int=32) -> Image.Image`
+
+Unroll raw pixels within the tessellated boundary at a fixed x-height position.
+
+```python
+from greekocr.glyphs.page_text_lines import extract_line_image
+image = extract_line_image(page_image, line, xheight=32)
 ```
 
 ### `greekocr.glyphs.readability.Readability`

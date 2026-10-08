@@ -211,6 +211,13 @@ CALLS={
 'region':'mask = recut.region',
 'PageTextLine':'lines = page_lines(page, boxes)  # list[PageTextLine]',
 'page_lines':'lines = page_lines(page, boxes, margin=0.25)',
+'LineSegment':'line = LineSegment(**measured_line_geometry)',
+'PageSegmentation':'result = PageSegmentation(**measured_page_geometry)',
+'page_line_segments':'lines = page_line_segments(page_image, hints=None)',
+'segment_page':'result = segment_page(page_image, hints=None)',
+'extract_line_image':'image = extract_line_image(page_image, line, xheight=32)',
+'unroll':'image = line.unroll(page_image, xheight=32)',
+'to_record':'record = line.to_record()',
 }
 
 
