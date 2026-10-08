@@ -82,7 +82,7 @@ class Recut:
     y1: int
     base: NDArray[np.float64]         # page baseline row per column x0..x1-1
     xh: float
-    stop_left: str                    # 'box' (not extended) | 'page_edge' (line ends) | 'gap' | 'rule'
+    stop_left: str                    # 'box' (not extended) | 'page_edge' (line ends) | 'gap' | 'rule' | 'edge' (shading)
     stop_right: str
     added_left: int                   # columns added beyond the box
     added_right: int
@@ -116,8 +116,10 @@ class PageLine:
 
 
 def _walk(objs: list, start_x: float, direction: int, xh: float, rise_mean: float, rules: list[tuple[int, int]],
-          seed: list[tuple[float, float]]) -> tuple[float, str, list[tuple[float, float]]]:
-    """Follow the line from start_x outward letter by letter. Returns (new edge x, stop reason, baseline points)."""
+          seed: list[tuple[float, float]], window: tuple[int, int] = (-1, -1)) -> tuple[float, str, list[tuple[float, float]]]:
+    """Follow the line from start_x outward letter by letter. Returns (new edge x, stop reason, baseline points).
+    Stops at non-text: a component taller than 3.2 x-heights or filling the whole walking window top to bottom (page-edge
+    shading, gutter shadow, stains) ends the line there ('edge')."""
     pts = list(seed)
     edge = start_x
     cand = []
@@ -151,6 +153,8 @@ def _walk(objs: list, start_x: float, direction: int, xh: float, rise_mean: floa
                 return edge, 'rule', pts
         if cy1 - cy0 > 2.6 * xh and (cx1 - cx0) < RULE_ASPECT * (cy1 - cy0):
             return edge, 'rule', pts
+        if cy1 - cy0 > 3.2 * xh or (cy0 <= window[0] + 1 and cy1 >= window[1] - 1):
+            return edge, 'edge', pts
         gap = (near_x - edge) * direction
         if (cy1 - cy0) < .3 * xh and gap > xh:                 # dots and specks extend the line only next to it
             continue
@@ -312,9 +316,9 @@ def _recut_fit(gray: NDArray[np.float64], f: LineFit, *, neighbours: list[LineFi
                  and sl[0].stop - sl[0].start >= RULE_HEIGHT * xh
                  and sl[1].stop - sl[1].start <= RULE_ASPECT * (sl[0].stop - sl[0].start)]
         if f.open_left:
-            new_x0, stop_l, pts_l = _walk(objs, f.x0, -1, xh, rise, rules, pts_l)
+            new_x0, stop_l, pts_l = _walk(objs, f.x0, -1, xh, rise, rules, pts_l, (ry0, ry1))
         if f.open_right:
-            new_x1, stop_r, pts_r = _walk(objs, f.x1, +1, xh, rise, rules, pts_r)
+            new_x1, stop_r, pts_r = _walk(objs, f.x1, +1, xh, rise, rules, pts_r, (ry0, ry1))
         new_x0, new_x1 = int(max(0, new_x0)), int(min(W, new_x1))
     xs = np.arange(new_x0, new_x1, dtype=np.float64)
     base = np.interp(xs, xs_seg, f.base)
