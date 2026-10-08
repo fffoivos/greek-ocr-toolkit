@@ -2,17 +2,37 @@
 draws them exactly like the crop tools' cards: for every input segment, the detector's lines that touch it (each with
 its four font lines; the best-covering line per detector column is 'main', the others are neighbours or 'piece' when
 level with the main line), with the reviewed crop-tools record kept as `prev` (drawn as "before" above it).
-Usage: detector_review_data.py REVIEW.json BOXES.json LINES.json OUT.json [--overview LINES.jpg]"""
+With --unroll PAGE.png, every card also carries the unrolled image of each detector line that came from its segment
+(`segment_indices`), straightened along the baseline and normalised to a fixed x-height: what the recogniser reads.
+Usage: detector_review_data.py REVIEW.json BOXES.json LINES.json OUT.json [--overview LINES.jpg] [--unroll PAGE.png]"""
 import base64, io, json, math, sys, time
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
+from scipy import ndimage as ndi
 
 review, boxes, lines = (json.load(open(p)) for p in sys.argv[1:4])
 out = Path(sys.argv[4])
 OVERVIEW = Path(sys.argv[sys.argv.index('--overview') + 1]) if '--overview' in sys.argv else None
 box_of = {b['line_id']: b['box'] for b in boxes}
+index_of = {b['line_id']: j for j, b in enumerate(boxes)}
+UNROLL = Path(sys.argv[sys.argv.index('--unroll') + 1]) if '--unroll' in sys.argv else None
+GRAY = np.asarray(Image.open(UNROLL).convert('L'), np.float64) if UNROLL else None
+XH = 20                                                   # x-height of the unrolled images, pixels
+
+
+def unroll(L):
+    """The line straightened along its baseline: mean line at 1.5 and baseline at 2.5 x-heights, the page outside the
+    line's own boundary (top/bottom curves) blanked to paper."""
+    s = XH / L['xheight']; w = max(1, int(np.ceil((L['x1'] - L['x0']) * s)))
+    grid = np.linspace(L['x0'], L['x1'] - 1, len(L['baseline']))
+    xs = np.clip(L['x0'] + (np.arange(w) + .5) / s - .5, L['x0'], L['x1'] - 1)
+    yy = np.interp(xs, grid, L['baseline'])[None, :] + ((np.arange(4 * XH) - 2.5 * XH) / s)[:, None]
+    strip = ndi.map_coordinates(GRAY, [yy, np.broadcast_to(xs, yy.shape)], order=1, mode='constant', cval=255)
+    strip[(yy < np.interp(xs, grid, L['top'])) | (yy >= np.interp(xs, grid, L['bottom']))] = 255
+    b = io.BytesIO(); Image.fromarray(np.clip(strip, 0, 255).astype(np.uint8)).save(b, 'JPEG', quality=55, optimize=True)
+    return dict(png=base64.b64encode(b.getvalue()).decode(), w=w, h=4 * XH)
 KEYS = (('font_top', 'ascender'), ('meanline', 'mean'), ('baseline', 'base'), ('font_bottom', 'descender'))
 
 
@@ -69,7 +89,10 @@ def after_record(r):
                n_columns=max(1, len(segs)), n_lines=len(kinds), n_full_lines=kinds.count('main') + kinds.count('full'),
                n_edge_lines=kinds.count('edges'), cut_spans=[], cut_letters=[], prior=None, xh_source='page_detector', confidence='page',
                n_support=m['n_support'] if m else 0, xh=m['xh'] if m else r['xh'], angle_deg=m['angle_deg'] if m else 0,
-               trail_px=m['trail_px'] if m else 0, degree=m['degree'] if m else 1, prev={k: v for k, v in r.items() if k != 'prev'})
+               trail_px=m['trail_px'] if m else 0, degree=m['degree'] if m else 1, prev={k: v for k, v in r.items() if k not in ('prev', 'png', 'img_type')})
+    if GRAY is not None:
+        j = index_of[r['id']]
+        rec['unrolled'] = [dict(i=i, **unroll(L)) for i, L in enumerate(lines) if j in L.get('segment_indices', [])]
     rec['n_pieces'] = sum(l['side'] == 'piece' for s in segs for l in s['lines'])
     return rec
 
@@ -77,10 +100,10 @@ def after_record(r):
 D = review
 D['lines'] = [after_record(r) for r in review['lines']]
 D['built'] = time.strftime('%Y-%m-%d %H:%M')
-D['lede'] = ("Each segment twice: before = the crop tools you reviewed; after = Astra's page detector (lines found from the pixels "
-             "alone, the segment only selects which lines to show). Same drawing: underline, mean line, dotted top and bottom font "
-             "lines; neighbour lines in the second colour, labelled; 'piece' = a second line level with the main one (one printed line "
-             "broken in two).")
+D['lede'] = ("Each segment twice, drawn the same way: before = the crop tools on the segment; after = the page detector's lines "
+             "(underline, mean line, dotted top and bottom font lines; neighbour lines in the second colour, labelled; 'piece' = a "
+             "second line level with the main one). Below: every line that came from the segment, straightened and normalised "
+             "— what the OCR reads. Check for cut-off letters and for ink from other lines or the other column.")
 if OVERVIEW:
     ov = Image.open(OVERVIEW); w = min(1400, ov.width); ov = ov.resize((w, round(ov.height * w / ov.width)), Image.LANCZOS)
     b = io.BytesIO(); ov.convert('RGB').save(b, 'JPEG', quality=62, optimize=True)

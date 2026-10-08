@@ -59,7 +59,7 @@ for r, p in zip(rows, paths):
         section = 'right'
     rec = line_record(p, priors=priors)
     spans = ' · spans both columns' if two_columns and x0 < rule - 200 and x1 > rule + 200 else ''
-    rec.update(section=section, label=f"box x {x0}–{x1}, y {y0}–{y1}{spans}", note=f"text layer (another OCR, not a reference): {r['text']}")
+    rec.update(section=section, label=f"box x {x0}–{x1}, y {y0}–{y1}{spans}", note=f"text layer (another OCR, not a reference): {r['text']}" if r.get('text') else '')
     if JPEG:
         b = io.BytesIO(); Image.open(p).convert('L').save(b, 'JPEG', quality=60, optimize=True)
         rec['png'] = base64.b64encode(b.getvalue()).decode(); rec['img_type'] = 'jpeg'
