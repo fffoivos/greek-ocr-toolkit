@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image
 
 from greekocr.glyphs.baseline import skew_line, text_lines
+from greekocr.glyphs.columns import column_segments
 from greekocr.glyphs.components import LineGlyphs, line_glyphs
 from greekocr.glyphs.ink import FAINT, ink_profile
 from greekocr.glyphs.letters import letter_boxes
@@ -71,26 +72,18 @@ def _sample(values: np.ndarray, step: int) -> list[float]:
     return [round(float(values[i]), 2) for i in idx]
 
 
-def line_record(path: PathLike, *, priors: Mapping[str, Mapping[str, float]] | None = None,
-                label: str = '', step: int = 4) -> dict[str, Any]:
-    path = Path(path)
-    image = Image.open(path)
-    g = line_glyphs(image)
-    prior_used = None
-    doc = document_of(path.name)
-    if priors and doc in priors and needs_prior(g):
-        prior_used = dict(priors[doc])
-        g = line_glyphs(image, xh_prior=prior_used['xh'])
+def _segment_record(g: LineGlyphs, x_offset: int, step: int) -> dict[str, Any]:
+    """Everything measured for one column segment, in the segment's own coordinates (x_offset into the crop)."""
     boxes = letter_boxes(g)
     sk = skew_line(g, boxes)
     ink = ink_profile(g, boxes)
+    lines = text_lines(g)
     return dict(
-        id=path.stem, label=label, document=doc, width=g.width, height=g.height, png=_png(image),
-        xh=round(g.band.xh, 1), xh_source=g.band.xh_source, prior=prior_used,
+        x_offset=x_offset, width=g.width,
+        xh=round(g.band.xh, 1), xh_source=g.band.xh_source,
         angle_deg=sk.angle_deg, trail_px=sk.trail_px, degree=sk.degree, confidence=sk.confidence,
         n_support=sk.n_support, residual_px=sk.residual_px, support_x=[round(v) for v in sk.support_x],
-        step=step, baseline=_sample(sk.baseline, step), meanline=_sample(sk.meanline, step),
-        visible=_sample(sk.visible, step),
+        baseline=_sample(sk.baseline, step), meanline=_sample(sk.meanline, step), visible=_sample(sk.visible, step),
         crossings=[dict(x=round(c.x), line=c.line, edge=c.edge, meaning=c.meaning) for c in sk.crossings],
         cut_spans=[dict(x0=s.x0, x1=s.x1, edge=s.edge, min_visible=s.min_visible) for s in sk.cut_spans],
         cut_letters=[dict(x0=c.x0, x1=c.x1, edge=c.edge, body_cut=c.body_cut, touches=c.touches)
@@ -99,12 +92,43 @@ def line_record(path: PathLike, *, priors: Mapping[str, Mapping[str, float]] | N
                       merged=l.merged, contrast=l.contrast) for l in ink.letters],
         marks=[[c.x0, c.y0, c.x1, c.y1] for c in g.components if c.role == 'mark'],
         n_broken=sum(l.state == 'broken' for l in ink.letters), n_faint=sum(l.state == 'faint' for l in ink.letters),
-        n_merged=sum(l.state == 'merged' for l in ink.letters), faint_threshold=FAINT,
+        n_merged=sum(l.state == 'merged' for l in ink.letters),
         double_line=sk.double_line,
         lines=[dict(side=t.side, shift_xh=t.shift_xh, x0=t.x0, x1=t.x1, votes=t.votes, visible=t.visible,
+                    kind='main' if t.side == 'main' else ('full' if t.visible >= .5 else 'edges'),
                     ascender=_sample(t.ascender, step), mean=_sample(t.mean, step), base=_sample(t.base, step),
-                    descender=_sample(t.descender, step)) for t in text_lines(g)],
-        second=None if sk.second is None else dict(support=sk.second.support, ratio=sk.second.ratio,
-                                                    offset_xh=sk.second.offset_xh, visible=sk.second.visible,
-                                                    baseline=_sample(sk.second.baseline, step)),
+                    descender=_sample(t.descender, step)) for t in lines],
     )
+
+
+def line_record(path: PathLike, *, priors: Mapping[str, Mapping[str, float]] | None = None,
+                label: str = '', step: int = 4) -> dict[str, Any]:
+    """JSON-ready record of a crop: one entry per column segment (columns split at rules / unaligned wide gaps), each
+    with its skew, bends, guide lines, neighbour lines, cut-offs and letter states. Top-level measurement fields repeat
+    the main segment (most baseline support) for summaries."""
+    path = Path(path)
+    image = Image.open(path)
+    probe = line_glyphs(image)
+    prior_used = None
+    doc = document_of(path.name)
+    kw: dict[str, Any] = {}
+    if priors and doc in priors and needs_prior(probe):
+        prior_used = dict(priors[doc])
+        kw['xh_prior'] = prior_used['xh']
+    segs = [sg for sg in column_segments(image, **kw) if sg.glyphs is not None]
+    records = [_segment_record(sg.glyphs, sg.x0, step) for sg in segs]
+    main = max(records, key=lambda r: r['n_support']) if records else _segment_record(probe, 0, step)
+    kinds = [l['kind'] for r in records for l in r['lines']]
+    out = dict(id=path.stem, label=label, document=doc, width=image.width, height=image.height, png=_png(image),
+               prior=prior_used, step=step, segments=records or [main], n_columns=max(1, len(records)),
+               n_lines=len(kinds), n_full_lines=kinds.count('main') + kinds.count('full'), n_edge_lines=kinds.count('edges'),
+               faint_threshold=FAINT)
+    for k in ('xh', 'xh_source', 'angle_deg', 'trail_px', 'degree', 'confidence', 'n_support', 'residual_px',
+              'support_x', 'double_line'):
+        out[k] = main[k]
+    for k in ('n_broken', 'n_faint', 'n_merged'):
+        out[k] = sum(r[k] for r in records) if records else main[k]
+    out['cut_spans'] = [c for r in records for c in r['cut_spans']]
+    out['letters'] = [l for r in records for l in r['letters']]
+    out['lines'] = [l for r in records for l in r['lines']]
+    return out

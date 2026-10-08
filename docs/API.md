@@ -420,13 +420,42 @@ main_line = text_lines(glyphs)[0]
 
 ### `greekocr.glyphs.baseline.text_lines`
 
-`def text_lines(glyphs: LineGlyphs, *, max_per_side: int=2) -> list[GuideLines]`
+`def text_lines(glyphs: LineGlyphs, *, max_per_side: int=3) -> list[GuideLines]`
 
 The main line and every neighbour line (above / below), each with its four guide lines.
 
 ```python
 from greekocr.glyphs.baseline import text_lines
 lines = text_lines(line_glyphs(Image.open("crop.png")))
+```
+
+### `greekocr.glyphs.columns.Segment`
+
+```python
+from greekocr.glyphs.columns import Segment
+segment = column_segments(Image.open("crop.png"))[0]
+```
+
+### `greekocr.glyphs.columns.column_rules`
+
+`def column_rules(crop: Image.Image | NDArray[Any]) -> list[tuple[int, int]]`
+
+x-ranges of vertical rules: tall thin ink spanning most of the crop height.
+
+```python
+from greekocr.glyphs.columns import column_rules
+rules = column_rules(Image.open("crop.png"))
+```
+
+### `greekocr.glyphs.columns.column_segments`
+
+`def column_segments(crop: Image.Image | NDArray[Any], **kw: Any) -> list[Segment]`
+
+Cut at rules; each segment gets its own line_glyphs (own band, skew, bends, guide lines).
+
+```python
+from greekocr.glyphs.columns import column_segments
+segments = column_segments(Image.open("crop.png"), xh_prior=None)
 ```
 
 ### `greekocr.glyphs.components.to_gray`
@@ -580,6 +609,33 @@ from greekocr.glyphs.letters import letter_boxes
 boxes = letter_boxes(line_glyphs(Image.open("crop.png")))
 ```
 
+### `greekocr.glyphs.lines_api.LineImage`
+
+```python
+from greekocr.glyphs.lines_api import LineImage
+line = separate_lines(Image.open("crop.png"))[0]
+```
+
+### `greekocr.glyphs.lines_api.straighten`
+
+`def straighten(gray: NDArray[np.float64], base: NDArray[np.float64], xh: float, *, paper: float, above: float=ABOVE, below: float=BELOW) -> tuple[NDArray[np.float64], NDArray[np.bool_], int]`
+
+Resample every column so the baseline lands on one row; linear interpolation along each column.
+
+```python
+from greekocr.glyphs.lines_api import straighten
+flat, missing, baseline_row = straighten(glyphs.gray, glyphs.band.bottom, glyphs.band.xh, paper=glyphs.paper)
+```
+
+### `greekocr.glyphs.lines_api.separate_lines`
+
+`def separate_lines(crop: Image.Image | NDArray[Any], *, min_visible: float=0.5, **kw: Any) -> list[LineImage]`
+
+```python
+from greekocr.glyphs.lines_api import separate_lines
+lines = separate_lines(Image.open("crop.png"), min_visible=.5)
+```
+
 ### `greekocr.glyphs.report.document_of`
 
 `def document_of(name: str) -> str | None`
@@ -614,6 +670,8 @@ priors = document_priors(["crops/a.png", "crops/b.png"])
 ### `greekocr.glyphs.report.line_record`
 
 `def line_record(path: PathLike, *, priors: Mapping[str, Mapping[str, float]] | None=None, label: str='', step: int=4) -> dict[str, Any]`
+
+JSON-ready record of a crop: one entry per column segment (columns split at rules / unaligned wide gaps), each
 
 ```python
 from greekocr.glyphs.report import line_record
@@ -1345,7 +1403,7 @@ receipts = stage_parliament("/node/project", "parliament_s2")
 
 ### `greekocr.real.sources.web_render.PageRecord`
 
-Capture receipt and absolute artifact paths (`None` for failed captures).
+Capture receipt and absolute artifact paths (None for failed captures).
 
 ```python
 from greekocr.real.sources.web_render import PageRecord
@@ -1356,19 +1414,11 @@ page = PageRecord(page_id, html_path, pdf_path, png_path, dom_path, print_dom_pa
 
 `def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathLike, *, viewport: tuple[int, int] | Mapping[str, int]=(794, 1123), scale: float=1.5, max_page_height: int=20000, print_to_pdf: bool=True, screenshot: bool=True, block_media: bool=True, licences: Mapping[str, str] | None=None, offline: bool=False, interval: float=1.0, timeout: float=30.0, client: _PoliteHTTP | None=None) -> list[PageRecord]`
 
-Render pages with polite top-level navigation and a `2 * timeout` page watchdog.
-Chromium fetches subresources directly. Timeout/error rows carry receipts and no
-artifact paths, and rendering continues with the next input. Progress is flushed
-to stdout as `WEB_PAGE n/N status url bytes seconds=... goto=...s fonts=...s
-dom_lines=...s screenshot=...s pdf=...s records=...s` and
-`WEB_WAVE_DONE pages=n failed=n`. Receipts preserve all six step timings in
-seconds, including interrupted work. Fonts have a five-second cap; response sizes
-are queried concurrently with a one-second cap. Screenshot truncation is recorded
-in `screenshot_capture`; the CSS height cap does not truncate PDF or DOM output.
+Render pages with polite top-level navigation and a 2*timeout page watchdog.
 
 ```python
 from greekocr.real.sources.web_render import render_pages
-pages = render_pages(["fixture.html"], "rendered", viewport=(794,1123), scale=1.5, max_page_height=20000, offline=True)
+pages = render_pages(["fixture.html"], "rendered", viewport=(794,1123), scale=2, offline=True)
 ```
 
 ### `greekocr.real.sources.web_render.records_from_dom`

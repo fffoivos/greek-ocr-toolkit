@@ -196,6 +196,11 @@ def skew_line(glyphs: LineGlyphs, boxes: list[LetterBox] | None = None) -> SkewL
 
 RISE, DROP = .51, .57     # median rise of tall letters / drop of hanging letters on 213 real lines (x-heights)
 ACCENT_GAP = .1           # accents sit ~0.1 x-heights above the mean line (rendered evidence, CP-G1 mark gaps)
+# Search limits (disclosed, CP-G2 F4): neighbours within ±LINE_RANGE x-heights of the main baseline, at most
+# max_per_side lines per side, at least LINE_SEPARATION apart (real line pitch here ≈ 2.2–2.7 x-heights), each supported
+# by ≥ MIN_PIECES distinct ink pieces (two paper specks must not invent a line, CP-G2 F3).
+LINE_RANGE, LINE_SEPARATION, MIN_PIECES = 6.0, 1.8, 3
+LINE_MIN = 1.7    # nearer than this is the main line's own ink (real pitch ≥ 2.2 x-heights; tips misplace by ≤ 0.5)
 
 
 @dataclass(frozen=True)
@@ -226,7 +231,7 @@ def _rise_drop(glyphs: LineGlyphs) -> tuple[float, float]:
     return (float(np.median(r)) if len(r) >= 3 else RISE), (float(np.median(d)) if len(d) >= 3 else DROP)
 
 
-def text_lines(glyphs: LineGlyphs, *, max_per_side: int = 2) -> list[GuideLines]:
+def text_lines(glyphs: LineGlyphs, *, max_per_side: int = 3) -> list[GuideLines]:
     """The main line and every neighbour line (above / below), each with its four guide lines."""
     xh, w, h = glyphs.band.xh, glyphs.width, glyphs.height
     B, M = glyphs.band.bottom, glyphs.band.top
@@ -236,11 +241,11 @@ def text_lines(glyphs: LineGlyphs, *, max_per_side: int = 2) -> list[GuideLines]
         base = B + shift
         vis = np.clip(np.minimum(base, h) - np.maximum(base - xh, 0), 0, xh) / xh
         return GuideLines(side, round(shift / xh, 3), base - (1 + rise) * xh, base - xh, base, base + drop * xh,
-                          x0, x1, round(votes, 1), round(float(vis[x0:x1 + 1].mean()) if x1 > x0 else 0.0, 3))
+                          x0, x1, round(votes, 1), round(float(vis[x0:x1 + 1].mean()), 3))
 
     sx = [p[0] for p in glyphs.band.support]
     out = [make('main', 0.0, int(min(sx)) if sx else 0, int(max(sx)) if sx else w - 1, float(glyphs.band.n_support))]
-    votes: list[tuple[float, float, float]] = []      # (shift rows, x, weight)
+    votes: list[tuple[float, float, float, int]] = []      # (shift rows, x, weight, component index)
     for c in glyphs.components:
         if c.role == 'rule' or c.area < 6:
             continue
@@ -249,25 +254,29 @@ def text_lines(glyphs: LineGlyphs, *, max_per_side: int = 2) -> list[GuideLines]
             continue                                   # the main line itself
         small = c.h < .5 * xh and c.w < .8 * xh
         if c.y0 > 0:     # a free top: the mean line, or the top of a tall letter
-            votes += [(c.y0 - M[i], c.cx, 1.0), (c.y0 - (M[i] - rise * xh), c.cx, .6)]
+            votes += [(c.y0 - M[i], c.cx, 1.0, c.index), (c.y0 - (M[i] - rise * xh), c.cx, .6, c.index)]
         if c.y1 < h:     # a free bottom: the baseline, a hanging letter's bottom, or an accent just above the mean line
-            votes += [(c.y1 - B[i], c.cx, 1.0), (c.y1 - (B[i] + drop * xh), c.cx, .6)]
+            votes += [(c.y1 - B[i], c.cx, 1.0, c.index), (c.y1 - (B[i] + drop * xh), c.cx, .6, c.index)]
             if small:
-                votes.append((c.y1 - (M[i] - ACCENT_GAP * xh), c.cx, .8))
-    for side, lo, hi in (('above', -6.0, -1.3), ('below', 1.3, 6.0)):   # up to two line pitches away
+                votes.append((c.y1 - (M[i] - ACCENT_GAP * xh), c.cx, .8, c.index))
+    for side, lo, hi in (('above', -LINE_RANGE, -LINE_MIN), ('below', LINE_MIN, LINE_RANGE)):
         v = [t for t in votes if lo * xh <= t[0] <= hi * xh]
-        for _ in range(max_per_side):
-            if len(v) < 3:
+        accepted = 0
+        for _ in range(4 * max_per_side):              # rejected peaks are skipped, not the end of the search (CP-G2)
+            if accepted >= max_per_side or len(v) < 3:
                 break
             s = np.array([t[0] for t in v]); wt = np.array([t[2] for t in v])
             hist, edges = np.histogram(s, bins=np.arange(lo * xh, hi * xh + 1, .1 * xh), weights=wt)
             hist = np.convolve(hist, [.25, .5, 1, .5, .25], mode='same')
             k = int(np.argmax(hist))
             near = np.abs(s - (edges[k] + edges[k + 1]) / 2) <= .25 * xh
-            if wt[near].sum() < 3:
-                break
+            pieces = {t[3] for t, n in zip(v, near) if n}
+            if wt[near].sum() < 3 or len(pieces) < MIN_PIECES:
+                v = [t for t, n in zip(v, near) if not n]      # too little independent support: drop this peak only
+                continue
             shift = float(np.average(s[near], weights=wt[near]))
             xs = np.array([t[1] for t, n in zip(v, near) if n])
             out.append(make(side, shift, int(xs.min()), int(xs.max()), float(wt[near].sum())))
-            v = [t for t in v if abs(t[0] - shift) > 1.8 * xh]     # the next line: ≥ 1.8 x-heights further (pitch ≈ 2.2–2.7)
+            accepted += 1
+            v = [t for t in v if abs(t[0] - shift) > LINE_SEPARATION * xh]
     return out

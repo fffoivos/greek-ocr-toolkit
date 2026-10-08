@@ -297,8 +297,10 @@ def test_line_record_uses_document_prior_for_the_owner_example():
     rec = line_record(OWNER, priors={'s2-60f24a3d8a2d714767f2': {'xh': 21.0, 'n': 1}})
     json.dumps(rec, allow_nan=False)
     assert rec['prior'] == {'xh': 21.0, 'n': 1} and rec['xh'] == 21.0
-    assert rec['cut_spans'] and rec['letters'] and len(rec['visible']) > 300
-    assert max(rec['visible'][:30]) < .5 and max(rec['visible']) > .9   # unreadable at the start, readable later
+    seg = rec['segments'][0]
+    assert rec['n_columns'] == 1 and rec['cut_spans'] and rec['letters'] and len(seg['visible']) > 300
+    assert max(seg['visible'][:30]) < .5 and max(seg['visible']) > .9   # unreadable at the start, readable later
+    assert rec['n_lines'] == 1                                          # one cut line, no invented neighbours
 
 
 def test_four_guide_lines_for_main_and_neighbour_lines():
@@ -324,3 +326,74 @@ def test_owner_b1ce_four_lines_in_one_crop():
     L = text_lines(line_glyphs(Image.open(Path(__file__).parents[1] / 'fixtures' / 'o4d_sample400' / 'crops' / 's2-b1ce8959da62cc55c839-p00009-l00068.png')))
     sides = sorted(round(l.shift_xh) for l in L)
     assert sides == [-5, -3, 0, 2]
+
+
+# ---------- CP-G2 findings, letters bounded by lines, columns, lines API (8 Oct 16:40) ----------
+
+def _probe_fixture(rects, *, B=120, xh=20, h=240, w=400):
+    """CP-G2 reviewer's synthetic band fixture: ten main bodies on baseline B plus extra rectangles."""
+    from types import SimpleNamespace
+    from greekocr.glyphs.components import Band, Component
+    comps = []
+    main = [(10 + i * 35, B - xh, 26 + i * 35, B, 'letter') for i in range(10)]
+    for j, (x0, y0, x1, y1, role) in enumerate(rects + main, 1):
+        touches = tuple(t for t, yes in [('top', y0 == 0), ('bottom', y1 == h)] if yes)
+        comps.append(Component(j, x0, y0, x1, y1, (x1 - x0) * (y1 - y0), 0, 0, 2, 20, 1, touches, role=role))
+    support = tuple(((a + b) / 2, float(B), k) for a, _, b, _, _ in main for k in ('bottom', 'top'))
+    band = Band(np.full(w, B - xh, float), np.full(w, B, float), xh, 20, support)
+    return SimpleNamespace(band=band, width=w, height=h, components=comps)
+
+
+def test_g2_rejected_peak_does_not_end_the_side_search():
+    from greekocr.glyphs.baseline import text_lines
+    tips = [(60 + i * 60, 0, 76 + i * 60, y, 'neighbour') for i, y in enumerate([5, 9, 13])]
+    distractor = [(10, 26, 26, 46, 'neighbour')]
+    for rects in (tips, tips + distractor):
+        lines = text_lines(_probe_fixture(rects, B=80, h=180))
+        assert [(l.side, float(l.base[0])) for l in lines] == [('main', 80.0), ('above', 9.0)]
+
+
+def test_g2_two_specks_do_not_invent_a_line_and_three_lines_are_found():
+    from greekocr.glyphs.baseline import text_lines
+    assert [l.side for l in text_lines(_probe_fixture([(80, 40, 84, 43, 'punct'), (240, 40, 244, 43, 'punct')]))] == ['main']
+    # realistic pitch 2.3 x-heights: lines at 2.3 and 4.6 above are found; one at 6.9 is beyond the disclosed
+    # ±6 x-height search range (two line pitches) and is not reported
+    three = [(10 + i * 35, b - 20, 26 + i * 35, b, 'neighbour') for b in (174, 128, 82) for i in range(10)]
+    bases = sorted(float(l.base[0]) for l in text_lines(_probe_fixture(three, B=220, h=260)))
+    assert bases == [128.0, 174.0, 220.0]
+
+
+def test_letter_boxes_never_leave_their_line():
+    """Owner 8 Oct: a page-edge shadow became one box spanning three lines; letters are bounded by their line."""
+    g = line_glyphs(Image.open(Path(__file__).parents[1] / 'fixtures' / 'o4d_sample400' / 'crops' / 's2-3229200bf47ca465a42d-p00004-l00018.png'))
+    assert max((b.y1 - b.y0) / g.band.xh for b in letter_boxes(g)) < 2.6
+
+
+@pytest.mark.parametrize('crop,n', [('s2-49598b2e848ab1f0ee1e-p00001-l00043', 2), ('s2-74cdb23a34ca4a6cd01e-p00010-l00018', 2),
+                                    ('s2-7534648e60694be1d180-p00023-l00013', 2), ('s2-60f24a3d8a2d714767f2-p00003-l00024', 1)])
+def test_columns_split_at_rules_and_unaligned_gaps_only(crop, n):
+    from greekocr.glyphs.columns import column_segments
+    segs = column_segments(Image.open(Path(__file__).parents[1] / 'fixtures' / 'o4d_sample400' / 'crops' / f'{crop}.png'))
+    assert len(segs) == n
+    if n == 2:   # columns of one crop share a type size (a capitals column must not get its own giant x-height)
+        assert abs(segs[0].glyphs.band.xh / segs[1].glyphs.band.xh - 1) <= .25
+
+
+def test_separate_lines_returns_straight_lines_per_column():
+    from greekocr.glyphs.lines_api import separate_lines
+    lines = separate_lines(Image.open(Path(__file__).parents[1] / 'fixtures' / 'o4d_sample400' / 'crops' / 's2-49598b2e848ab1f0ee1e-p00001-l00043.png'))
+    mains = [l for l in lines if l.side == 'main']
+    assert len(mains) == 2 and mains[0].x1 <= mains[1].x0
+    for l in mains:
+        assert l.image.height == l.missing.shape[0] and l.baseline_row > 0
+        assert l.top_cut.mean() < .2 and l.bottom_cut.mean() < .2
+
+
+def test_straighten_flattens_a_bent_rendered_line():
+    from greekocr.glyphs.lines_api import straighten
+    from greekocr.glyphs.baseline import skew_line
+    r = render_truth_line(TEXTS[1], DIDOT, size=36, rng=random.Random(12), bend=('left', -1.2, .3))
+    g = line_glyphs(r.image)
+    out, missing, up = straighten(g.gray, g.band.bottom, g.band.xh, paper=g.paper)
+    flat = line_glyphs(Image.fromarray(np.clip(out, 0, 255).astype(np.uint8)))
+    assert abs(skew_line(flat).angle_deg) < .3 and np.ptp(flat.band.bottom) < .2 * g.band.xh

@@ -191,6 +191,12 @@ CALLS={
 'visible':'seen = rendered.visible(.25)',
 'GuideLines':'main_line = text_lines(glyphs)[0]',
 'text_lines':'lines = text_lines(line_glyphs(Image.open("crop.png")))',
+'Segment':'segment = column_segments(Image.open("crop.png"))[0]',
+'column_rules':'rules = column_rules(Image.open("crop.png"))',
+'column_segments':'segments = column_segments(Image.open("crop.png"), xh_prior=None)',
+'LineImage':'line = separate_lines(Image.open("crop.png"))[0]',
+'separate_lines':'lines = separate_lines(Image.open("crop.png"), min_visible=.5)',
+'straighten':'flat, missing, baseline_row = straighten(glyphs.gray, glyphs.band.bottom, glyphs.band.xh, paper=glyphs.paper)',
 }
 
 

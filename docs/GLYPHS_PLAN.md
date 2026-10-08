@@ -30,9 +30,9 @@ review_scratch/CP-G1c3-evidence/: evals_v7.txt, neighbour_eval.txt, fixture_doub
   VISIBLE broken recall 56.9 % / 61.5 %, under precision 44.6 % / 48.6 %, merged precision 87.1 % / 84.5 %,
           merged recall 63.8 % / 79.5 %.
   Letters truly gone from the print: 0 / 282 (253 missed, no warning yet). 'Merged' = visibly touching in the scan.
-- four guide lines for every line: neighbours borrow the main line's shape; on 150 rendered crops 96 % of visible
-  neighbour lines found, median placement error 0.056 x-heights, 74 % within 0.25, 87 % within 0.5 (the rest:
-  tall-letter tops taken for short-letter tops; a per-document line pitch would resolve it).
+- four guide lines for every line: neighbours borrow the main line's shape. Honest matching (CP-G2): 167 of 199 visible
+  neighbour lines matched (83.9 %), 21 unmatched predictions (precision 88.9 %), median placement error 0.047
+  x-heights, 88 % of matches within 0.25. Limits: ≤ 3 per side, 1.7–6 x-heights from the main baseline.
 - double lines: real fixtures 7/7 double, 0/20 single, 2/17 partial flagged (in-sample threshold); rendered recall 93 %,
   precision 76 %.
 Earlier figures on the review page v2 (84 %→45 % bends, broken 82 %/78 %, merged 99.5 %/74 %) used the
@@ -121,4 +121,4 @@ detector-dependent evaluator and are superseded.
 - The document prior for that crop is the median of the document's complete crops (26 px); the same line's re-cut crop
   measures 21 px. The fitted angle moves from 2.4° (prior 26) to 2.0° (21): the prior's precision matters for clipped crops.
 - Rendered validation covers rotation, end bends and injected defects; page warping and real broken type are not in it.
-- Letters faded below visibility vanish without a per-letter warning (717 of 7,595 truth letters in the defect set).
+- Letters gone from the print get no 'missing letter' warning: 282 of 7,595 truth letters in the defect set (print truth): 253 missed, 23 flagged under, 6 intact.

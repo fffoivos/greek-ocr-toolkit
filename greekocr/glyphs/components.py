@@ -68,6 +68,7 @@ def binarise(gray: NDArray[np.float64], *, window: int | None = None, k: float =
     dark = float(np.percentile(gray, 1))
     floor = gray < paper - max(12.0, .12 * (paper - dark))
     ink = local & floor
+    strong = ink.copy()
     faint = gray < paper - max(4 * _noise_sigma(gray, paper), .15 * (paper - dark), 10.0)
     # faint ink is added where it stands apart from strong ink: whole faint components with no strong ink, and faint
     # regions more than 2 px from strong ink (a faint letter body attached to one dark stroke; CP-G1c2 F4). The 2 px
@@ -87,6 +88,19 @@ def binarise(gray: NDArray[np.float64], *, window: int | None = None, k: float =
         keep = sizes >= 24
         keep[0] = False
         ink |= keep[flab]
+    # faint ink must be stroke-like: a faint region much thicker than the strong strokes is shading or a stain, not
+    # print (owner 8 Oct: a page-edge shadow became one 73-px-thick 'letter' spanning three lines)
+    if ink.any() and (ink & ~strong).any():
+        dt = ndi.distance_transform_edt(ink)
+        slab, sn = ndi.label(strong, structure=EIGHT)
+        stroke = float(np.median(2 * ndi.maximum(dt, slab, np.arange(1, sn + 1)))) if sn else 4.0
+        alab, an = ndi.label(ink, structure=EIGHT)
+        thick = 2 * ndi.maximum(dt, alab, np.arange(1, an + 1))
+        has_strong = np.zeros(an + 1, bool)
+        has_strong[np.unique(alab[strong])] = True
+        drop = np.zeros(an + 1, bool)
+        drop[1:] = (thick > 3 * stroke) & ~has_strong[1:]
+        ink &= ~drop[alab]
     return ink
 
 

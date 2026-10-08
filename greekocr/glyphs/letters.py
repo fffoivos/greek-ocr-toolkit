@@ -26,6 +26,8 @@ SHARE, MAX_GAP, MERGE_WIDTH = .3, .3, 1.15
 MIN_MID, COMPLETE = .2, .8         # a piece must span MIN_MID x-heights of the middle region; COMPLETE spans it
 MERGED_WIDTH, BRIDGE = 1.5, .45    # merged: ≥ MERGED_WIDTH typical letters wide; cut where a column holds ≤ BRIDGE × median
 UNRESOLVED_WIDTH = 1.8             # without a bridge, only a blob this wide is called merged (ω, μ, Μ are wide letters)
+PATCH_THICKNESS = 1.2              # ink thicker than this (x-heights) is a patch, not a stroke (over-inked strokes stay < 1)
+LINE_HEIGHT = 2.6                  # tallest single letter + its accent, in x-heights; taller ink is not a letter
 
 
 @dataclass(frozen=True)
@@ -68,7 +70,13 @@ def _cuts(cols: np.ndarray, k: int, min_gap: int) -> list[int]:
 
 def letter_boxes(glyphs: LineGlyphs) -> list[LetterBox]:
     xh = glyphs.band.xh
-    eligible = [c.index for c in glyphs.components if c.role not in ('mark', 'neighbour', 'rule')]
+    # a letter belongs to one line: ink taller than a whole line (tall-letter top to hanging-letter bottom, ≈ 2.1 x-heights)
+    # or thicker than a letter is high (a patch) is not a letter (stain, shading, rule, several lines) and never becomes a piece
+    stroke = glyphs.stroke if glyphs.stroke > 0 else 4.0
+    thick = {c.index: float(2 * glyphs.dt[c.y0:c.y1, c.x0:c.x1][glyphs.labels[c.y0:c.y1, c.x0:c.x1] == c.index].max())
+             for c in glyphs.components}
+    eligible = [c.index for c in glyphs.components if c.role not in ('mark', 'neighbour', 'rule')
+                and c.h <= LINE_HEIGHT * xh and thick[c.index] <= PATCH_THICKNESS * xh]
     mid_ink = np.isin(glyphs.labels, eligible) & middle_mask(glyphs)
     plab, n = ndi.label(mid_ink, structure=EIGHT)
     info = []
@@ -106,9 +114,14 @@ def letter_boxes(glyphs: LineGlyphs) -> list[LetterBox]:
     gaps = [b['x0'] - a['x1'] for a, b in zip(groups, groups[1:]) if 0 <= b['x0'] - a['x1'] < .5 * xh]
     gap = float(np.median(gaps)) if gaps else 0.0
 
+    top_limit = glyphs.band.top - .9 * xh          # above: tall letters (~0.5) and their accents
+    bottom_limit = glyphs.band.bottom + .9 * xh    # below: hanging letters (~0.6) and iota subscript
+
     def extent(parents: tuple[int, ...], x0: int, x1: int) -> tuple[int, int]:
-        rows = np.nonzero(np.isin(glyphs.labels[:, x0:x1], parents).any(axis=1))[0]
-        return (int(rows[0]), int(rows[-1]) + 1) if rows.size else (0, glyphs.height)
+        """Rows of the letter's ink, clipped to its own line: a letter box never leaves its line."""
+        lo = int(max(0, np.floor(top_limit[x0:x1].min()))); hi = int(min(glyphs.height, np.ceil(bottom_limit[x0:x1].max())))
+        rows = np.nonzero(np.isin(glyphs.labels[lo:hi, x0:x1], parents).any(axis=1))[0]
+        return (lo + int(rows[0]), lo + int(rows[-1]) + 1) if rows.size else (lo, hi)
 
     out: list[LetterBox] = []
     for G in groups:
