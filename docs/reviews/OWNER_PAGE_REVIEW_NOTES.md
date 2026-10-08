@@ -13,3 +13,8 @@ Checked:
   its neighbours on the page (the row's other cells / the page's skew), never its own fit.
 - (1) not yet pinned down: the table's vertical rules are short inside each row box and are not found by the crop
   rule test (it requires a rule ≥ 80 % of the crop height and 1.5 × the letters); to verify per row.
+
+## a4 · 1806 navigation tables (Anemi an-7a2b17a3fb0f-p000200, two-page spread), 8 Oct 2026, ~23:45
+
+Owner: "navigation table is basically a table and is all boundaries" — the errors there are column-boundary
+violations (underlines crossing the table's vertical rules), as on the Vouli table page.
