@@ -2,12 +2,19 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
+from contextlib import contextmanager
 import ctypes
 import json
 import os
 from pathlib import Path
 import unicodedata
 import struct
+import subprocess
+import sys
+import threading
+import time
+from types import SimpleNamespace
 
 from PIL import Image
 import pytest
@@ -23,25 +30,63 @@ ROOT = Path(__file__).resolve().parents[1]
 NAMES = ('polytonic', 'government', 'news')
 
 
+@contextmanager
+def browser_hard_cap(seconds=60):
+    """Fail the test process even if Playwright/its cleanup stops servicing timeouts."""
+    def expired():
+        sys.stderr.write(f'Browser test exceeded its {seconds}s hard cap\n')
+        sys.stderr.flush()
+        os._exit(124)
+    timer = threading.Timer(seconds, expired)
+    timer.daemon = True
+    timer.start()
+    try:
+        yield
+    finally:
+        timer.cancel()
+
+
+@pytest.fixture(autouse=True)
+def browser_test_cap(request):
+    if {'chromium', 'rendered'} & set(request.fixturenames):
+        with browser_hard_cap():
+            yield
+    else:
+        yield
+
+
 @pytest.fixture(scope='module')
 def chromium():
-    playwright = pytest.importorskip('playwright.sync_api', reason='optional playwright is absent')
+    pytest.importorskip('playwright.sync_api', reason='optional playwright is absent')
     if 'PLAYWRIGHT_BROWSERS_PATH' not in os.environ and (ROOT / '.playwright').exists():
         os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(ROOT / '.playwright')
-    with playwright.sync_playwright() as driver:
+    # Isolate the probe as even driver startup/teardown can hang on restricted Macs.
+    probe = '''from playwright.sync_api import sync_playwright, Error
+import sys
+with sync_playwright() as driver:
+    try:
+        browser = driver.chromium.launch(headless=True, timeout=10000)
+    except Error as error:
+        print(str(error).splitlines()[0], file=sys.stderr)
+        sys.exit(1)
+    browser.close()
+'''
+    with browser_hard_cap():
         try:
-            browser = driver.chromium.launch(headless=True)
-        except playwright.Error as error:
-            pytest.skip('Chromium absent or unable to launch in sandbox: ' + str(error).splitlines()[0])
-        browser.close()
+            result = subprocess.run([sys.executable, '-c', probe], capture_output=True, text=True, timeout=15)
+        except subprocess.TimeoutExpired:
+            pytest.skip('Chromium launch probe exceeded 15s (including driver setup/cleanup)')
+        if result.returncode:
+            pytest.skip('Chromium absent or unable to launch in sandbox: ' + result.stderr.strip())
 
 
 @pytest.fixture(scope='module')
 def rendered(chromium, tmp_path_factory):
     root = tmp_path_factory.mktemp('web-render')
     inputs = [dict(url=str(FIXTURES / (name + '.html')), licence='CC0-1.0; authored test fixture') for name in NAMES]
-    return (render_pages(inputs, root / 'first', offline=True),
-            render_pages(inputs, root / 'second', offline=True))
+    with browser_hard_cap():
+        return (render_pages(inputs, root / 'first', offline=True, timeout=5),
+                render_pages(inputs, root / 'second', offline=True, timeout=5))
 
 
 @pytest.mark.parametrize('index', range(3), ids=NAMES)
@@ -112,7 +157,11 @@ def test_browser_cli_and_checksum_guard(chromium, tmp_path, capsys):
     destination = tmp_path / 'cli'
     assert main(['web', 'render', '--sources', str(FIXTURES / 'polytonic.html'),
                  '--max-pages', '1', '--dest', str(destination), '--offline', '--licence', 'CC0-1.0']) == 0
-    result = json.loads(capsys.readouterr().out)
+    output = capsys.readouterr().out
+    progress, done, payload = output.split('\n', 2)
+    assert progress.startswith('WEB_PAGE 1/1 ok file:')
+    assert done == 'WEB_WAVE_DONE pages=1 failed=0'
+    result = json.loads(payload)
     assert len(result['pages']) == 1
     assert main(['web', 'records', str(destination)]) == 0
     summary = json.loads(capsys.readouterr().out)
@@ -373,3 +422,263 @@ def test_receipt_verification_and_dom_export_without_browser(tmp_path):
     (work / 'source.html').write_text('changed')
     with pytest.raises(ValueError, match='checksum mismatch'):
         page_records(tmp_path)
+
+
+@pytest.fixture
+def fake_browser(monkeypatch):
+    """Drive real capture control flow with recorded browser events, never a socket."""
+    api = pytest.importorskip('playwright.async_api')
+    from greekocr.real.sources import web_render
+    state = SimpleNamespace(contexts=[], calls=[], stall=None)
+
+    async def stall(page, stage):
+        if page.url.endswith('/stuck') and state.stall == stage:
+            await asyncio.Event().wait()
+        if page.url.endswith('/stuck') and state.stall == stage + '_timeout':
+            raise api.TimeoutError(stage + ' timed out')
+
+    class Request:
+        def __init__(self, page, url, kind, size):
+            self.url, self.resource_type, self.frame, self.size = url, kind, page.main_frame, size
+
+        def is_navigation_request(self):
+            return self.resource_type == 'document'
+
+        async def sizes(self):
+            return dict(responseBodySize=self.size)
+
+    class Response:
+        status = 200
+
+        def __init__(self, request):
+            self.request, self.url = request, request.url
+
+        async def body(self):
+            return b'<html lang="el"><body>recorded</body></html>'
+
+        async def finished(self):
+            pass
+
+    class Route:
+        def __init__(self, request):
+            self.request, self.allowed = request, False
+
+        async def abort(self):
+            state.calls.append(('abort', self.request.resource_type))
+
+        async def continue_(self):
+            self.allowed = True
+            state.calls.append(('continue', self.request.resource_type))
+
+    class Handle:
+        async def dispose(self):
+            pass
+
+    class Page:
+        def __init__(self, context):
+            self.context, self.main_frame, self.url = context, object(), 'about:blank'
+
+        def set_default_timeout(self, timeout):
+            state.calls.append(('default_timeout', timeout))
+
+        def on(self, event, callback):
+            assert event == 'response'
+            self.response_event = callback
+
+        async def goto(self, url, **kwargs):
+            self.url = url
+            state.calls.append(('goto', url, kwargs))
+            await stall(self, 'goto')
+            result = None
+            for kind, size in [('document', 41), ('stylesheet', 11), ('font', 13), ('image', 17), ('media', 19)]:
+                request = Request(self, url if kind == 'document' else url + '/' + kind, kind, size)
+                route = Route(request)
+                await self.context.route_callback(route)
+                if route.allowed:
+                    response = Response(request)
+                    self.response_event(response)
+                    if kind == 'document':
+                        result = response
+            return result
+
+        async def add_style_tag(self, **kwargs):
+            pass
+
+        async def evaluate(self, expression, arg=None):
+            if expression == web_render._DOM:
+                await stall(self, 'evaluate')
+                return dict(lines=[], nodes=[], fonts=[], computed_font_families=['system-ui'], warnings=[])
+            if expression == 'document.documentElement.lang':
+                return 'el'
+            if expression == 'navigator.userAgent':
+                return 'recorded-browser'
+
+        async def wait_for_function(self, expression, **kwargs):
+            state.calls.append(('wait_for_function', expression, kwargs))
+            await stall(self, 'fonts')
+            return Handle()
+
+        async def title(self):
+            return 'Recorded page'
+
+        async def content(self):
+            return '<html>recorded</html>'
+
+        async def screenshot(self, path, **kwargs):
+            Image.new('RGB', (10, 10), 'white').save(path)
+
+        async def emulate_media(self, **kwargs):
+            pass
+
+        async def set_viewport_size(self, size):
+            pass
+
+        async def pdf(self, path, **kwargs):
+            await stall(self, 'pdf')
+            Path(path).write_bytes(b'recorded PDF')
+
+    class Context:
+        closed = False
+
+        async def new_page(self):
+            self.page = Page(self)
+            return self.page
+
+        async def route(self, pattern, callback):
+            assert pattern == '**/*'
+            self.route_callback = callback
+
+        async def close(self):
+            self.closed = True
+
+    class Browser:
+        version = 'recorded-chromium'
+
+        async def new_context(self, **kwargs):
+            context = Context()
+            state.contexts.append(context)
+            return context
+
+        async def close(self):
+            pass
+
+    class Chromium:
+        async def launch(self, **kwargs):
+            assert kwargs['timeout'] == 10000
+            return Browser()
+
+    class Driver:
+        async def __aenter__(self):
+            return SimpleNamespace(chromium=Chromium())
+
+        async def __aexit__(self, *args):
+            pass
+
+    async def prepare(client, context, url, timeout):
+        state.calls.append(('prepare', url))
+        await stall(SimpleNamespace(url=url), 'prepare')
+
+    monkeypatch.setattr(api, 'async_playwright', Driver)
+    monkeypatch.setattr(web_render, '_prepare_navigation', prepare)
+    return state
+
+
+@pytest.mark.parametrize('block_media', [True, False])
+def test_chromium_fetches_assets_and_reports_response_bytes(fake_browser, monkeypatch, tmp_path, capsys, block_media):
+    client = _PoliteHTTP()
+    def forbidden(*args):
+        raise AssertionError('renderer must never proxy page/assets through polite HTTP')
+    monkeypatch.setattr(client, 'get', forbidden)
+    monkeypatch.setattr(client, '_request', forbidden)
+    page = render_pages(['https://recorded.invalid/page'], tmp_path, client=client,
+                        block_media=block_media, timeout=1)[0]
+    assert page.receipt['capture_status'] == 'rendered'
+    network = page.receipt['network']
+    assert network['subresources'] == (2 if block_media else 4)
+    assert network['subresource_bytes'] == (24 if block_media else 60)
+    assert network['response_bytes'] == 41 + network['subresource_bytes']
+    assert len(network['resources']) == network['responses']
+    assert network['unmeasured_responses'] == 0
+    calls = fake_browser.calls
+    assert calls.index(('prepare', page.receipt['url'])) < next(i for i, call in enumerate(calls) if call[0] == 'goto')
+    assert ('continue', 'stylesheet') in calls and ('continue', 'font') in calls
+    assert ('abort' if block_media else 'continue', 'image') in calls
+    assert ('abort' if block_media else 'continue', 'media') in calls
+    assert next(call[2]['timeout'] for call in calls if call[0] == 'goto') == 1000
+    assert all(call[2]['timeout'] == 1000 for call in calls if call[0] == 'wait_for_function')
+    assert capsys.readouterr().out.splitlines() == [
+        f"WEB_PAGE 1/1 ok https://recorded.invalid/page {page.receipt['bytes']}",
+        'WEB_WAVE_DONE pages=1 failed=0']
+
+
+@pytest.mark.parametrize('stage', ['prepare', 'goto', 'fonts', 'evaluate', 'pdf', 'goto_timeout', 'fonts_timeout'])
+def test_page_watchdog_receipt_and_wave_continuation(fake_browser, tmp_path, capsys, stage):
+    fake_browser.stall = stage
+    started = time.monotonic()
+    pages = render_pages(['https://recorded.invalid/stuck', 'https://recorded.invalid/next'], tmp_path, timeout=.03)
+    assert time.monotonic() - started < 1
+    failed, completed = pages
+    assert failed.receipt['status'] == 'timeout'
+    assert failed.receipt['watchdog_seconds'] == .06
+    if not stage.endswith('_timeout'):
+        assert .05 <= failed.receipt['elapsed_seconds'] < .3
+    assert json.loads(Path(failed.receipt_path).read_text()) == failed.receipt
+    assert not any(failed.receipt['files'].values())
+    assert failed.html_path is None and failed.dom_path is None
+    assert completed.receipt['capture_status'] == 'rendered'
+    assert all(context.closed for context in fake_browser.contexts)
+    output = capsys.readouterr().out.splitlines()
+    assert output[0].startswith('WEB_PAGE 1/2 timeout https://recorded.invalid/stuck ')
+    assert output[1].startswith('WEB_PAGE 2/2 ok https://recorded.invalid/next ')
+    assert output[-1] == 'WEB_WAVE_DONE pages=2 failed=1'
+    summary = page_records(Path(failed.receipt_path).parent)
+    assert summary['pages'][0]['status'] == 'timeout'
+
+
+def test_navigation_reuses_origin_robots_and_discovery_rate_state(monkeypatch):
+    from greekocr.real.sources import web_render
+    clock, waits, requested = [10.0], [], []
+    client = _PoliteHTTP()
+    client._last['https://recorded.invalid'] = 10.0  # Earlier discovery request.
+    monkeypatch.setattr(web_render, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def sleep(delay):
+        waits.append(delay)
+        clock[0] += delay
+
+    class Robots:
+        status = 200
+        async def body(self):
+            return b'User-agent: *\nDisallow: /private\nCrawl-delay: 2\n'
+        async def dispose(self):
+            pass
+
+    async def get(url, **kwargs):
+        requested.append((url, kwargs))
+        return Robots()
+
+    monkeypatch.setattr(web_render.asyncio, 'sleep', sleep)
+    context = SimpleNamespace(request=SimpleNamespace(get=get))
+
+    async def exercise():
+        await web_render._prepare_navigation(client, context, 'https://recorded.invalid/a', 5)
+        await web_render._prepare_navigation(client, context, 'https://recorded.invalid/b', 5)
+        with pytest.raises(ValueError, match='robots disallows'):
+            await web_render._prepare_navigation(client, context, 'https://recorded.invalid/private', 5)
+
+    asyncio.run(exercise())
+    assert requested == [('https://recorded.invalid/robots.txt', dict(timeout=5000, max_redirects=0))]
+    assert waits == [1.0, 2.0, 2.0]
+    assert client._last['https://recorded.invalid'] == 15.0
+
+
+def test_browser_cap_really_terminates_a_stalled_process():
+    # Exercise a shorter copy of the same cap, without killing the pytest process.
+    script = '''import runpy, time
+cap = runpy.run_path('tests/test_web_render.py')['browser_hard_cap']
+with cap(.1):
+    time.sleep(10)
+'''
+    result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=10, cwd=ROOT)
+    assert result.returncode == 124
+    assert 'hard cap' in result.stderr

@@ -1345,7 +1345,7 @@ receipts = stage_parliament("/node/project", "parliament_s2")
 
 ### `greekocr.real.sources.web_render.PageRecord`
 
-Paths and capture receipt for one rendered input; paths are absolute.
+Capture receipt and absolute artifact paths (`None` for failed captures).
 
 ```python
 from greekocr.real.sources.web_render import PageRecord
@@ -1356,7 +1356,10 @@ page = PageRecord(page_id, html_path, pdf_path, png_path, dom_path, print_dom_pa
 
 `def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathLike, *, viewport: tuple[int, int] | Mapping[str, int]=(794, 1123), scale: float=2.0, print_to_pdf: bool=True, screenshot: bool=True, block_media: bool=True, licences: Mapping[str, str] | None=None, offline: bool=False, interval: float=1.0, timeout: float=30.0, client: _PoliteHTTP | None=None) -> list[PageRecord]`
 
-Render paths/URLs/source mappings; network assets obey robots and rate gates.
+Render pages with polite top-level navigation and a `2 * timeout` page watchdog.
+Chromium fetches subresources directly. Timeout/error rows carry receipts and no
+artifact paths, and rendering continues with the next input. Progress is flushed
+to stdout as `WEB_PAGE n/N status url bytes` and `WEB_WAVE_DONE pages=n failed=n`.
 
 ```python
 from greekocr.real.sources.web_render import render_pages

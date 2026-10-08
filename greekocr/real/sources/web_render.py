@@ -1,6 +1,7 @@
 """Receipt-bound Chromium page images and DOM/PDF labels, without OCR."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -9,13 +10,14 @@ import json
 import math
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
+import time
 import unicodedata
 from urllib.parse import unquote, urlsplit
 
 from PIL import Image
 
 from greekocr.types import PathLike, Record
-from .web_sources import _PoliteHTTP, USER_AGENT
+from .web_sources import _PoliteHTTP
 
 __all__ = ['PageRecord', 'render_pages', 'records_from_dom', 'records_from_pdf',
            'degrade_twins', 'page_records']
@@ -88,12 +90,12 @@ _DOM = r'''(scale) => {
 
 @dataclass(frozen=True)
 class PageRecord:
-    """Paths and capture receipt for one rendered input; paths are absolute."""
+    """Capture receipt and absolute artifact paths (None for failed captures)."""
     page_id: str
-    html_path: str
+    html_path: str | None
     pdf_path: str | None
     png_path: str | None
-    dom_path: str
+    dom_path: str | None
     print_dom_path: str | None
     receipt_path: str
     receipt: Record
@@ -114,176 +116,278 @@ def _metadata(path: Path, receipt: Mapping[str, object] | None) -> Record:
     return json.loads(candidate.read_text()) if candidate.exists() else {}
 
 
+async def _prepare_navigation(client: _PoliteHTTP, context, url: str, timeout: float) -> None:
+    """Use the shared policy state before goto; never block Playwright's event loop."""
+    origin = client._origin(url)
+
+    async def pace(delay: float) -> None:
+        wait = client._last.get(origin, -float('inf')) + delay - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+        client._last[origin] = time.monotonic()
+
+    if origin not in client._robots:
+        await pace(client.interval)
+        # Fetch only robots here. Chromium owns the document and its subresources.
+        response = await context.request.get(origin + '/robots.txt', timeout=timeout * 1000,
+                                             max_redirects=0)
+        try:
+            body = await response.body()
+            if len(body) > client.limit:
+                raise ValueError('web response exceeds byte limit: ' + origin + '/robots.txt')
+            client._cache_robots(origin, dict(status=response.status, body=body))
+        finally:
+            await response.dispose()
+    await pace(client._navigation_interval(url))
+
+
+async def _await_fonts(page, timeout: float) -> None:
+    # evaluate itself has no timeout: the enclosing wall-clock watchdog covers it.
+    await page.evaluate("""() => {
+        window.__webRenderFontsReady = false;
+        document.fonts.ready.then(() => { window.__webRenderFontsReady = true; });
+    }""")
+    handle = await page.wait_for_function('window.__webRenderFontsReady === true', timeout=timeout * 1000)
+    await handle.dispose()
+
+
 def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathLike, *,
                  viewport: tuple[int, int] | Mapping[str, int] = (794, 1123), scale: float = 2.0,
                  print_to_pdf: bool = True, screenshot: bool = True,
                  block_media: bool = True, licences: Mapping[str, str] | None = None,
                  offline: bool = False, interval: float = 1.0,
                  timeout: float = 30.0, client: _PoliteHTTP | None = None) -> list[PageRecord]:
-    """Render paths/URLs/source mappings; network assets obey robots and rate gates."""
+    """Render pages with polite top-level navigation and a 2*timeout page watchdog."""
     if isinstance(viewport, Mapping):
         viewport = (viewport['width'], viewport['height'])
     if (len(viewport) != 2 or any(not isinstance(v, int) or v <= 0 for v in viewport)
-            or not math.isfinite(scale) or scale <= 0 or timeout <= 0):
+            or not math.isfinite(scale) or scale <= 0 or not math.isfinite(timeout) or timeout <= 0):
         raise ValueError('viewport, scale and timeout must be positive')
     client = client or _PoliteHTTP(interval=interval, timeout=timeout)
     try:
-        from playwright.sync_api import sync_playwright, Error
+        from playwright.async_api import async_playwright, Error, TimeoutError as PlaywrightTimeout
     except ImportError as error:
         raise ImportError('install greek-ocr-toolkit[web] and playwright install chromium') from error
+    # Resolve discovery generators before starting the browser's event loop.
+    sources = list(urls)
     destination = Path(out_dir).resolve()
     destination.mkdir(parents=True, exist_ok=True)
-    records: list[PageRecord] = []
-    with sync_playwright() as playwright:
-        try:
-            browser = playwright.chromium.launch(headless=True)
-        except Error as error:
-            raise RuntimeError('Chromium unavailable or cannot start: ' + str(error).splitlines()[0]) from error
-        try:
-            for index, source in enumerate(urls):
-                spec = dict(source) if isinstance(source, Mapping) else {'url': str(source)}
-                original = str(spec.get('url') or spec.get('path') or '')
-                if not original and 'html' not in spec:
-                    raise ValueError('render input needs url/path or html')
-                remote = urlsplit(original).scheme in ('http', 'https')
-                if remote and offline and 'html' not in spec:
-                    raise ValueError('offline render refuses remote source: ' + original)
-                parts = urlsplit(original)
-                if parts.scheme == 'file' and parts.netloc not in ('', 'localhost'):
-                    raise ValueError('remote file URLs are not supported')
-                local = Path(unquote(parts.path) if parts.scheme == 'file' else original).resolve() if not remote and 'html' not in spec else None
-                url = original if remote else local.as_uri() if local else original
-                licence = str(spec.get('licence') or (licences or {}).get(original) or 'unspecified; rights review required')
-                page_id = f'{index:05d}-' + hashlib.sha256(url.encode()).hexdigest()[:12]
-                work = destination / page_id
-                work.mkdir(exist_ok=False)
-                context = browser.new_context(viewport={'width': viewport[0], 'height': viewport[1]},
-                                              device_scale_factor=scale, locale='el-GR', timezone_id='UTC',
-                                              color_scheme='light', reduced_motion='reduce',
-                                              java_script_enabled=False, service_workers='block',
-                                              user_agent=USER_AGENT)
-                page = context.new_page()
-                page.set_default_timeout(timeout * 1000)
-                fetched_at = datetime.now(timezone.utc).isoformat()
-                blocked: list[Record] = []
-                fetched: dict[str, Record] = {}
 
-                def route_request(route):
-                    request = route.request
-                    target = request.url
-                    if block_media and request.resource_type in ('image', 'media'):
-                        blocked.append(dict(url=target, reason='block_media'))
-                        route.abort()
-                        return
-                    if target.startswith(('http://', 'https://')):
-                        if offline or not remote or 'html' in spec:
-                            blocked.append(dict(url=target, reason='offline'))
-                            route.abort()
-                            return
-                        try:
-                            response = fetched.get(target) or client.get(target)
-                            fetched[target] = response
-                            fetched[response['url']] = response
-                            if response['url'] != target:
-                                route.fulfill(status=302, headers={'location': response['url']})
-                                return
-                            headers = {k: v for k, v in response['headers'].items()
-                                       if k.lower() not in ('content-encoding', 'content-length', 'transfer-encoding')}
-                            route.fulfill(status=response['status'], headers=headers, body=response['body'])
-                        except (OSError, ValueError) as error:
-                            blocked.append(dict(url=target, reason=str(error)))
-                            route.abort()
-                    else:
-                        route.continue_()
+    async def render() -> list[PageRecord]:
+        records: list[PageRecord] = []
+        failed = 0
+        async with async_playwright() as playwright:
+            try:
+                browser = await playwright.chromium.launch(headless=True, timeout=10000)
+            except Error as error:
+                raise RuntimeError('Chromium unavailable or cannot start: ' + str(error).splitlines()[0]) from error
+            try:
+                for index, source in enumerate(sources):
+                    spec = dict(source) if isinstance(source, Mapping) else {'url': str(source)}
+                    original = str(spec.get('url') or spec.get('path') or '')
+                    if not original and 'html' not in spec:
+                        raise ValueError('render input needs url/path or html')
+                    remote = urlsplit(original).scheme in ('http', 'https')
+                    if remote and offline and 'html' not in spec:
+                        raise ValueError('offline render refuses remote source: ' + original)
+                    parts = urlsplit(original)
+                    if parts.scheme == 'file' and parts.netloc not in ('', 'localhost'):
+                        raise ValueError('remote file URLs are not supported')
+                    local = Path(unquote(parts.path) if parts.scheme == 'file' else original).resolve() if not remote and 'html' not in spec else None
+                    url = original if remote else local.as_uri() if local else original
+                    licence = str(spec.get('licence') or (licences or {}).get(original) or 'unspecified; rights review required')
+                    page_id = f'{index:05d}-' + hashlib.sha256(url.encode()).hexdigest()[:12]
+                    work = destination / page_id
+                    work.mkdir(exist_ok=False)
+                    fetched_at = datetime.now(timezone.utc).isoformat()
+                    started = time.monotonic()
+                    context = None
+                    blocked: list[Record] = []
+                    responses = []
+                    network = dict(responses=0, subresources=0, response_bytes=0,
+                                   subresource_bytes=0, unmeasured_responses=0, resources=[],
+                                   byte_basis='Chromium request.sizes responseBodySize (encoded body bytes)')
+                    state = dict(final_url=url, http_status=None, bytes=0)
 
-                context.route('**/*', route_request)
-                try:
-                    if 'html' in spec:
-                        page.set_content(str(spec['html']), wait_until='load')
-                        status, final_url = spec.get('api_status'), url
-                        raw_html = str(spec['html']).encode('utf-8')
-                    else:
-                        response = page.goto(url, wait_until='load')
-                        status, final_url = response.status if response else None, page.url
-                        if remote:
-                            raw_html = fetched[final_url]['body']
-                            if status is None or not 200 <= status < 300:
-                                raise ValueError('capture HTTP status ' + str(status))
+                    async def capture() -> PageRecord:
+                        nonlocal context
+                        context = await browser.new_context(viewport={'width': viewport[0], 'height': viewport[1]},
+                                                            device_scale_factor=scale, locale='el-GR', timezone_id='UTC',
+                                                            color_scheme='light', reduced_motion='reduce',
+                                                            java_script_enabled=False, service_workers='block',
+                                                            user_agent=client.user_agent)
+                        page = await context.new_page()
+                        page.set_default_timeout(timeout * 1000)
+
+                        async def route_request(route):
+                            request = route.request
+                            target = request.url
+                            if block_media and request.resource_type in ('image', 'media'):
+                                blocked.append(dict(url=target, reason='block_media'))
+                                await route.abort()
+                            elif target.startswith(('http://', 'https://')) and (offline or not remote or 'html' in spec):
+                                blocked.append(dict(url=target, reason='offline'))
+                                await route.abort()
+                            else:
+                                await route.continue_()
+
+                        def response_event(response):
+                            # No body reads, HTTP, pacing or waits inside event callbacks.
+                            request = response.request
+                            subresource = not (request.is_navigation_request() and request.frame == page.main_frame)
+                            network['responses'] += 1
+                            network['subresources'] += int(subresource)
+                            responses.append((response, subresource))
+
+                        await context.route('**/*', route_request)
+                        page.on('response', response_event)
+                        if 'html' in spec:
+                            await page.set_content(str(spec['html']), wait_until='load', timeout=timeout * 1000)
+                            status, final_url = spec.get('api_status'), url
+                            raw_html = str(spec['html']).encode('utf-8')
                         else:
-                            raw_html = local.read_bytes()
-                    page.add_style_tag(content=_FREEZE)
-                    page.evaluate('''async (blocked) => {
-                        document.querySelectorAll('video,audio').forEach(e=>e.pause());
-                        if(!blocked)document.querySelectorAll('img').forEach(e=>e.loading='eager');
-                        await document.fonts.ready;
-                        if(!blocked)await Promise.all(Array.from(document.images).map(i=>i.decode().catch(()=>{})));
-                        window.scrollTo(0,0);
-                    }''', block_media)
-                    title = page.title()
-                    lang = page.evaluate('document.documentElement.lang')
-                    dom = page.evaluate(_DOM, scale)
-                    dom.update(source_url=final_url, licence=licence)
-                    html_path = work / 'source.html'
-                    html_path.write_bytes(raw_html)
-                    (work / 'rendered.html').write_text(page.content(), encoding='utf-8')
-                    if 'source_json' in spec:
-                        _write(work / 'source.json', spec['source_json'])
-                    png_path = work / 'page.png' if screenshot else None
-                    if png_path:
-                        page.screenshot(path=str(png_path), full_page=True, animations='disabled', scale='device')
-                    pdf_path = work / 'page.pdf' if print_to_pdf else None
-                    print_dom_path = work / 'print_dom.json' if print_to_pdf else None
-                    if pdf_path:
-                        page.emulate_media(media='print')
-                        page.set_viewport_size({'width': math.ceil(_A4[0]), 'height': math.ceil(_A4[1])})
-                        # Match the continuous print layout's fractional A4 width. Fragmentation is audited separately.
-                        page.add_style_tag(content=f'html {{width:{_A4[0]}px!important}}')
-                        page.evaluate('document.fonts.ready')
-                        print_dom = page.evaluate(_DOM, 1.0)
-                        print_dom.update(source_url=final_url, licence=licence,
-                                         layout='continuous print DOM; pagination may differ', a4_css=list(_A4))
-                        _write(print_dom_path, print_dom)
-                        page.pdf(path=str(pdf_path), format='A4', print_background=True,
-                                 margin=dict(top='0', right='0', bottom='0', left='0'),
-                                 prefer_css_page_size=False, display_header_footer=False)
-                    dom_path = work / 'dom.json'
-                    _write(dom_path, dom)
-                    receipt = dict(schema='web-render-v1', page_id=page_id, url=url, fetched_at=fetched_at,
-                                   final_url=final_url, status=status, title=title, lang=lang,
-                                   licence=licence, source=spec.get('source'), api_url=spec.get('api_url'),
-                                   viewport=list(viewport), scale=scale, user_agent=page.evaluate('navigator.userAgent'),
-                                   render_url=page.url,
-                                   chromium_version=browser.version, fonts=dom['fonts'],
-                                   computed_font_families=dom['computed_font_families'],
-                                   sha256=dict(html=_sha(html_path), pdf=_sha(pdf_path) if pdf_path else None,
-                                               png=_sha(png_path) if png_path else None,
-                                               dom=_sha(dom_path), print_dom=_sha(print_dom_path) if print_dom_path else None,
-                                               rendered_html=_sha(work / 'rendered.html')),
-                                   files=dict(html='source.html', pdf='page.pdf' if pdf_path else None,
-                                              png='page.png' if png_path else None, dom='dom.json',
-                                              print_dom='print_dom.json' if print_dom_path else None,
-                                              rendered_html='rendered.html'),
-                                   determinism=dict(animations=False, javascript=False, service_workers=False,
-                                                    fonts_awaited=True, block_media=block_media,
-                                                    lazy_images='blocked' if block_media else 'eager', locale='el-GR', timezone='UTC'),
-                                   blocked_requests=blocked, dom_warnings=dom['warnings'],
-                                   api_final_url=spec.get('api_final_url'),
-                                   label_limits='DOM fragments exclude generated content, hidden nodes, text-transform and non-LTR text')
-                    receipt_path = work / 'receipt.json'
-                    if 'source_json' in spec:
-                        receipt['sha256']['source_json'] = _sha(work / 'source.json')
-                        receipt['files']['source_json'] = 'source.json'
-                    _write(receipt_path, receipt)
-                    records.append(PageRecord(page_id, str(html_path), str(pdf_path) if pdf_path else None,
-                                              str(png_path) if png_path else None, str(dom_path),
-                                              str(print_dom_path) if print_dom_path else None, str(receipt_path), receipt))
-                except Error as error:
-                    raise RuntimeError('page rendering failed: ' + str(error).splitlines()[0]) from error
-                finally:
-                    context.close()
-        finally:
-            browser.close()
-    return records
+                            if remote:
+                                await _prepare_navigation(client, context, url, timeout)
+                            response = await page.goto(url, wait_until='load', timeout=timeout * 1000)
+                            status, final_url = response.status if response else None, page.url
+                            state.update(final_url=final_url, http_status=status)
+                            if remote:
+                                if status is None or not 200 <= status < 300:
+                                    raise ValueError('capture HTTP status ' + str(status))
+                                raw_html = await response.body()
+                                if len(raw_html) > client.limit:
+                                    raise ValueError('web response exceeds byte limit: ' + final_url)
+                            else:
+                                raw_html = local.read_bytes()
+                        state.update(final_url=final_url, http_status=status, bytes=len(raw_html))
+                        await page.add_style_tag(content=_FREEZE)
+                        await page.evaluate("""(blocked) => {
+                            document.querySelectorAll('video,audio').forEach(e=>e.pause());
+                            window.__webRenderImagesReady = blocked;
+                            if(!blocked) {
+                                document.querySelectorAll('img').forEach(e=>e.loading='eager');
+                                Promise.all(Array.from(document.images).map(i=>i.decode().catch(()=>{})))
+                                    .then(()=>{window.__webRenderImagesReady=true;});
+                            }
+                            window.scrollTo(0,0);
+                        }""", block_media)
+                        await _await_fonts(page, timeout)
+                        if not block_media:
+                            handle = await page.wait_for_function('window.__webRenderImagesReady === true', timeout=timeout * 1000)
+                            await handle.dispose()
+                        title = await page.title()
+                        lang = await page.evaluate('document.documentElement.lang')
+                        dom = await page.evaluate(_DOM, scale)
+                        dom.update(source_url=final_url, licence=licence)
+                        html_path = work / 'source.html'
+                        html_path.write_bytes(raw_html)
+                        (work / 'rendered.html').write_text(await page.content(), encoding='utf-8')
+                        if 'source_json' in spec:
+                            _write(work / 'source.json', spec['source_json'])
+                        png_path = work / 'page.png' if screenshot else None
+                        if png_path:
+                            await page.screenshot(path=str(png_path), full_page=True, animations='disabled',
+                                                  scale='device', timeout=timeout * 1000)
+                        pdf_path = work / 'page.pdf' if print_to_pdf else None
+                        print_dom_path = work / 'print_dom.json' if print_to_pdf else None
+                        if pdf_path:
+                            await page.emulate_media(media='print')
+                            await page.set_viewport_size({'width': math.ceil(_A4[0]), 'height': math.ceil(_A4[1])})
+                            # Match the continuous print layout's fractional A4 width. Fragmentation is audited separately.
+                            await page.add_style_tag(content=f'html {{width:{_A4[0]}px!important}}')
+                            await _await_fonts(page, timeout)
+                            print_dom = await page.evaluate(_DOM, 1.0)
+                            print_dom.update(source_url=final_url, licence=licence,
+                                             layout='continuous print DOM; pagination may differ', a4_css=list(_A4))
+                            _write(print_dom_path, print_dom)
+                            await page.pdf(path=str(pdf_path), format='A4', print_background=True,
+                                           margin=dict(top='0', right='0', bottom='0', left='0'),
+                                           prefer_css_page_size=False, display_header_footer=False)
+                        dom_path = work / 'dom.json'
+                        _write(dom_path, dom)
+                        for response, subresource in responses:
+                            resource = dict(url=response.url, status=response.status,
+                                            resource_type=response.request.resource_type, subresource=subresource, bytes=None)
+                            try:
+                                await response.finished()
+                                resource['bytes'] = (await response.request.sizes())['responseBodySize']
+                            except Error:
+                                network['unmeasured_responses'] += 1
+                            else:
+                                network['response_bytes'] += resource['bytes']
+                                if subresource:
+                                    network['subresource_bytes'] += resource['bytes']
+                            network['resources'].append(resource)
+                        state['bytes'] += network['subresource_bytes']
+                        receipt = dict(schema='web-render-v1', page_id=page_id, url=url, fetched_at=fetched_at,
+                                       final_url=final_url, status=status, capture_status='rendered', title=title, lang=lang,
+                                       licence=licence, source=spec.get('source'), api_url=spec.get('api_url'),
+                                       viewport=list(viewport), scale=scale, user_agent=await page.evaluate('navigator.userAgent'),
+                                       render_url=page.url, timeout=timeout, watchdog_seconds=2 * timeout,
+                                       elapsed_seconds=time.monotonic() - started, bytes=state['bytes'], network=network,
+                                       chromium_version=browser.version, fonts=dom['fonts'],
+                                       computed_font_families=dom['computed_font_families'],
+                                       sha256=dict(html=_sha(html_path), pdf=_sha(pdf_path) if pdf_path else None,
+                                                   png=_sha(png_path) if png_path else None,
+                                                   dom=_sha(dom_path), print_dom=_sha(print_dom_path) if print_dom_path else None,
+                                                   rendered_html=_sha(work / 'rendered.html')),
+                                       files=dict(html='source.html', pdf='page.pdf' if pdf_path else None,
+                                                  png='page.png' if png_path else None, dom='dom.json',
+                                                  print_dom='print_dom.json' if print_dom_path else None,
+                                                  rendered_html='rendered.html'),
+                                       determinism=dict(animations=False, javascript=False, service_workers=False,
+                                                        fonts_awaited=True, block_media=block_media,
+                                                        lazy_images='blocked' if block_media else 'eager', locale='el-GR', timezone='UTC'),
+                                       blocked_requests=blocked, dom_warnings=dom['warnings'],
+                                       api_final_url=spec.get('api_final_url'),
+                                       label_limits='DOM fragments exclude generated content, hidden nodes, text-transform and non-LTR text')
+                        receipt_path = work / 'receipt.json'
+                        if 'source_json' in spec:
+                            receipt['sha256']['source_json'] = _sha(work / 'source.json')
+                            receipt['files']['source_json'] = 'source.json'
+                        _write(receipt_path, receipt)
+                        return PageRecord(page_id, str(html_path), str(pdf_path) if pdf_path else None,
+                                          str(png_path) if png_path else None, str(dom_path),
+                                          str(print_dom_path) if print_dom_path else None, str(receipt_path), receipt)
+
+                    try:
+                        record = await asyncio.wait_for(capture(), timeout=2 * timeout)
+                        if time.monotonic() - started > 2 * timeout:
+                            raise asyncio.TimeoutError('per-page watchdog exceeded')
+                        progress_status = 'ok'
+                    except (asyncio.TimeoutError, Error, OSError, ValueError) as error:
+                        progress_status = 'timeout' if isinstance(error, (asyncio.TimeoutError, PlaywrightTimeout)) else 'error'
+                        failed += 1
+                        receipt = dict(schema='web-render-v1', page_id=page_id, url=url, fetched_at=fetched_at,
+                                       final_url=state['final_url'], status=progress_status, capture_status=progress_status,
+                                       http_status=state['http_status'], licence=licence, source=spec.get('source'),
+                                       timeout=timeout, watchdog_seconds=2 * timeout,
+                                       elapsed_seconds=time.monotonic() - started, bytes=state['bytes'], network=network,
+                                       blocked_requests=blocked,
+                                       error=str(error).splitlines()[0] if str(error) else 'per-page watchdog exceeded',
+                                       files=dict(html=None, pdf=None, png=None, dom=None, print_dom=None, rendered_html=None),
+                                       sha256={})
+                        receipt_path = work / 'receipt.json'
+                        _write(receipt_path, receipt)
+                        record = PageRecord(page_id, None, None, None, None, None, str(receipt_path), receipt)
+                    finally:
+                        if context is not None:
+                            # A stuck close must not keep an abandoned page holding up the wave.
+                            try:
+                                await asyncio.wait_for(context.close(), timeout=min(timeout, 1.0))
+                            except (asyncio.TimeoutError, Error):
+                                pass
+                    records.append(record)
+                    print(f"WEB_PAGE {index + 1}/{len(sources)} {progress_status} {url} {record.receipt['bytes']}", flush=True)
+            finally:
+                try:
+                    await asyncio.wait_for(browser.close(), timeout=10)
+                except (asyncio.TimeoutError, Error):
+                    pass
+        print(f'WEB_WAVE_DONE pages={len(records)} failed={failed}', flush=True)
+        return records
+
+    return asyncio.run(render())
 
 
 def records_from_dom(png: PathLike, dom_lines: PathLike | Mapping[str, object] | Sequence[Record], *,
@@ -432,6 +536,10 @@ def page_records(directory: PathLike) -> Record:
     for receipt_path in receipts:
         receipt = json.loads(receipt_path.read_text())
         work = receipt_path.parent
+        if receipt.get('capture_status') in ('timeout', 'error'):
+            summary.append(dict(page_id=receipt['page_id'], status=receipt['status'],
+                                error=receipt['error'], dom_records=0, pdf_records=0, agreement=None))
+            continue
         for kind, name in receipt['files'].items():
             if name:
                 target = (work / name).resolve()

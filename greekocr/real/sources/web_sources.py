@@ -42,7 +42,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class _PoliteHTTP:
-    """All requests, including redirects/assets, pass the same per-origin gate."""
+    """Discovery requests and renderer navigations share robots and rate state."""
     def __init__(self, interval: float = 1.0, timeout: float = 30.0,
                  user_agent: str = USER_AGENT, limit: int = 16_000_000) -> None:
         import math
@@ -73,31 +73,38 @@ class _PoliteHTTP:
                 raise ValueError('web response exceeds byte limit: ' + url)
             return dict(url=url, status=response.code, headers=dict(response.headers), body=body)
 
+    @staticmethod
+    def _origin(url: str) -> str:
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme not in ('http', 'https') or not parsed.netloc or parsed.username:
+            raise ValueError('only credential-free HTTP(S) source URLs are supported')
+        return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, '', '', ''))
+
+    def _cache_robots(self, origin: str, robots: Record) -> None:
+        parser = urllib.robotparser.RobotFileParser(origin + '/robots.txt')
+        if robots['status'] in (404, 410):
+            parser.parse([])
+        elif robots['status'] == 200:
+            parser.parse(robots['body'].decode('utf-8', errors='replace').splitlines())
+        else:
+            raise ValueError('robots unavailable; refusing capture: ' + origin)
+        self._robots[origin] = parser
+
+    def _navigation_interval(self, url: str) -> float:
+        parser = self._robots[self._origin(url)]
+        if not parser.can_fetch(self.user_agent, url):
+            raise ValueError('robots disallows capture: ' + url)
+        delay = max(self.interval, parser.crawl_delay(self.user_agent) or 0)
+        rate = parser.request_rate(self.user_agent)
+        return max(delay, rate.seconds / rate.requests) if rate else delay
+
     def get(self, url: str) -> Record:
         for _ in range(10):
-            parsed = urllib.parse.urlsplit(url)
-            if parsed.scheme not in ('http', 'https') or not parsed.netloc or parsed.username:
-                raise ValueError('only credential-free HTTP(S) source URLs are supported')
-            origin = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, '', '', ''))
+            origin = self._origin(url)
             if origin not in self._robots:
                 self._pace(origin)
-                robots = self._request(origin + '/robots.txt')
-                parser = urllib.robotparser.RobotFileParser(origin + '/robots.txt')
-                if robots['status'] in (404, 410):
-                    parser.parse([])
-                elif robots['status'] == 200:
-                    parser.parse(robots['body'].decode('utf-8', errors='replace').splitlines())
-                else:
-                    raise ValueError('robots unavailable; refusing capture: ' + origin)
-                self._robots[origin] = parser
-            parser = self._robots[origin]
-            if not parser.can_fetch(self.user_agent, url):
-                raise ValueError('robots disallows capture: ' + url)
-            delay = max(self.interval, parser.crawl_delay(self.user_agent) or 0)
-            rate = parser.request_rate(self.user_agent)
-            if rate:
-                delay = max(delay, rate.seconds / rate.requests)
-            self._pace(origin, delay)
+                self._cache_robots(origin, self._request(origin + '/robots.txt'))
+            self._pace(origin, self._navigation_interval(url))
             result = self._request(url)
             location = next((v for k, v in result['headers'].items() if k.lower() == 'location'), None)
             if result['status'] in (301, 302, 303, 307, 308) and location:

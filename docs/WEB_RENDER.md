@@ -50,9 +50,18 @@ including source seeds. Multiple named sources are visited in round-robin order,
 so their seed pages precede discovered article links. Random Wikipedia seeds can
 resolve to the same article; captures are not deduplicated automatically.
 
-`--interval` controls the per-origin rate (at least one second) and `--timeout`
-sets request/navigation timeouts; rich pages may need longer navigation timeouts
-because assets are fetched sequentially through the polite gate.
+`--interval` controls the per-origin rate for top-level page navigations (at least
+one second). Chromium fetches stylesheets, fonts and other allowed subresources
+directly. `--timeout` bounds navigation and each font/image readiness wait. A
+wall-clock watchdog abandons a page after `2 * timeout`, including its robots/rate
+gate and PDF generation, writes a `status="timeout"` receipt and continues the
+wave. Page errors also receive failure receipts. Context cleanup after abandonment
+has a separate bound of at most one second.
+
+Each page prints `WEB_PAGE n/N status url bytes` to stdout; the wave ends with
+`WEB_WAVE_DONE pages=n failed=n`. Both are flushed immediately. The CLI then emits
+its JSON result, so consumers should read the progress lines before parsing that
+JSON. Progress bytes count source HTML bytes plus measured subresource body bytes.
 
 ## Capture artifacts and receipts
 
@@ -79,6 +88,15 @@ every resolved glyph font. File and generated HTML inputs have no HTTP status;
 HTTP inputs preserve the final response status. For Mastodon-generated pages,
 the status refers to the JSON API acquisition, and `api_url` / `api_final_url`
 distinguish that response from the post's logical provenance URL.
+
+The `network` receipt field counts Chromium response events and subresources and
+records encoded response-body bytes from Chromium's `request.sizes()`. Redirect
+responses and repeated requests are counted individually. Byte sizes that Chromium
+cannot supply remain `null` and increment `unmeasured_responses`; no subresource
+bodies are fetched through the polite client. Failure receipts retain available
+counts, an error, timing and `capture_status`, with all `files` entries set to
+`null`; any partial files are not label artifacts. `web records` reports those
+failed pages with zero label records.
 
 `greekocr web records DIR` verifies every captured artifact checksum before
 extracting labels. It writes `dom_records.jsonl`, PDF page rasters/crops,
@@ -132,8 +150,9 @@ workers, then awaits `document.fonts.ready`. Consequently script-only content is
 not initialized. Default image/media blocking removes network requests for those
 resources; allowing media forces lazy images eager and awaits decoding. Layout
 is exact for the resulting captured scene, which may differ from a fully loaded
-interactive website. External stylesheets/fonts can be blocked by robots or fail;
-blocked requests and reasons remain in the receipt. Raster determinism requires
+interactive website. External stylesheets/fonts are fetched by Chromium and can
+fail; offline inputs block remote assets. Blocked requests and reasons remain in
+the receipt. Raster determinism requires
 the same HTML/assets, Chromium build, fonts and operating system. PDF timestamps
 and receipt fetch times are not asserted byte deterministic.
 
@@ -161,13 +180,18 @@ the post URL, and converts post HTML into escaped inert text with paragraph/line
 breaks. That generated layout is an exact rendering of the saved post JSON; it
 does not reproduce the originating site's timeline appearance.
 
-All HTTP(S) navigation, assets, discovery and redirects use the same explicit
-per-origin transport. It fetches robots.txt first, respects disallow,
-crawl-delay/request-rate and waits at least one second between requests to each
-origin. Missing robots (404/410) permits requests; inaccessible/other-error robots
-fails closed. Redirect destinations are checked before retrieval. Responses have
-timeouts, a byte limit and a redirect bound. Local HTML/recorded generated inputs
-never fetch remote assets, and `offline=True` refuses remote inputs.
+Before each HTTP(S) `goto`, the renderer checks robots for that page URL and waits
+on the client's shared per-origin rate state. Robots are cached by origin, with
+disallow, crawl-delay/request-rate respected. Missing robots (404/410) permits
+requests; inaccessible/other-error robots fails closed. Robots retrieval uses
+Playwright's bounded asynchronous request API before navigation, sharing cached
+policy and pacing state with discovery. The document, browser-followed redirects
+and subresources are fetched directly by Chromium; subresource origins/paths do
+not receive robots or rate checks. Route callbacks only continue or abort requests.
+Source discovery retains the polite HTTP transport, including its robots checks
+on redirects, timeouts, byte limit and redirect bound. Local HTML/recorded
+generated inputs never fetch remote assets, and `offline=True` refuses remote
+inputs without recorded HTML.
 
 Licence tags are source hints supplied to receipts, not a rights determination.
 Wikipedia/Wikisource attribution, revision and work-specific underlying rights
@@ -186,6 +210,12 @@ nodes, scaled geometry, receipt hashes, embedded PDF font streams, >=95% NFC lin
 agreement in both directions, and box/PNG determinism across two renders. They
 skip only when Playwright/Chromium is absent or the environment prevents launch;
 rendering/extraction failures after a successful launch fail the tests.
+The launch probe uses a 10-second browser timeout inside a subprocess capped at
+15 seconds, so a stuck driver also skips cleanly. Browser fixture setup and every
+browser test have a 60-second hard cap. Fixtures use `file://` pages and system
+fonts. Recorded browser-event tests exercise direct resource routing, response
+counts/bytes and continuation after navigation, font, evaluation and PDF stalls
+without launching Chromium.
 
 Source discovery, robots/redirect/rate behavior, direct DOM records, checksum
 refusal, degradation and failed-label handling have independent offline tests.
