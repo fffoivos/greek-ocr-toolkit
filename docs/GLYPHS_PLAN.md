@@ -105,9 +105,9 @@ detector-dependent evaluator and are superseded.
 
 ## Capitals (owner 8 Oct 16:45: be careful with them) — measured, scripts/glyphs/eval/capitals_eval.py, seed 81
 Rendered lines opening with a speaker-style name in capitals ('ΠΕΤΡΙΔΗΣ. …') and all-capitals lines (120 lines,
-2,057 capitals): baselines unaffected (median error 0.05 / 0.04 x-heights); capitals called intact 75 %, merged 17 %
-— of which 312 of 354 are visibly touching a neighbour in the scan (serifs), so ≈ 2 % of capitals are wrongly merged —
-split in two 4.5 %, broken 3 %. A capital-sized width reference was tried and reverted: it moved capitals < 1 % and
+2,057 capitals; current code): baselines unaffected (median error 0.05 / 0.04 x-heights); capitals called intact
+74 %, merged 18 % — of which 318 of 367 visibly touch a neighbour in the scan (serifs), so ≈ 2.4 % of capitals are
+wrongly merged — split in two 4.8 %, broken 3 %. A capital-sized width reference was tried and reverted: it moved capitals < 1 % and
 cost one-box letters on lowercase lines (tall lowercase δ, λ, θ share the capital shape test).
 
 ## Known open problems
