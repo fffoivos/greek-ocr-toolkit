@@ -145,7 +145,7 @@ def preservation_census(image, result):
 def test_v2_band_and_diacritic_ink_preservation_on_every_original(path):
     with Image.open(path) as im:
         image = im.convert('L')
-    result = refine_line(image, (0, 0, *image.size))
+    result = refine_line(image, (0, 0, *image.size), policy='v2')
     source, output, band, valid, counts = preservation_census(image, result)
     (band_old, band_new), (marks_old, marks_new) = counts
     assert band_old > 0
@@ -155,7 +155,8 @@ def test_v2_band_and_diacritic_ink_preservation_on_every_original(path):
     assert np.all(valid[band])
     assert np.array_equal(source[band], output[band])
     diag = result.diagnostics
-    assert diag.policy == GEOMETRY_POLICY == 'o4d-local-line-geometry-v2'
+    assert diag.policy == 'o4d-local-line-geometry-v2'
+    assert GEOMETRY_POLICY == 'o4d-local-line-geometry-v3'
     assert (diag.band_ink_original, diag.band_ink_refined) == (band_old, band_new)
     assert (diag.diacritic_ink_original, diag.diacritic_ink_refined) == (marks_old, marks_new)
     assert diag.band_ink_retained_fraction == diag.diacritic_ink_retained_fraction == 1.0
@@ -181,7 +182,7 @@ def test_v2_selects_nearest_baseline_even_with_stronger_neighbour_and_keeps_stac
     # Both tracks have body centres inside this tall layer box. Ink support
     # favours the neighbour, but its baseline is farther from the box centre.
     box = (0, 30, 420, 116)
-    result = refine_line(image, box, pad=30)
+    result = refine_line(image, box, pad=30, policy='v2')
     clusters = result.diagnostics.baseline_clusters
     assert len(clusters) == 2
     target = clusters[result.diagnostics.selected_cluster_index]
@@ -209,7 +210,7 @@ def test_v2_keeps_overlapping_neighbour_components_but_masks_only_outside_cluste
         # even though their centres are assigned to that upper baseline.
         draw.rectangle((x, 12, x+10, 31), fill=20)
         draw.rectangle((x, 112, x+10, 131), fill=30)
-    result = refine_line(image, (0, 35, 420, 80), pad=80)
+    result = refine_line(image, (0, 35, 420, 80), pad=80, policy='v2')
     height = result.diagnostics.x_height_px
     kept = {c.id for c in result.kept_components}
     for c in ink_components(image):

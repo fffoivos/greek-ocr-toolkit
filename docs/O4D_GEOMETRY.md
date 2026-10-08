@@ -1,16 +1,30 @@
-# O4d G1 v2: ink-preserving line geometry
+# O4d G1 v3: reference-free crop evaluation
 
-Policy: `o4d-local-line-geometry-v2`. V2 changes the opt-in geometry path while
-keeping its existing function signatures and dataclass constructor arguments.
-New diagnostic fields have defaults. The CLI refinement receipt uses the same
-v2 policy identifier.
+Default policy: `o4d-local-line-geometry-v3`. Use `refine_line(..., policy='v3')`
+or `greekocr geometry refine --policy v3`. V1 and v2 remain selectable for
+comparison; added diagnostic fields have defaults.
 
-The coordinator's 8 October 2026 measurement in `O4D_G1_measure_v1.json` recorded
-400 real parliament lines: mean CER 0.106019 → 0.136372, median 0.041667 →
-0.082363, exact matches 100 → 27, with 272 worsened and 67 improved. V2 addresses
-the observed loss of diacritics, selection of intrusive neighbouring ink and
-loss of source contrast. The supplied four `_old`/`_new` pairs are preserved
-unchanged; `_new` denotes historical v1 output throughout.
+The owner's 8 October 14:05 visual review of `O4D_G1_measure_v1.json` and
+`O4D_G1_measure_v2.json` found that “attempt 1 is consistently better than the
+original line”. The earlier exact-match adoption gate was invalid: the PDF text
+layer is another OCR output, **never a reference**. Matching its mistakes cannot
+establish crop or recognition quality. Historical CER/exact numbers measure
+agreement with that OCR only; they support no accuracy ranking or rejection of
+G1. They remain unchanged for audit. The four `_old`/`_new` pairs are also
+unchanged; `_new` denotes historical v1 output, not a page raster or human gold.
+
+V3 combines assigned-neighbour masking with v2's component-overlap band and
+detached-mark protection, nearest-cluster target and integer row shifts. The
+explicit keep rule takes precedence when a neighbour assignment conflicts with
+the band: every overlapping component is kept, and small marks over kept body
+ink are always kept. Unconditional cluster masking erased real ink in
+`line33_small` and `line42_large` during development. The supplied v2 already
+implemented this protected-neighbour combination, so **v2 and v3 produce the
+same rasters on the 48 supplied originals**. The policy bump does not establish
+an additional visual or reader accuracy improvement. V1 reproduces its original
+0.55-height clustering, support-based target and component-only stencil; an
+independent pre-edit replay receipt binds all 48 v1/v2 crop hashes and component
+assignments in `tests/data/geometry_policy_replay.json`.
 
 `greekocr.real.geometry` adds an opt-in CPU geometry path for OCR text layers
 on bound scans. This changes the behavior of the **new scan profile only**.
@@ -50,7 +64,7 @@ box when comparing admission profiles.
    seeded RANSAC search (160 trials per cluster, at most four clusters) and Huber
    reweighting. Body support requires height at least 0.45 x-height, sufficient
    area, at least three components and 8% of the body's component count. Inlier
-   tolerance is **0.35 body height** in v2 (formerly 0.55). Tracks need separation of 0.90 x-height on at least
+   tolerance is **0.35 body height** in v2/v3 (0.55 in selectable v1). Tracks need separation of 0.90 x-height on at least
    90% of their supporting centres. Limit quadratic bending to prevent a curve
    connecting outliers from two lines. Long rules and tall gutter strokes do not
    provide baseline support. Assign accents and other small components to the
@@ -98,8 +112,8 @@ The ink-preservation census counts grayscale values **<220** independently of
 component labels. Compare the original crop's pixels in the continuous baseline
 band to exactly the same source positions in the strip, using the inverse
 integer-column shift. The diacritic zone is the part of that band above
-`baseline − body_height`. Required retained fractions are ≥0.97 in the band and
-≥0.95 in the diacritic zone. Diagnostics record original/refined counts and both
+`baseline − body_height`. V3 requires ≥0.97 retention separately in the diacritic
+zone and the body zone (the rest of the band). Diagnostics record original/refined counts and both
 fractions (1.0 when a zone has no original ink), along with numeric band limits.
 Tests additionally require every in-band source intensity to be bit-identical
 after rectification, including pixels too small/light to count as components.
@@ -184,7 +198,13 @@ directory. Split labels remain unassigned; all labels remain provisional
 `silver_ocr_layer` / `unadjudicated`. The CLI has no PDF acquisition, OCR reader,
 network, GPU or factory-import side effects.
 
-## Reproducible reader measurement
+## Historical text-layer agreement replay (diagnostic only)
+
+Prefer `geometry evaluate` below. The older `geometry measure` API remains for
+reproducing historical records; its receipts now explicitly carry
+`diagnostic_only=true` and state that the text layer is another OCR, never a
+reference or adoption gate. Its CER/exact fields must not be interpreted as
+recognition accuracy.
 
 `greekocr.real.geometry_measure.measure_geometry(lines, reader, *, out=None,
 pad=16)` accepts a JSONL path or a sequence of rows and a callable
@@ -301,15 +321,124 @@ CLI readback, retained rejects and refusal to overwrite prior output.
   training import, production extraction or replacement of the existing gate is
   performed. Rejected and dropped evidence remains in the returned receipts.
 
-## Real-page measurement (8 Oct 2026, 400 parliament lines, CLLG readings scored against the text layer)
+## Historical real-page agreement (8 Oct 2026, 400 lines; text layer is another OCR)
 
-| version | exact (400) | exact on 100 silver | median CER | mean CER | improved / worsened |
+| version | OCR-layer matches (400) | OCR-layer matches on 100 silver | median OCR-layer CER | mean OCR-layer CER | lower / higher OCR-layer CER |
 | --- | --- | --- | --- | --- | --- |
 | text-layer crops (baseline) | 100 | 100 | 0.042 | 0.106 | |
 | G1 v1 | 27 | 20 | 0.082 | 0.136 | 67 / 272 |
 | G1 v2 | 98 | 76 | 0.039 | 0.129 | 129 / 115 |
 
-Gate (set before measuring): exact ≥ 100 and improved > worsened. v2 passes the second, fails the first (and regresses 24 silver lines),
-so G1 is NOT adopted as a replacement extraction. Use: `refine_line` diagnostics (curl, baselines, clipping, ink checks) as record features
-for weighting; the segmentation arm moves to G2 (Kraken baseline segmentation), which image-only sources (Anemi) need regardless.
-Receipts: docs/O4D_G1_measure_v1.json, docs/O4D_G1_measure_v2.json.
+The former gate (exact ≥100 and lower-CER count > higher-CER count) is withdrawn.
+Its conclusion that G1 should be rejected does not follow from OCR-to-OCR
+agreement. G2 segmentation and G3 page dewarp remain separate arms; these
+historical agreement numbers do not decide between them.
+
+## Reference-free pixel signals
+
+`crop_quality(original_crop, refined_crop, diagnostics)` accepts Pillow rasters
+and `line.diagnostics`, its serialized dictionary or `line.receipt()`. Source
+box, baseline curve, strip horizontal origin, strip baseline row and rectification
+status bind corresponding pixels. Both crops must use the same pixel resolution.
+Only their shared page-space x-range contributes to retention/removal; recovered
+pixels outside that range cannot conceal losses. Cached ink counts and text are
+not used. The evaluator uses the v3 target band for **all** policies while mapping
+pixels through each policy's own row shifts. Changing the selected line cannot
+change the retention measurement zone.
+
+| Signal | Definition and direction |
+| --- | --- |
+| `diacritic_ink_retained` | Refined/original count of pixels <220 in `[baseline − 1.9 body, baseline − body)`. Higher is better; no original ink gives 1.0, with counts retained. This is an accent-zone proxy, not mark recognition. |
+| `body_ink_retained` | Same count ratio in `[baseline − body, baseline + 0.6 body]`. Higher is better. |
+| `neighbour_ink_removed` | Fraction of original dark pixels outside the line band that are no longer dark at corresponding source positions. No outside-band ink gives null. Outside-band ink can also be noise or a rule; this is a removal proxy. |
+| `clipped_left`, `clipped_right` | Any dark pixel touching the actual output strip's first/last column. This flags possible clipping, not proof of a missing glyph. |
+| `curl_residual_px` | Peak-to-peak variation of a fresh robust body-bottom baseline fit to output pixels over the shared width, selecting the track nearest the expected mapped target baseline. Lower is better; unsupported fits give null. This measures output ink, not a fabricated zero from the applied transform. |
+| `contrast_delta` | Refined minus original ink/paper contrast: `(95th-percentile gray − mean dark gray)/255`, floored at zero, over the shared columns. Higher generally indicates more contrast. |
+| `blur_delta` | Refined minus original Laplacian variance on grayscale pixels over shared columns. Higher means sharper. Ink density, padding and neighbour removal affect this proxy, so it does not independently prove preserved sharpness. |
+| `reader_confidence` | Optional caller hook: mean per-character natural log probability. Larger (closer to zero) is more confident. Missing confidence gives null. |
+| `inter_reader_agreement` | Optional caller hook: CER between independent reader outputs on the same crop. The evaluator uses symmetric NFD codepoint edit distance / max(lengths, 1); **zero means agreement**, lower is better. Whitespace is preserved. Neither reader is a reference. |
+
+Supply reader hooks in a diagnostics mapping. Pixel-only calls leave both hooks
+null. Counts, threshold, original/refined appearance values and the shared x-range
+are included. Confidence and agreement are evidence for comparison, not human
+correctness: independent readers can share errors and differently calibrated
+readers' confidence scales are not interchangeable.
+
+## Local reader confidence protocol
+
+`r2_cllg_worker.py --confidence` returns one object per crop: `text`,
+`character_confidences`, `mean_confidence`, `min_confidence` and
+`mean_log_probability`. These come directly from `records[0].prediction` and
+`records[0].confidences`; probabilities are not invented from text agreement.
+Empty confidence sequences give null summaries. Mean log probability averages
+the natural logs of individual probabilities, not the log of their arithmetic
+mean; exact zeros are floored at 1e-300 for finite JSON. Unicode output is unchanged.
+`--serve --confidence` uses the same newline protocol; `--describe` keeps the
+model binding unchanged. Plain one-shot and serving modes retain the exact
+string-list JSON bytes and do not access confidence records.
+
+Use `load_cllg_worker(..., confidence=True)` for structured `read`/`read_batch`
+results; the default remains string results. Close the reader after use. Toolkit
+vendor changes and prior/current hashes are recorded in `T6_VENDOR_UPDATE.json`
+and the origins inventory. Tests mock Kraken prediction records and the worker
+protocol; no actual CLLG model/runtime is qualified here.
+
+## Reference-free evaluator and blind comparison
+
+```sh
+.venv/bin/greekocr geometry evaluate --records lines.jsonl --page-images pages --policies original,v1,v2,v3 --readers cllg,ours --reader-config readers.json --out evaluated
+```
+
+Rows require unique `line_id` and `bbox_pixel`. Supply `page_image_path` (relative
+to the records parent or `--page-images` directory), or `page_id` with a page
+directory (`page_id.png`) or JSON mapping of IDs to locally staged raster paths.
+An optional original `crop_path` resolves against the records parent and must
+have the box's dimensions; otherwise the original crop comes from the page.
+Paths in a page-images JSON map resolve against that map's parent. Original and
+page rasters must share pixel coordinates and resolution; no resizing is hidden.
+`text`, `layer` and `text_layer` are optional and retained only under the clearly
+labelled `text_layer_diagnostic`. They cannot affect any pixel or reader score.
+
+`readers.json` names staged local artifacts, with paths relative to that JSON:
+
+```json
+{"cllg":{"checkpoint":"ppocr_v6_tau090.safetensors","python":"venvs/cllg/bin/python","contract":"cllg_contract.json"},"ours":{"checkpoint":"ours.pt","codec":"codec/v1.json"}}
+```
+
+Alternatively use `CLLG_CHECKPOINT` / `CLLG_PYTHON` and
+`GREEKOCR_OURS_CHECKPOINT` / `GREEKOCR_OURS_CODEC`, or an explicit callable
+override `--reader cllg=staged_reader:read_crop`. A config entry can also specify
+`{"callable":"staged_reader:read_crop"}`. Only selected readers load, using local
+artifacts; built-in readers use CPU and a non-CPU `CLLG_ACCELERATOR` is rejected.
+No downloads or service reader defaults are introduced. The ours reader currently
+returns text only, so its confidence remains null. Callables may return text or
+the confidence object described above. Python callers pass
+`evaluate_geometry(..., readers={"cllg": cllg.read, "ours": ours.read}, out=...)`.
+
+The new output directory contains:
+
+- `crops/`: original and each requested policy raster for every successful line.
+- `receipt.json`: source/page/crop hashes, geometry, measured pixel signals, each
+  reader's raw text and confidence, pairwise CER, per-reader means and per-policy
+  means/counts. Reader and crop failures remain visible and are excluded from
+  corresponding means. Missing confidence/agreement is null, never zero.
+- `summary.csv` / `summary.md`: mean reader log confidence, mean inter-reader CER,
+  diacritic/body retention, neighbour removal and clipping rate per policy, with
+  sample/error counts. There is **no text-layer column**. Single-reader evaluation
+  leaves inter-reader agreement unavailable.
+- `ab_pairs.json` / `ab.html` / `ab_crops/`: per-line shuffled choices with opaque
+  A/B/C/D filenames and no policy or reader-result labels. The HTML lets a reviewer
+  download selections locally. `ab_mapping.json` separately maps choices to
+  policies. Do not disclose that mapping or the evaluation receipt to a blind
+  reviewer. Local per-line seeded shuffling is reproducible (`--blind-seed`) and
+  does not alter caller RNG state.
+
+V3's independent pixel checks cover all 44 fixtures and all four regression
+originals: body and diacritic retention are each at least 0.97 on every original
+(measured minima 1.0), and outside-band ink is removed on `line01_large` and
+`line06_large`. `O4D_G1_validation_v3.json` binds fixture hashes and these signals.
+The companion historical v1 crops remain evidence; they are not treated as pages.
+Determinism, historical raster replay, missing confidence, reader failures,
+blind mapping and CLI readback are tested offline. No new 400-line OCR result or
+automatic adoption claim is made; that requires locally staged pages/readers and
+review of the resulting reference-free evidence.

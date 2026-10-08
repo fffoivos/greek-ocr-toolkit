@@ -3,6 +3,7 @@
 --describe emits the loaded model binding instead. No model downloads, page
 segmentation, binarization, or Unicode normalization occur here.
 --serve keeps the model loaded for newline-delimited JSON requests.
+--confidence returns text, character probabilities and mean/min/log summaries.
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import hashlib
 import importlib.metadata
 import inspect
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -89,7 +91,7 @@ def load(checkpoint, expected_hash):
     return RecognitionTaskModel(nets), config, json.loads(json.dumps(binding))
 
 
-def recognize(model, config, paths):
+def recognize(model, config, paths, *, confidence=False):
     from PIL import Image
     from kraken.containers import BBoxLine, Segmentation
 
@@ -105,7 +107,18 @@ def recognize(model, config, paths):
             records = list(model.predict(image, segmentation, config))
         if len(records) != 1 or not isinstance(records[0].prediction, str):
             raise ValueError('Kraken must return exactly one string for each crop')
-        predictions.append(records[0].prediction)
+        if confidence:
+            probabilities = [float(value) for value in records[0].confidences]
+            if any(not math.isfinite(p) or not 0 <= p <= 1 for p in probabilities):
+                raise ValueError('Kraken character confidences must be finite probabilities in [0, 1]')
+            predictions.append(dict(text=records[0].prediction,
+                character_confidences=probabilities,
+                mean_confidence=sum(probabilities)/len(probabilities) if probabilities else None,
+                min_confidence=min(probabilities) if probabilities else None,
+                mean_log_probability=sum(math.log(max(p, 1e-300)) for p in probabilities)/len(probabilities)
+                    if probabilities else None))
+        else:
+            predictions.append(records[0].prediction)
     return predictions
 
 
@@ -116,6 +129,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--describe', action='store_true')
     mode.add_argument('--serve', action='store_true')
+    parser.add_argument('--confidence', action='store_true')
     args = parser.parse_args()
     # Imports and upstream diagnostics cannot contaminate the JSON protocol.
     with contextlib.redirect_stdout(sys.stderr):
@@ -124,13 +138,14 @@ def main():
         for line in sys.stdin:
             try:
                 with contextlib.redirect_stdout(sys.stderr):
-                    result = recognize(model, config, json.loads(line))
+                    result = recognize(model, config, json.loads(line), **({'confidence': True} if args.confidence else {}))
             except Exception as error:
                 result = {'error': str(error)}
             print(json.dumps(result, ensure_ascii=False, allow_nan=False), flush=True)
         return
     with contextlib.redirect_stdout(sys.stderr):
-        result = binding if args.describe else recognize(model, config, json.load(sys.stdin))
+        result = binding if args.describe else recognize(model, config, json.load(sys.stdin),
+            **({'confidence': True} if args.confidence else {}))
     print(json.dumps(result, ensure_ascii=False, allow_nan=False))
 
 

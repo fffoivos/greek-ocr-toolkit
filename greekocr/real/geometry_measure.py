@@ -1,4 +1,4 @@
-"""Reproducible old/new crop readings, with coordinator and strict CER scores."""
+"""Historical text-layer agreement replay; diagnostic only, never an accuracy gate."""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -24,7 +24,7 @@ __all__ = ['comparison_scores', 'summarize_measurements', 'measure_geometry']
 
 
 def comparison_scores(text: str, old: str, new: str) -> dict[str, Any]:
-    """Match the O4d coordinator's NFD SequenceMatcher score and trimmed exacts.
+    """Replay historical layer-agreement diagnostics, never reference accuracy.
 
     SequenceMatcher's opcode cost is not minimum Levenshtein distance. Both are
     reported, with whitespace left intact for CER and stripped only for exacts.
@@ -158,6 +158,7 @@ def measure_geometry(lines: PathLike | Sequence[Mapping[str, Any]], reader: Crop
         receipt = dict(schema='o4d-geometry-measure-v1', geometry_policy=GEOMETRY_POLICY,
                        input_sha256=file_sha256(manifest) if manifest is not None else None,
                        reader=name, pad=pad,
+                       diagnostic_only=True, text_layer_status='another OCR; never a reference or adoption gate',
                        scoring=dict(cer='NFD SequenceMatcher opcode cost / reference length; autojunk=False',
                                     levenshtein_cer='NFD minimum unit-cost codepoint edit distance / reference length',
                                     exact='NFD equality after stripping leading/trailing whitespace',

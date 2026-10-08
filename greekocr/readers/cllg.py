@@ -1,6 +1,6 @@
 """Published CLLG teacher and isolated persistent Kraken worker."""
 from pathlib import Path
-from greekocr.types import PathLike, Record, Reader, BatchReader
+from greekocr.types import PathLike, Record, Reader, BatchReader, ConfidenceBatchReader
 __all__ = ['load_cllg', 'load_cllg_worker', 'build_cllg_contract']
 
 def load_cllg(spec: Record) -> Reader:
@@ -10,9 +10,11 @@ def load_cllg(spec: Record) -> Reader:
 
 
 def load_cllg_worker(checkpoint: PathLike, contract: Record | None = None, *,
-                     python: PathLike | None = None, timeout: float = 300) -> BatchReader:
+                     python: PathLike | None = None, timeout: float = 300,
+                     confidence: bool = False) -> BatchReader | ConfidenceBatchReader:
     from greekocr._vendor.bench.e2_native import cllg_kraken
-    return cllg_kraken(checkpoint, contract, python=python, timeout=timeout)
+    return cllg_kraken(checkpoint, contract, python=python, timeout=timeout,
+                       **({'confidence': True} if confidence else {}))
 
 
 def build_cllg_contract(readme: PathLike, checkpoint: PathLike, out: PathLike) -> Record:

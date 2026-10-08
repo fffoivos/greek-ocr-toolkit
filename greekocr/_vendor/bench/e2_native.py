@@ -7,6 +7,7 @@ from __future__ import annotations
 import atexit
 import inspect
 import json
+import math
 import os
 from pathlib import Path
 import queue
@@ -31,7 +32,7 @@ def kraken_codec_order(codec):
     return sorted(entries,key=lambda e:(e['labels'],e['text']))
 
 
-def cllg_kraken(checkpoint, contract=None, *, python=None, timeout=300):
+def cllg_kraken(checkpoint, contract=None, *, python=None, timeout=300, confidence=False):
     """Run pinned Kraken in ~/venvs/cllg, isolated from the benchmark runtime.
 
     The worker loads the safetensors container with kraken.models, describes
@@ -89,7 +90,7 @@ def cllg_kraken(checkpoint, contract=None, *, python=None, timeout=300):
             # A file keeps upstream diagnostics from filling a stderr pipe.
             self._stderr = tempfile.TemporaryFile()
             try:
-                process = subprocess.Popen(command + ['--serve'], stdin=subprocess.PIPE,
+                process = subprocess.Popen(command + (['--confidence'] if confidence else []) + ['--serve'], stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE, stderr=self._stderr, text=True,
                     encoding='utf-8', bufsize=1)
             except FileNotFoundError as error:
@@ -135,10 +136,31 @@ def cllg_kraken(checkpoint, contract=None, *, python=None, timeout=300):
                 raise ValueError('CLLG Kraken worker returned invalid JSON') from error
             if isinstance(result, dict) and 'error' in result:
                 raise ValueError('CLLG Kraken worker failed: '+str(result['error']))
-            if (not isinstance(result, list) or len(result) != len(paths)
-                    or any(not isinstance(text, str) for text in result)):
+            if confidence:
+                if (not isinstance(result, list) or len(result) != len(paths)
+                        or any(not self._valid_confidence_record(record) for record in result)):
+                    raise ValueError('CLLG Kraken worker must return one text/confidence record per crop')
+            elif (not isinstance(result, list) or len(result) != len(paths)
+                  or any(not isinstance(text, str) for text in result)):
                 raise ValueError('CLLG Kraken worker must return one string per crop')
             return result
+
+        @staticmethod
+        def _valid_confidence_record(record):
+            if not isinstance(record, dict) or not isinstance(record.get('text'), str):
+                return False
+            for key in ('mean_confidence', 'min_confidence', 'mean_log_probability'):
+                if key not in record:
+                    return False
+                value = record[key]
+                if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
+                        or not math.isfinite(value) or value > (0 if key == 'mean_log_probability' else 1)
+                        or (key != 'mean_log_probability' and value < 0)):
+                    return False
+            probabilities = record.get('character_confidences')
+            return isinstance(probabilities, list) and all(
+                not isinstance(p, bool) and isinstance(p, (int, float)) and math.isfinite(p) and 0 <= p <= 1
+                for p in probabilities)
 
         def _diagnostics(self):
             self._stderr.seek(0, os.SEEK_END)

@@ -54,6 +54,167 @@ from greekocr.annotate import load_word_tags
 tags_or_none = load_word_tags("real")
 ```
 
+### `greekocr.annotate.font.FontEstimate`
+
+Predicted factory font id/style, uncalibrated distance/margin and model provenance.
+
+```python
+from greekocr.annotate.font import FontEstimate
+estimate = FontEstimate(None, None, None, None, None, False)
+```
+
+### `greekocr.annotate.font.FontEstimate.to_dict`
+
+`def to_dict(self) -> dict[str, Any]`
+
+Return a JSON-serializable prediction record.
+
+```python
+from greekocr.annotate.font import FontEstimate
+record = features.to_dict()
+```
+
+### `greekocr.annotate.font.font_style`
+
+`def font_style(font: str | None, styles: Mapping[str, str] | None=None) -> str | None`
+
+Map known factory font ids to shared styles; unidentified/real fonts stay unset.
+
+```python
+from greekocr.annotate.font import font_style
+style = font_style("GFSDidot_Classic")
+```
+
+### `greekocr.annotate.font.font_estimate`
+
+`def font_estimate(image: Image.Image | np.ndarray | PathLike, *, model: PathLike | Mapping[str, Any] | None=None) -> FontEstimate`
+
+Predict using an explicit local model; absent model/blank/outside support abstains.
+
+```python
+from greekocr.annotate.font import font_estimate
+estimate = font_estimate(image, model="font_model.json")
+```
+
+### `greekocr.annotate.font.train_font_classifier`
+
+`def train_font_classifier(shards: PathLike, out_model: PathLike, *, styles: Mapping[str, str] | None=None, max_lines: int | None=None) -> dict[str, Any]`
+
+Fit streaming font centroids from known synthetic fonts, entirely in numpy on CPU.
+
+```python
+from greekocr.annotate.font import train_font_classifier
+model = train_font_classifier("synthetic/train", "font_model.json")
+```
+
+### `greekocr.annotate.line_features.LineFeatures`
+
+JSON-ready measurements; definitions and missing-value rules in LINE_METADATA.md.
+
+```python
+from greekocr.annotate.line_features import LineFeatures
+features = LineFeatures(**measured_field_values)
+```
+
+### `greekocr.annotate.line_features.LineFeatures.to_dict`
+
+`def to_dict(self) -> dict[str, Any]`
+
+Return only built-in finite values, suitable for json.dumps(allow_nan=False).
+
+```python
+from greekocr.annotate.line_features import LineFeatures
+record = features.to_dict()
+```
+
+### `greekocr.annotate.line_features.load_lexicon`
+
+`def load_lexicon(lexicon: PathLike | Iterable[str]) -> frozenset[str]`
+
+Read UTF-8 words (one per line; # comments), folding accents, case and final sigma.
+
+```python
+from greekocr.annotate.line_features import load_lexicon
+words = load_lexicon("greek_words.txt")
+```
+
+### `greekocr.annotate.line_features.line_features`
+
+`def line_features(image: Image.Image | np.ndarray | PathLike, text: str | None=None, *, geometry: Any=None, lexicon: PathLike | Iterable[str] | None=None) -> LineFeatures`
+
+Measure a line at its native scale; optional geometry/Greek lexicon never changes pixels.
+
+```python
+from greekocr.annotate.line_features import line_features
+features = line_features(image, "ἅλφα", geometry=geometry_receipt)
+```
+
+### `greekocr.annotate.pipeline.annotate_records`
+
+`def annotate_records(records_jsonl: PathLike, out_jsonl: PathLike, *, catalogue: Any=None, lexicon: PathLike | Iterable[str] | None=None, font_model: PathLike | Mapping[str, Any] | None=None) -> dict[str, Any]`
+
+Stream records into a new atomic JSONL sidecar; preserve labels, provenance and admission.
+
+```python
+from greekocr.annotate.pipeline import annotate_records
+receipt = annotate_records("records.jsonl", "annotated.jsonl", lexicon="greek_words.txt")
+```
+
+### `greekocr.annotate.pipeline.distribution_report`
+
+`def distribution_report(out_jsonl: PathLike, *, catalogue: Any=None, lexicon: PathLike | Iterable[str] | None=None, font_model: PathLike | Mapping[str, Any] | None=None) -> str`
+
+Report all numeric quantiles/histograms and categorical counts per source, including unknowns.
+
+```python
+from greekocr.annotate.pipeline import distribution_report
+markdown = distribution_report("annotated.jsonl")
+```
+
+### `greekocr.annotate.sources.source_metadata`
+
+`def source_metadata(record: Mapping[str, Any], catalogue: Any=None) -> Record`
+
+Join by document identity; preserve unknown rights and distinguish fetch from publication years.
+
+```python
+from greekocr.annotate.sources import source_metadata
+metadata = source_metadata(line_record, document_catalogue)
+```
+
+### `greekocr.annotate.strata.stratum_key`
+
+`def stratum_key(record: Mapping[str, Any]) -> StratumKey`
+
+Return script/polytonic/document/year/contrast/ink/font axes with explicit unknown bins.
+
+```python
+from greekocr.annotate.strata import stratum_key
+key = stratum_key(annotated_record)
+```
+
+### `greekocr.annotate.strata.stratum_counts`
+
+`def stratum_counts(records: Iterable[Mapping[str, Any]]) -> dict[StratumKey, int]`
+
+Count existing supply only; missing strata are never fabricated.
+
+```python
+from greekocr.annotate.strata import stratum_counts
+counts = stratum_counts(annotated_records)
+```
+
+### `greekocr.annotate.strata.sampling_weights`
+
+`def sampling_weights(records: Iterable[Mapping[str, Any]], *, floor: float=0.0, floors: Mapping[StratumKey, float] | None=None, targets: Mapping[StratumKey, float] | None=None) -> list[float]`
+
+Return normalized per-record probabilities with guaranteed per-stratum mass floors.
+
+```python
+from greekocr.annotate.strata import sampling_weights
+probabilities = sampling_weights(annotated_records, floor=.01)
+```
+
 ### `greekocr.cli.main`
 
 `def main(argv: Sequence[str] | None=None) -> int`
@@ -287,7 +448,7 @@ reader = load_cllg({"checkpoint":"ppocr_v6_tau090.safetensors", "readme":"README
 
 ### `greekocr.readers.cllg.load_cllg_worker`
 
-`def load_cllg_worker(checkpoint: PathLike, contract: Record | None=None, *, python: PathLike | None=None, timeout: float=300) -> BatchReader`
+`def load_cllg_worker(checkpoint: PathLike, contract: Record | None=None, *, python: PathLike | None=None, timeout: float=300, confidence: bool=False) -> BatchReader | ConfidenceBatchReader`
 
 ```python
 from greekocr.readers.cllg import load_cllg_worker
@@ -488,13 +649,24 @@ boxes = split_multiline((10, 20, 800, 120), components)
 
 ### `greekocr.real.geometry.refine_line`
 
-`def refine_line(page_image: Image.Image, box: Box, *, pad: int=DEFAULT_PAD) -> LineCrop`
+`def refine_line(page_image: Image.Image, box: Box, *, pad: int=DEFAULT_PAD, policy: GeometryPolicy='v3') -> LineCrop`
 
-Select one baseline, fit glyph bottoms robustly and sample a curved ink strip.
+Rectify a local line; v1/v2 preserve historical crop behavior for comparison.
 
 ```python
 from greekocr.real.geometry import refine_line
 crop = refine_line(image, (10, 20, 800, 70), pad=16)
+```
+
+### `greekocr.real.geometry.crop_quality`
+
+`def crop_quality(original_crop: Image.Image, refined_crop: Image.Image, diagnostics: GeometryDiagnostics | Mapping[str, Any]) -> dict[str, Any]`
+
+Measure pixel-only crop signals using recorded page-to-strip geometry.
+
+```python
+from greekocr.real.geometry import crop_quality
+quality = crop_quality(original_crop, refined_crop, geometry_receipt)
 ```
 
 ### `greekocr.real.geometry.scan_admission`
@@ -521,7 +693,7 @@ missing = hyphen_at_line_end(crop, "ἀλήθεια λέξεις")
 
 ### `greekocr.real.geometry.refine_page_lines`
 
-`def refine_page_lines(pdf_page_image: Image.Image, text_layer_boxes: Sequence[TextLayerBox | Box | Mapping[str, Any]], *, pad: int=DEFAULT_PAD) -> list[LineCrop]`
+`def refine_page_lines(pdf_page_image: Image.Image, text_layer_boxes: Sequence[TextLayerBox | Box | Mapping[str, Any]], *, pad: int=DEFAULT_PAD, policy: GeometryPolicy='v3') -> list[LineCrop]`
 
 Refine pixel boxes in input order; split labels are withheld for caller assignment.
 
@@ -530,11 +702,33 @@ from greekocr.real.geometry import refine_page_lines
 crops = refine_page_lines(image, text_layer_boxes, pad=16)
 ```
 
+### `greekocr.real.geometry_evaluate.inter_reader_cer`
+
+`def inter_reader_cer(first: str, second: str) -> float`
+
+Symmetric NFD codepoint CER, distance / max(lengths, 1); zero is agreement.
+
+```python
+from greekocr.real.geometry_evaluate import inter_reader_cer
+cer = inter_reader_cer("ἅλφα", "άλφα")
+```
+
+### `greekocr.real.geometry_evaluate.evaluate_geometry`
+
+`def evaluate_geometry(records: PathLike | Sequence[Mapping[str, Any]], *, page_images: PathLike | Mapping[str, PathLike] | None=None, policies: Sequence[str]=POLICIES, readers: Mapping[str, EvaluationReader], out: PathLike, pad: int=DEFAULT_PAD, blind_seed: int=0) -> dict[str, Any]`
+
+Save every policy crop, pixel/reader evidence, summaries and a blind A/B page.
+
+```python
+from greekocr.real.geometry_evaluate import evaluate_geometry
+receipt = evaluate_geometry("records.jsonl", readers=reader_hooks, out="geometry-evaluation")
+```
+
 ### `greekocr.real.geometry_measure.comparison_scores`
 
 `def comparison_scores(text: str, old: str, new: str) -> dict[str, Any]`
 
-Match the O4d coordinator's NFD SequenceMatcher score and trimmed exacts.
+Replay historical layer-agreement diagnostics, never reference accuracy.
 
 ```python
 from greekocr.real.geometry_measure import comparison_scores
@@ -692,6 +886,103 @@ Ranked S2 staging, with original MD5-match flags and SHA-256 receipts.
 ```python
 from greekocr.real.sources.parliament import stage_parliament
 receipts = stage_parliament("/node/project", "parliament_s2")
+```
+
+### `greekocr.real.sources.web_render.PageRecord`
+
+Paths and capture receipt for one rendered input; paths are absolute.
+
+```python
+from greekocr.real.sources.web_render import PageRecord
+page = PageRecord(page_id, html_path, pdf_path, png_path, dom_path, print_dom_path, receipt_path, receipt)
+```
+
+### `greekocr.real.sources.web_render.render_pages`
+
+`def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathLike, *, viewport: tuple[int, int] | Mapping[str, int]=(794, 1123), scale: float=2.0, print_to_pdf: bool=True, screenshot: bool=True, block_media: bool=True, licences: Mapping[str, str] | None=None, offline: bool=False, interval: float=1.0, timeout: float=30.0, client: _PoliteHTTP | None=None) -> list[PageRecord]`
+
+Render paths/URLs/source mappings; network assets obey robots and rate gates.
+
+```python
+from greekocr.real.sources.web_render import render_pages
+pages = render_pages(["fixture.html"], "rendered", viewport=(794,1123), scale=2, offline=True)
+```
+
+### `greekocr.real.sources.web_render.records_from_dom`
+
+`def records_from_dom(png: PathLike, dom_lines: PathLike | Mapping[str, object] | Sequence[Record], *, receipt: Mapping[str, object] | None=None) -> list[Record]`
+
+Return per-text-node fragments in screenshot pixels, preserving raw text.
+
+```python
+from greekocr.real.sources.web_render import records_from_dom
+lines = records_from_dom("rendered/page.png", "rendered/dom.json")
+```
+
+### `greekocr.real.sources.web_render.records_from_pdf`
+
+`def records_from_pdf(pdf_path: PathLike, *, dom_lines: PathLike | Mapping[str, object] | None=None, receipt: Mapping[str, object] | None=None, out_dir: PathLike | None=None, iou_threshold: float=0.5) -> list[Record]`
+
+Use the vendored PDFium extractor and write an independent DOM agreement report.
+
+```python
+from greekocr.real.sources.web_render import records_from_pdf
+lines = records_from_pdf("rendered/page.pdf")
+```
+
+### `greekocr.real.sources.web_render.degrade_twins`
+
+`def degrade_twins(page_png: PathLike, labels: Sequence[Record], *, out_dir: PathLike | None=None, seed: int=0) -> Record`
+
+Call a vendored degradation adapter if present, else report unavailable (no fake twin).
+
+```python
+from greekocr.real.sources.web_render import degrade_twins
+result = degrade_twins("rendered/page.png", exact_line_records, seed=0)
+```
+
+### `greekocr.real.sources.web_render.page_records`
+
+`def page_records(directory: PathLike) -> Record`
+
+Verify capture hashes and extract all available screenshot/PDF records offline.
+
+```python
+from greekocr.real.sources.web_render import page_records
+summary = page_records("rendered")
+```
+
+### `greekocr.real.sources.web_sources.source_catalog`
+
+`def source_catalog() -> dict[str, Record]`
+
+Return seed metadata with conservative licence tags and >=1 second rates.
+
+```python
+from greekocr.real.sources.web_sources import source_catalog
+catalog = source_catalog()
+```
+
+### `greekocr.real.sources.web_sources.mastodon_post_html`
+
+`def mastodon_post_html(post: Record) -> str`
+
+Render recorded public JSON as inert post HTML, with author and source link.
+
+```python
+from greekocr.real.sources.web_sources import mastodon_post_html
+html = mastodon_post_html(recorded_public_post_json)
+```
+
+### `greekocr.real.sources.web_sources.source_pages`
+
+`def source_pages(sources: Sequence[str], max_pages: int=10, *, category: str | None=None, mastodon_instance: str='https://mastodon.social', client: _PoliteHTTP | None=None) -> Iterator[Record]`
+
+Yield bounded seeds/articles; discovery fetches only when iteration needs it.
+
+```python
+from greekocr.real.sources.web_sources import source_pages
+seeds = list(source_pages(["wikisource"], max_pages=1, category="Αρχαία ελληνική ποίηση"))
 ```
 
 ### `greekocr.score.strict_cer`
@@ -879,4 +1170,141 @@ checkpoint = verify_init("converted/donor_init.pt")
 ```python
 from greekocr.warmstart import qualify_parity
 receipt = qualify_parity(donor_spec, "converted/native_before_swap.pt", "100_crops.jsonl", "parity")
+```
+
+<!-- T7_VERIFY_API -->
+
+## Image readability and Greek readings
+
+Offline measurements: `image_checks`, `readability_profile`, `text_checks`. Judges require an explicit invocation and share a persistent call ledger; their costs and model identity are receipt-bound. See [VERIFY.md](VERIFY.md).
+
+### `greekocr.verify.images.ImageChecks`
+
+Line summaries. Units, sign conventions and provisional thresholds: docs/VERIFY.md.
+
+```python
+from greekocr.verify.images import ImageChecks
+checks = ImageChecks(**measured_image_values)
+```
+
+### `greekocr.verify.images.ImageChecks.to_dict`
+
+`def to_dict(self) -> dict`
+
+```python
+from greekocr.verify.images import ImageChecks
+record = features.to_dict()
+```
+
+### `greekocr.verify.images.Profile`
+
+Per-column functions; half-open segments and 16x64 quality, 1=good/0=bad.
+
+```python
+from greekocr.verify.images import Profile
+profile = Profile(**measured_profile_values)
+```
+
+### `greekocr.verify.images.Profile.to_dict`
+
+`def to_dict(self) -> dict[str, Any]`
+
+```python
+from greekocr.verify.images import Profile
+record = features.to_dict()
+```
+
+### `greekocr.verify.images.readability_profile`
+
+`def readability_profile(crop: Crop, *, threshold: float=0.55) -> Profile`
+
+Bounded analysis grid, native border checks, original-coordinate functions.
+
+```python
+from greekocr.verify.images import readability_profile
+profile = readability_profile("crop.png")
+```
+
+### `greekocr.verify.images.image_checks`
+
+`def image_checks(crop: Crop) -> ImageChecks`
+
+Return the scalar summaries of readability_profile, using the same analysis.
+
+```python
+from greekocr.verify.images import image_checks
+checks = image_checks("crop.png")
+```
+
+### `greekocr.verify.images.render_overlay`
+
+`def render_overlay(crop: Crop, profile: Profile) -> bytes`
+
+Return PNG bytes: raster, translucent 2-D defects and half-open red segments.
+
+```python
+from greekocr.verify.images import render_overlay
+png_bytes = render_overlay("crop.png", profile)
+```
+
+### `greekocr.verify.judges.vlm_annotate`
+
+`def vlm_annotate(crops: Iterable[str | Path], *, model: str='gpt-6-luna', schema: dict=READABILITY_SCHEMA, batch_size: int=4, cache: str | Path | None=None, budget: CallBudget | None=None, receipts_dir: str | Path='docs/verify/receipts') -> list[dict]`
+
+One-to-four independent numbered attachments per call; return JSON-ready rows.
+
+```python
+from greekocr.verify.judges import vlm_annotate
+rows = vlm_annotate(["crop.png"], cache="readability_cache.jsonl")
+```
+
+### `greekocr.verify.judges.judge_texts`
+
+`def judge_texts(texts: Iterable[str], *, model: str='gpt-6-luna', batch_size: int=4, cache: str | Path | None=None, budget: CallBudget | None=None, receipts_dir: str | Path='docs/verify/receipts') -> list[dict]`
+
+Cached batches of at most four readings; the job reserves <=200 text calls.
+
+```python
+from greekocr.verify.judges import judge_texts
+rows = judge_texts(["ἡ χώρα", "ὁ δήμος"], cache="text_cache.jsonl")
+```
+
+### `greekocr.verify.judges.llm_judge`
+
+`def llm_judge(text: str, *, model: str='gpt-6-luna', cache: str | Path | None=None, budget: CallBudget | None=None, receipts_dir: str | Path='docs/verify/receipts') -> dict`
+
+Return {good_greek, problems, receipt}; reusing a cache costs no invocation.
+
+```python
+from greekocr.verify.judges import llm_judge
+judgement = llm_judge("ἡ χώρα", cache="text_cache.jsonl")
+```
+
+### `greekocr.verify.text.TextChecks`
+
+All ratios/scores are 0..1; None means unavailable, not a negative result.
+
+```python
+from greekocr.verify.text import TextChecks
+checks = TextChecks(**measured_text_values)
+```
+
+### `greekocr.verify.text.TextChecks.to_dict`
+
+`def to_dict(self) -> dict`
+
+```python
+from greekocr.verify.text import TextChecks
+record = features.to_dict()
+```
+
+### `greekocr.verify.text.text_checks`
+
+`def text_checks(text: str) -> TextChecks`
+
+Check normalized graphemes, not NFC-vs-NFD representation differences.
+
+```python
+from greekocr.verify.text import text_checks
+checks = text_checks("ἡ χώρα")
 ```
