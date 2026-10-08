@@ -2,6 +2,9 @@
 
 Written 8 Oct 2026 14:30 Athens. Owner = the project owner; requirements quoted or paraphrased from the 8 Oct sessions.
 
+
+> **Main algorithm (owner 8 Oct 19:10): [PAGE_LINES_ALGORITHM.md](PAGE_LINES_ALGORITHM.md)** — page lines, their coordinates and neighbours, the four font lines along each curve, midpoint boundaries, generous extension. It governs `greekocr.glyphs.recut`.
+
 ## Foundational tools (skew and ink are both built on these)
 
 1. **Ink mask** (`glyphs.components.binarise`): which pixels are ink, plus its stability under a small threshold shift
