@@ -640,7 +640,7 @@ above_top, below_bottom = straighten_edges(glyphs.band.bottom, glyphs.band.xh, g
 
 ### `greekocr.glyphs.lines_api.separate_lines`
 
-`def separate_lines(crop: Image.Image | NDArray[Any], *, min_visible: float=0.5, tight: bool=True, margin: float=0.2, level_deg: float=0.3, **kw: Any) -> list[LineImage]`
+`def separate_lines(crop: Image.Image | NDArray[Any], *, min_visible: float=0.5, tight: bool=True, margin: float=0.2, level_deg: float=0.0, **kw: Any) -> list[LineImage]`
 
 One straightened image per text line. Recogniser-facing default: tight=True, margin=0.2 x-heights — the image is
 
@@ -658,13 +658,73 @@ verdict = readability(Image.open("crop.png"))
 
 ### `greekocr.glyphs.readability.readability`
 
-`def readability(crop: Image.Image, *, xh_prior: float | None=None, limits: dict[str, float]=LIMITS) -> Readability`
+`def readability(crop: Image.Image, *, xh_prior: float | None=None, limits: dict[str, float | None]=LIMITS) -> Readability`
 
 Verdict and reasons for one crop under a reader's limits (READER_LIMITS['cllg'] by default).
 
 ```python
 from greekocr.glyphs.readability import readability
 verdict = readability(Image.open("crop.png"), xh_prior=None, limits=READER_LIMITS["cllg"])
+```
+
+### `greekocr.glyphs.recut.Recut`
+
+```python
+from greekocr.glyphs.recut import Recut
+lines = recut_lines(page, (x0, y0, x1, y1))  # list[Recut]
+```
+
+### `greekocr.glyphs.recut.LineFit`
+
+A line fitted on its own text-layer box, in page coordinates.
+
+```python
+from greekocr.glyphs.recut import LineFit
+fits = fit_box(gray_page, (x0, y0, x1, y1))  # list[LineFit]
+```
+
+### `greekocr.glyphs.recut.LineFit.base_at`
+
+`def base_at(self, xs: NDArray[np.float64]) -> NDArray[np.float64]`
+
+Baseline at page columns xs; linear continuation with the end slopes beyond the fitted range.
+
+```python
+from greekocr.glyphs.recut import LineFit
+rows = fit.base_at(np.arange(x0, x1, dtype=float))
+```
+
+### `greekocr.glyphs.recut.fit_box`
+
+`def fit_box(gray: NDArray[np.float64], box: tuple[int, int, int, int], xh_prior: float | None=None) -> list[LineFit]`
+
+Fit the main line of every column segment of page[box]; page coordinates.
+
+```python
+from greekocr.glyphs.recut import fit_box
+fits = fit_box(gray_page, (x0, y0, x1, y1), xh_prior=None)
+```
+
+### `greekocr.glyphs.recut.recut_page`
+
+`def recut_page(page: Image.Image | NDArray[Any], boxes: list[tuple[int, int, int, int]], **kw: Any) -> list[list[Recut]]`
+
+Recut every line of a page collaboratively: every text-layer box is fitted first; each line is then bounded by
+
+```python
+from greekocr.glyphs.recut import recut_page
+per_box = recut_page(page, [(x0, y0, x1, y1), ...], mode="curve")
+```
+
+### `greekocr.glyphs.recut.recut_lines`
+
+`def recut_lines(page: Image.Image | NDArray[Any], box: tuple[int, int, int, int], *, mode: str='curve', margin: float=0.25, extend: bool=True, isolate: bool=True, xh_prior: float | None=None, pitch_xh: float | None=None, neighbours: list[LineFit] | None=None, page_xh: float | None=None) -> list[Recut]`
+
+One Recut per column segment's main line of the crop page[box] (x0, y0, x1, y1, exclusive ends).
+
+```python
+from greekocr.glyphs.recut import recut_lines
+lines = recut_lines(page, (x0, y0, x1, y1), mode="curve", margin=0.25)
 ```
 
 ### `greekocr.glyphs.report.document_of`

@@ -200,6 +200,12 @@ CALLS={
 'straighten_edges':'above_top, below_bottom = straighten_edges(glyphs.band.bottom, glyphs.band.xh, glyphs.height)',
 'Readability':'verdict = readability(Image.open("crop.png"))',
 'readability':'verdict = readability(Image.open("crop.png"), xh_prior=None, limits=READER_LIMITS["cllg"])',
+'Recut':'lines = recut_lines(page, (x0, y0, x1, y1))  # list[Recut]',
+'LineFit':'fits = fit_box(gray_page, (x0, y0, x1, y1))  # list[LineFit]',
+'fit_box':'fits = fit_box(gray_page, (x0, y0, x1, y1), xh_prior=None)',
+'recut_lines':'lines = recut_lines(page, (x0, y0, x1, y1), mode="curve", margin=0.25)',
+'recut_page':'per_box = recut_page(page, [(x0, y0, x1, y1), ...], mode="curve")',
+'base_at':'rows = fit.base_at(np.arange(x0, x1, dtype=float))',
 }
 
 
