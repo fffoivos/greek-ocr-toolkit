@@ -43,8 +43,8 @@ are fetched for these recorded/generated inputs. `--licence` applies to direct
 path/URL inputs; use per-entry licences in manifests. Missing licences remain
 `unspecified; rights review required`.
 
-The default viewport is 794 × 1123 CSS pixels, raster scale 2. Options include
-`--viewport WIDTHxHEIGHT`, `--scale`, `--no-pdf`, `--no-screenshot`, `--allow-media`,
+The default viewport is 794 × 1123 CSS pixels, raster scale 1.5. Options include
+`--viewport WIDTHxHEIGHT`, `--scale`, `--max-page-height`, `--no-pdf`, `--no-screenshot`, `--allow-media`,
 `--offline` and `--mastodon-instance`. `--max-pages` bounds the number rendered,
 including source seeds. Multiple named sources are visited in round-robin order,
 so their seed pages precede discovered article links. Random Wikipedia seeds can
@@ -52,16 +52,36 @@ resolve to the same article; captures are not deduplicated automatically.
 
 `--interval` controls the per-origin rate for top-level page navigations (at least
 one second). Chromium fetches stylesheets, fonts and other allowed subresources
-directly. `--timeout` bounds navigation and each font/image readiness wait. A
+directly. `--timeout` bounds navigation and image readiness. Fonts are awaited
+directly through `document.fonts.ready`, with a Python wall-clock cap of
+`min(timeout, 5)` seconds for each screen/print layout. No animation-frame polling
+or `networkidle` wait is used. A
 wall-clock watchdog abandons a page after `2 * timeout`, including its robots/rate
 gate and PDF generation, writes a `status="timeout"` receipt and continues the
 wave. Page errors also receive failure receipts. Context cleanup after abandonment
 has a separate bound of at most one second.
 
-Each page prints `WEB_PAGE n/N status url bytes` to stdout; the wave ends with
+Each page prints `WEB_PAGE n/N status url bytes seconds=<elapsed> goto=<s>s
+fonts=<s>s dom_lines=<s>s screenshot=<s>s pdf=<s>s records=<s>s` to stdout; the wave ends with
 `WEB_WAVE_DONE pages=n failed=n`. Both are flushed immediately. The CLI then emits
 its JSON result, so consumers should read the progress lines before parsing that
 JSON. Progress bytes count source HTML bytes plus measured subresource body bytes.
+
+Every success/failure receipt includes `timings` in seconds, retaining the time
+spent in an interrupted step. `goto` includes robots/rate gating and HTML reads;
+`fonts` includes capture stabilization and optional image decoding; `dom_lines`
+sums the one bulk screen extraction and the independent bulk print extraction;
+`screenshot` measures the single PNG capture; `pdf` includes print setup and the
+single PDF call; `records` measures capture serialization, response-size accounting
+and hashes. Disabled PNG/PDF steps remain zero. The separate `web records` command's
+PDF label extraction/rasterization is outside these capture timings.
+
+The PNG is captured once with `full_page=True` and a top-origin clip capped at
+20,000 CSS pixels by default (`--max-page-height`). At scale 1.5 the maximum PNG
+height is 30,000 raster pixels. `screenshot_capture` in the receipt records the
+original CSS page height, captured height, limit and `truncated` flag. This clip
+does not change the page layout or limit the PDF or DOM JSON; DOM records outside
+the PNG remain explicitly `clipped` when exported.
 
 ## Capture artifacts and receipts
 
@@ -72,7 +92,7 @@ never overwritten by `render_pages`:
 | --- | --- |
 | `source.html` | Original response bytes, local input bytes, or generated post HTML |
 | `rendered.html` | Serialized DOM after stabilization, including capture CSS |
-| `page.png` | Full-page screen rendering at the requested device scale |
+| `page.png` | Full-page screen rendering at the requested device scale, clipped at the recorded height cap |
 | `page.pdf` | Chromium A4 print output, background enabled, no browser headers/footers |
 | `dom.json` | Screen text nodes and their individual line fragments |
 | `print_dom.json` | Independent continuous print DOM, at fractional A4 CSS width |
@@ -93,7 +113,9 @@ The `network` receipt field counts Chromium response events and subresources and
 records encoded response-body bytes from Chromium's `request.sizes()`. Redirect
 responses and repeated requests are counted individually. Byte sizes that Chromium
 cannot supply remain `null` and increment `unmeasured_responses`; no subresource
-bodies are fetched through the polite client. Failure receipts retain available
+bodies are fetched through the polite client. All size queries run concurrently,
+each capped at `min(timeout, 1)` seconds; receipt assembly never waits for
+`response.finished()`. Failure receipts retain available
 counts, an error, timing and `capture_status`, with all `files` entries set to
 `null`; any partial files are not label artifacts. `web records` reports those
 failed pages with zero label records.
@@ -106,9 +128,13 @@ outputs and can be regenerated; the original artifacts and receipts are retained
 ## What is exact
 
 For every body text node, the capture records its raw text, a stable traversal
-ID and either its line IDs or an explicit exclusion reason. A node-wide
-`Range.getClientRects()` determines fragments. Grapheme-sized ranges map text
-onto those rectangles; offsets are UTF-16 offsets as used by the browser, so
+ID and either its line IDs or an explicit exclusion reason. One `page.evaluate`
+per layout walks all text nodes and returns their line rectangles as JSON, with
+no per-node browser round trips. A node-wide `Range.getClientRects()` determines
+fragments. Single-line nodes avoid per-grapheme geometry queries; ordinary LTR
+wraps use binary searches at grapheme boundaries. Styles and ancestor visibility
+are cached within the walk. Preserved whitespace and unusual inline fragmentation
+retain conservative grapheme-range mapping. Offsets are UTF-16 offsets as used by the browser, so
 combining marks and non-BMP characters are not split as unrelated glyphs. Lines
 carry raw fragment text and NFC labels. Collapsed CSS whitespace is reduced to
 its rendered space; `pre`, `pre-wrap` and `break-spaces` retain their whitespace.
@@ -215,7 +241,10 @@ The launch probe uses a 10-second browser timeout inside a subprocess capped at
 browser test have a 60-second hard cap. Fixtures use `file://` pages and system
 fonts. Recorded browser-event tests exercise direct resource routing, response
 counts/bytes and continuation after navigation, font, evaluation and PDF stalls
-without launching Chromium.
+without launching Chromium. They also verify the font cap, concurrent accounting
+when size queries never resolve, retained timeout timings, one screenshot/PDF call,
+and screenshot truncation. A browser fixture checks wrapped combining sequences,
+non-BMP characters and labels below the screenshot cap.
 
 Source discovery, robots/redirect/rate behavior, direct DOM records, checksum
 refusal, degradation and failed-label handling have independent offline tests.

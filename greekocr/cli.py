@@ -59,7 +59,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     render.add_argument('--max-pages', type=int, default=10)
     render.add_argument('--dest', type=Path, required=True)
     render.add_argument('--viewport', default='794x1123')
-    render.add_argument('--scale', type=float, default=2.0)
+    render.add_argument('--scale', type=float, default=1.5)
+    render.add_argument('--max-page-height', type=int, default=20_000, help='screenshot height cap in CSS pixels')
     render.add_argument('--licence', help='caller supplied licence for direct paths/URLs')
     render.add_argument('--offline', action='store_true')
     render.add_argument('--allow-media', action='store_true')
@@ -192,7 +193,7 @@ def _web_render(args: argparse.Namespace) -> dict:
                                     mastodon_instance=args.mastodon_instance, client=client)
 
     pages = render_pages(islice(inputs(), args.max_pages), args.dest, viewport=viewport,
-                         scale=args.scale, print_to_pdf=not args.no_pdf,
+                         scale=args.scale, max_page_height=args.max_page_height, print_to_pdf=not args.no_pdf,
                          screenshot=not args.no_screenshot, block_media=not args.allow_media,
                          offline=args.offline, client=client, interval=args.interval, timeout=args.timeout)
     return dict(pages=[asdict(page) for page in pages])

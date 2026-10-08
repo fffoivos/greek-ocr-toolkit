@@ -105,7 +105,7 @@ def test_dom_nodes_and_scaled_geometry(rendered, index):
     for line in dom['lines']:
         assert line['text'] and line['bbox_css'][2] > line['bbox_css'][0]
         assert line['bbox_css'][3] > line['bbox_css'][1]
-        assert line['bbox_pixel'] == [v * 2 for v in line['bbox_css']]
+        assert line['bbox_pixel'] == [v * 1.5 for v in line['bbox_css']]
     records = records_from_dom(page.png_path, page.dom_path)
     assert len(records) == len(dom['lines'])
     assert all(r['tier'] == 'exact-rendered' and r['provenance'] == 'web_render' for r in records)
@@ -117,18 +117,22 @@ def test_receipts_and_embedded_fonts(rendered, index):
     page = rendered[0][index]
     receipt = json.loads(Path(page.receipt_path).read_text())
     for key in ('url', 'fetched_at', 'final_url', 'status', 'title', 'lang', 'sha256',
-                'fonts', 'computed_font_families', 'licence', 'user_agent', 'chromium_version'):
+                'fonts', 'computed_font_families', 'licence', 'user_agent', 'chromium_version', 'timings'):
         assert key in receipt
     assert receipt['lang'] == 'el'
     assert receipt['title'] and receipt['computed_font_families']
     assert receipt['status'] in (0, None)  # file navigation has no HTTP status
     assert receipt['determinism']['fonts_awaited']
     assert receipt['determinism']['javascript'] is False
+    assert set(receipt['timings']) == {'goto', 'fonts', 'dom_lines', 'screenshot', 'pdf', 'records'}
+    assert all(value >= 0 for value in receipt['timings'].values())
+    assert receipt['font_timeout_seconds'] == 5
+    assert not receipt['screenshot_capture']['truncated']
     for key, filename in receipt['files'].items():
         assert receipt['sha256'][key] == hashlib.sha256((Path(page.receipt_path).parent / filename).read_bytes()).hexdigest()
     assert b'/FontFile' in Path(page.pdf_path).read_bytes()
     with Image.open(page.png_path) as image:
-        assert image.width == 794 * 2 and image.height >= 1123 * 2
+        assert image.width == 794 * 1.5 and image.height >= 1123 * 1.5
 
 
 @pytest.mark.parametrize('index', range(3), ids=NAMES)
@@ -160,6 +164,7 @@ def test_browser_cli_and_checksum_guard(chromium, tmp_path, capsys):
     output = capsys.readouterr().out
     progress, done, payload = output.split('\n', 2)
     assert progress.startswith('WEB_PAGE 1/1 ok file:')
+    assert all(f'{step}=' in progress for step in ('goto', 'fonts', 'dom_lines', 'screenshot', 'pdf', 'records'))
     assert done == 'WEB_WAVE_DONE pages=1 failed=0'
     result = json.loads(payload)
     assert len(result['pages']) == 1
@@ -190,6 +195,33 @@ def test_print_reflow_and_pdf_only(chromium, tmp_path):
     assert screen['scale'] == 1.5 and printed['scale'] == 1
     assert screen['width'] != printed['width']
     assert page_records(tmp_path)['pages'][0]['pdf_records'] > 0
+
+
+def test_wrapped_dom_graphemes_and_clipped_screenshot(chromium, tmp_path):
+    text = ('Ἀλη\u0301θεια Ελληνικά 𐀀 λέξεις ' * 35).strip()
+    page = render_pages([dict(url='fixture:wrapped', html=f'''<html lang="el"><style>
+        p {{width:220px;font:20px Arial}} .lower {{margin-top:2000px}}
+        </style><body><p>{text}</p><p class="lower">Κείμενο κάτω από το όριο</p></body></html>''')],
+                        tmp_path, offline=True, max_page_height=1200)[0]
+    assert page.receipt['capture_status'] == 'rendered'
+    dom = json.loads(Path(page.dom_path).read_text())
+    node = next(n for n in dom['nodes'] if n['text_raw'] == text)
+    lines = [dom['lines'][i] for i in node['line_ids']]
+    assert len(lines) > 10
+    assert ''.join(''.join(line['text'].split()) for line in lines) == ''.join(unicodedata.normalize('NFC', text).split())
+    encoded = text.encode('utf-16-le')
+    for line in lines:
+        # Decoding fails if a boundary splits a surrogate pair. NFC fails if it
+        # splits a combining sequence from its base letter.
+        fragment = encoded[line['start_utf16'] * 2:line['end_utf16'] * 2].decode('utf-16-le')
+        assert line['text_raw'] == fragment
+        assert not unicodedata.combining(fragment[0])
+    assert page.receipt['screenshot_capture']['truncated']
+    with Image.open(page.png_path) as image:
+        assert image.height == 1200 * 1.5
+    rows = records_from_dom(page.png_path, page.dom_path)
+    assert any(r['clipped'] and 'κάτω' in r['text'] for r in rows)
+    assert Path(page.pdf_path).read_bytes().startswith(b'%PDF')
 
 
 def test_catalog_seeds_no_network_and_news_round_robin():
@@ -429,7 +461,8 @@ def fake_browser(monkeypatch):
     """Drive real capture control flow with recorded browser events, never a socket."""
     api = pytest.importorskip('playwright.async_api')
     from greekocr.real.sources import web_render
-    state = SimpleNamespace(contexts=[], calls=[], stall=None)
+    state = SimpleNamespace(contexts=[], calls=[], stall=None, height=1123,
+                            sizes_stall=False, size_active=0, size_max_active=0)
 
     async def stall(page, stage):
         if page.url.endswith('/stuck') and state.stall == stage:
@@ -445,7 +478,14 @@ def fake_browser(monkeypatch):
             return self.resource_type == 'document'
 
         async def sizes(self):
-            return dict(responseBodySize=self.size)
+            state.size_active += 1
+            state.size_max_active = max(state.size_max_active, state.size_active)
+            try:
+                if state.sizes_stall:
+                    await asyncio.Event().wait()
+                return dict(responseBodySize=self.size)
+            finally:
+                state.size_active -= 1
 
     class Response:
         status = 200
@@ -457,7 +497,7 @@ def fake_browser(monkeypatch):
             return b'<html lang="el"><body>recorded</body></html>'
 
         async def finished(self):
-            pass
+            raise AssertionError('receipt must not wait on response.finished()')
 
     class Route:
         def __init__(self, request):
@@ -505,9 +545,14 @@ def fake_browser(monkeypatch):
             pass
 
         async def evaluate(self, expression, arg=None):
+            state.calls.append(('evaluate', expression, arg))
             if expression == web_render._DOM:
                 await stall(self, 'evaluate')
-                return dict(lines=[], nodes=[], fonts=[], computed_font_families=['system-ui'], warnings=[])
+                return dict(lines=[], nodes=[], fonts=[], computed_font_families=['system-ui'], warnings=[],
+                            width=794, height=state.height)
+            if 'document.fonts.ready' in expression:
+                await stall(self, 'fonts')
+                return True
             if expression == 'document.documentElement.lang':
                 return 'el'
             if expression == 'navigator.userAgent':
@@ -525,6 +570,8 @@ def fake_browser(monkeypatch):
             return '<html>recorded</html>'
 
         async def screenshot(self, path, **kwargs):
+            state.calls.append(('screenshot', kwargs))
+            await stall(self, 'screenshot')
             Image.new('RGB', (10, 10), 'white').save(path)
 
         async def emulate_media(self, **kwargs):
@@ -534,6 +581,7 @@ def fake_browser(monkeypatch):
             pass
 
         async def pdf(self, path, **kwargs):
+            state.calls.append(('pdf', kwargs))
             await stall(self, 'pdf')
             Path(path).write_bytes(b'recorded PDF')
 
@@ -555,6 +603,7 @@ def fake_browser(monkeypatch):
         version = 'recorded-chromium'
 
         async def new_context(self, **kwargs):
+            state.calls.append(('new_context', kwargs))
             context = Context()
             state.contexts.append(context)
             return context
@@ -605,13 +654,83 @@ def test_chromium_fetches_assets_and_reports_response_bytes(fake_browser, monkey
     assert ('abort' if block_media else 'continue', 'image') in calls
     assert ('abort' if block_media else 'continue', 'media') in calls
     assert next(call[2]['timeout'] for call in calls if call[0] == 'goto') == 1000
-    assert all(call[2]['timeout'] == 1000 for call in calls if call[0] == 'wait_for_function')
-    assert capsys.readouterr().out.splitlines() == [
-        f"WEB_PAGE 1/1 ok https://recorded.invalid/page {page.receipt['bytes']}",
-        'WEB_WAVE_DONE pages=1 failed=0']
+    assert next(call[2]['wait_until'] for call in calls if call[0] == 'goto') == 'load'
+    assert not any(call[0] == 'wait_for_function' for call in calls)
+    output = capsys.readouterr().out.splitlines()
+    assert output[0].startswith(f"WEB_PAGE 1/1 ok https://recorded.invalid/page {page.receipt['bytes']} seconds=")
+    assert all(f'{step}={value:.3f}s' in output[0] for step, value in page.receipt['timings'].items())
+    assert output[1] == 'WEB_WAVE_DONE pages=1 failed=0'
 
 
-@pytest.mark.parametrize('stage', ['prepare', 'goto', 'fonts', 'evaluate', 'pdf', 'goto_timeout', 'fonts_timeout'])
+@pytest.mark.parametrize('height_limit', [None, 500])
+def test_single_capped_screenshot_and_pdf_calls(fake_browser, tmp_path, height_limit):
+    from greekocr.real.sources import web_render
+    fake_browser.height = 50_000
+    options = {} if height_limit is None else dict(max_page_height=height_limit)
+    page = render_pages(['https://recorded.invalid/page'], tmp_path, timeout=180, **options)[0]
+    assert page.receipt['capture_status'] == 'rendered'
+    capture = page.receipt['screenshot_capture']
+    assert capture == dict(enabled=True, page_height_css=50_000, height_css=height_limit or 20_000,
+                           max_height_css=height_limit or 20_000, truncated=True)
+    calls = fake_browser.calls
+    screenshots = [call[1] for call in calls if call[0] == 'screenshot']
+    assert len(screenshots) == 1
+    assert screenshots[0]['full_page'] is True and screenshots[0]['scale'] == 'device'
+    assert screenshots[0]['clip'] == dict(x=0, y=0, width=794, height=height_limit or 20_000)
+    assert next(call[1]['device_scale_factor'] for call in calls if call[0] == 'new_context') == 1.5
+    assert len([call for call in calls if call[0] == 'pdf']) == 1
+    # Exactly one bulk extraction per layout (screen and independent print).
+    dom_calls = [call for call in calls if call[0] == 'evaluate' and call[1] == web_render._DOM]
+    assert [call[2] for call in dom_calls] == [1.5, 1.0]
+    assert json.loads(Path(page.dom_path).read_text())['height'] == 50_000
+    assert json.loads(Path(page.receipt_path).read_text()) == page.receipt
+
+
+def test_unfinished_resources_share_one_concurrent_budget(fake_browser, tmp_path):
+    fake_browser.sizes_stall = True
+    started = time.monotonic()
+    page = render_pages(['https://recorded.invalid/page'], tmp_path, timeout=.2, block_media=False)[0]
+    assert time.monotonic() - started < .4
+    assert page.receipt['capture_status'] == 'rendered'
+    network = page.receipt['network']
+    assert network['unmeasured_responses'] == network['responses'] == 5
+    assert all(resource['bytes'] is None for resource in network['resources'])
+    assert .19 <= page.receipt['timings']['records'] < .35
+    assert fake_browser.size_max_active == 5 and fake_browser.size_active == 0
+
+
+def test_fonts_have_a_five_second_cap_independent_of_page_timeout(fake_browser, monkeypatch, tmp_path):
+    from greekocr.real.sources import web_render
+    seen, original_wait = [], asyncio.wait_for
+
+    async def recorded_wait(awaitable, *, timeout):
+        seen.append(timeout)
+        return await original_wait(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(web_render.asyncio, 'wait_for', recorded_wait)
+    page = render_pages(['https://recorded.invalid/page'], tmp_path, timeout=180)[0]
+    assert page.receipt['capture_status'] == 'rendered'
+    assert page.receipt['font_timeout_seconds'] == 5
+    assert seen.count(5) == 2  # Screen and print layout fonts, directly awaited.
+    assert not any(call[0] == 'wait_for_function' for call in fake_browser.calls)
+
+
+def test_disabled_artifacts_have_zero_timings(fake_browser, tmp_path):
+    page = render_pages(['https://recorded.invalid/page'], tmp_path, screenshot=False, print_to_pdf=False)[0]
+    assert page.receipt['capture_status'] == 'rendered'
+    assert page.receipt['timings']['screenshot'] == page.receipt['timings']['pdf'] == 0
+    assert not page.receipt['screenshot_capture']['enabled']
+    assert not page.receipt['screenshot_capture']['truncated']
+    assert not any(call[0] in ('screenshot', 'pdf') for call in fake_browser.calls)
+
+
+@pytest.mark.parametrize('limit', [0, -1, 1.5])
+def test_rejects_invalid_screenshot_height(limit, tmp_path):
+    with pytest.raises(ValueError, match='max_page_height'):
+        render_pages([], tmp_path, max_page_height=limit)
+
+
+@pytest.mark.parametrize('stage', ['prepare', 'goto', 'fonts', 'evaluate', 'screenshot', 'pdf', 'goto_timeout', 'fonts_timeout'])
 def test_page_watchdog_receipt_and_wave_continuation(fake_browser, tmp_path, capsys, stage):
     fake_browser.stall = stage
     started = time.monotonic()
@@ -620,8 +739,11 @@ def test_page_watchdog_receipt_and_wave_continuation(fake_browser, tmp_path, cap
     failed, completed = pages
     assert failed.receipt['status'] == 'timeout'
     assert failed.receipt['watchdog_seconds'] == .06
-    if not stage.endswith('_timeout'):
+    if stage not in ('fonts', 'goto_timeout', 'fonts_timeout'):
         assert .05 <= failed.receipt['elapsed_seconds'] < .3
+    assert set(failed.receipt['timings']) == {'goto', 'fonts', 'dom_lines', 'screenshot', 'pdf', 'records'}
+    slow_step = dict(prepare='goto', evaluate='dom_lines', goto_timeout='goto', fonts_timeout='fonts').get(stage, stage)
+    assert failed.receipt['timings'][slow_step] > 0
     assert json.loads(Path(failed.receipt_path).read_text()) == failed.receipt
     assert not any(failed.receipt['files'].values())
     assert failed.html_path is None and failed.dom_path is None

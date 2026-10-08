@@ -1354,16 +1354,21 @@ page = PageRecord(page_id, html_path, pdf_path, png_path, dom_path, print_dom_pa
 
 ### `greekocr.real.sources.web_render.render_pages`
 
-`def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathLike, *, viewport: tuple[int, int] | Mapping[str, int]=(794, 1123), scale: float=2.0, print_to_pdf: bool=True, screenshot: bool=True, block_media: bool=True, licences: Mapping[str, str] | None=None, offline: bool=False, interval: float=1.0, timeout: float=30.0, client: _PoliteHTTP | None=None) -> list[PageRecord]`
+`def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathLike, *, viewport: tuple[int, int] | Mapping[str, int]=(794, 1123), scale: float=1.5, max_page_height: int=20000, print_to_pdf: bool=True, screenshot: bool=True, block_media: bool=True, licences: Mapping[str, str] | None=None, offline: bool=False, interval: float=1.0, timeout: float=30.0, client: _PoliteHTTP | None=None) -> list[PageRecord]`
 
 Render pages with polite top-level navigation and a `2 * timeout` page watchdog.
 Chromium fetches subresources directly. Timeout/error rows carry receipts and no
 artifact paths, and rendering continues with the next input. Progress is flushed
-to stdout as `WEB_PAGE n/N status url bytes` and `WEB_WAVE_DONE pages=n failed=n`.
+to stdout as `WEB_PAGE n/N status url bytes seconds=... goto=...s fonts=...s
+dom_lines=...s screenshot=...s pdf=...s records=...s` and
+`WEB_WAVE_DONE pages=n failed=n`. Receipts preserve all six step timings in
+seconds, including interrupted work. Fonts have a five-second cap; response sizes
+are queried concurrently with a one-second cap. Screenshot truncation is recorded
+in `screenshot_capture`; the CSS height cap does not truncate PDF or DOM output.
 
 ```python
 from greekocr.real.sources.web_render import render_pages
-pages = render_pages(["fixture.html"], "rendered", viewport=(794,1123), scale=2, offline=True)
+pages = render_pages(["fixture.html"], "rendered", viewport=(794,1123), scale=1.5, max_page_height=20000, offline=True)
 ```
 
 ### `greekocr.real.sources.web_render.records_from_dom`

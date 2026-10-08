@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -30,19 +31,24 @@ _DOM = r'''(scale) => {
  const lines=[], nodes=[], warnings=[];
  const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
  const segmenter=new Intl.Segmenter(document.documentElement.lang||'el',{granularity:'grapheme'});
+ const styles=new WeakMap(), hidden=new WeakMap();
+ const styleOf=p=>{if(!styles.has(p))styles.set(p,getComputedStyle(p));return styles.get(p);};
+ const isHidden=p=>{
+  if(!p)return false;
+  if(!hidden.has(p)) {
+   const s=styleOf(p);
+   hidden.set(p,s.display==='none'||Number(s.opacity)===0||isHidden(p.parentElement));
+  }
+  return hidden.get(p);
+ };
  let node, id=0;
  const box=r=>[r.left+scrollX,r.top+scrollY,r.right+scrollX,r.bottom+scrollY];
  while(node=walker.nextNode()) {
   const parent=node.parentElement, raw=node.data, nodeId=id++;
   const info={node_id:nodeId,text_raw:raw,line_ids:[]}; nodes.push(info);
   if(!raw || parent.closest('script,style,template,svg,canvas')) {info.excluded='non-content';continue;}
-  let invisible=false;
-  for(let p=parent;p;p=p.parentElement) {
-   const s=getComputedStyle(p);
-   if(s.display==='none'||Number(s.opacity)===0) invisible=true;
-  }
-  const style=getComputedStyle(parent), range=document.createRange();range.selectNodeContents(node);
-  if(style.visibility!=='visible')invisible=true;
+  const style=styleOf(parent), range=document.createRange();range.selectNodeContents(node);
+  const invisible=isHidden(parent)||style.visibility!=='visible';
   const rects=Array.from(range.getClientRects()).filter(r=>r.width>0&&r.height>0);
   info.rects_css=rects.map(box);info.rects_pixel=info.rects_css.map(r=>r.map(v=>v*scale));
   if(invisible||!rects.length) {info.excluded=raw.trim()?'not-visible':'collapsed-whitespace';continue;}
@@ -51,24 +57,65 @@ _DOM = r'''(scale) => {
    info.excluded='unsupported-writing-direction';warnings.push('unsupported-writing-direction');continue;
   }
   const fragments=rects.map(r=>({rect:r,parts:[],start:null,end:null}));
-  for(const s of segmenter.segment(raw)) {
-   range.setStart(node,s.index);range.setEnd(node,s.index+s.segment.length);
-   const glyphs=Array.from(range.getClientRects()).filter(r=>r.width>0&&r.height>0);
-   if(!glyphs.length)continue;
-   const g=glyphs[0], cx=(g.left+g.right)/2, cy=(g.top+g.bottom)/2;
-   let best=0, distance=Infinity;
-   fragments.forEach((f,i)=>{
-    const r=f.rect, d=Math.abs(cy-(r.top+r.bottom)/2)*1000+
-     Math.max(0,r.left-cx,cx-r.right);
-    if(d<distance){best=i;distance=d;}
-   });
-   const f=fragments[best];f.parts.push(s.segment);
-   f.start=f.start===null?s.index:Math.min(f.start,s.index);f.end=s.index+s.segment.length;
+  const preserveSpace=['pre','pre-wrap','break-spaces'].includes(style.whiteSpace);
+  const trimCollapsedEdges=f=>{
+   const text=raw.slice(f.start,f.end), leading=/^[\t\r\n ]+/.exec(text), trailing=/[\t\r\n ]+$/.exec(text);
+   const visible=(start,end)=>{
+    range.setStart(node,start);range.setEnd(node,end);
+    return Array.from(range.getClientRects()).some(r=>r.width>0&&r.height>0);
+   };
+   if(leading&&!visible(f.start,f.start+leading[0].length))f.start+=leading[0].length;
+   if(trailing&&f.end-trailing[0].length>=f.start&&!visible(f.end-trailing[0].length,f.end))f.end-=trailing[0].length;
+   f.parts=f.end>f.start?[raw.slice(f.start,f.end)]:[];
+  };
+  if(rects.length===1&&!preserveSpace) {
+   // Most inline nodes occupy one line: no per-grapheme geometry queries.
+   Object.assign(fragments[0],{parts:[raw],start:0,end:raw.length});
+   trimCollapsedEdges(fragments[0]);
+  } else {
+   const segments=Array.from(segmenter.segment(raw));
+   const boundaries=[0,...segments.map(s=>s.index+s.segment.length)];
+   const sameLine=(a,b)=>Math.abs(a.top-b.top)<0.5&&Math.abs(a.bottom-b.bottom)<0.5;
+   // Ordinary LTR wraps are monotone in text order. Find each line boundary
+   // with logarithmically many Range queries, always on grapheme boundaries.
+   let fast=!preserveSpace&&!rects.some((r,i)=>rects.slice(0,i).some(p=>sameLine(p,r))), start=0;
+   if(fast)for(const f of fragments) {
+    let low=start+1, high=boundaries.length-1, end=start;
+    while(low<=high) {
+     const mid=Math.floor((low+high)/2);
+     range.setStart(node,boundaries[start]);range.setEnd(node,boundaries[mid]);
+     const selected=Array.from(range.getClientRects()).filter(r=>r.width>0&&r.height>0);
+     if(selected.every(r=>sameLine(r,f.rect))){end=mid;low=mid+1;}else high=mid-1;
+    }
+    if(end===start){fast=false;break;}
+    f.start=boundaries[start];f.end=boundaries[end];f.parts=[raw.slice(f.start,f.end)];start=end;
+   }
+   if(start!==boundaries.length-1)fast=false;
+   if(fast)fragments.forEach(trimCollapsedEdges);
+   if(!fast) {
+    // Bidi runs or unusual inline fragmentation retain the conservative mapping,
+    // still entirely inside this one evaluate call.
+    fragments.forEach(f=>Object.assign(f,{parts:[],start:null,end:null}));
+    for(const s of segments) {
+     range.setStart(node,s.index);range.setEnd(node,s.index+s.segment.length);
+     const glyphs=Array.from(range.getClientRects()).filter(r=>r.width>0&&r.height>0);
+     if(!glyphs.length)continue;
+     const g=glyphs[0], cx=(g.left+g.right)/2, cy=(g.top+g.bottom)/2;
+     let best=0, distance=Infinity;
+     fragments.forEach((f,i)=>{
+      const r=f.rect, d=Math.abs(cy-(r.top+r.bottom)/2)*1000+
+       Math.max(0,r.left-cx,cx-r.right);
+      if(d<distance){best=i;distance=d;}
+     });
+     const f=fragments[best];f.parts.push(s.segment);
+     f.start=f.start===null?s.index:Math.min(f.start,s.index);f.end=s.index+s.segment.length;
+    }
+   }
   }
   for(const f of fragments) {
    if(!f.parts.length)continue;
    let text=f.parts.join('');
-   if(!['pre','pre-wrap','break-spaces'].includes(style.whiteSpace))text=text.replace(/[\t\r\n ]+/g,' ');
+   if(!preserveSpace)text=text.replace(/[\t\r\n ]+/g,' ');
    const css=box(f.rect), lineId=lines.length;
    lines.push({line_id:lineId,node_id:nodeId,text:text.normalize('NFC'),text_raw:raw.slice(f.start,f.end),
     start_utf16:f.start,end_utf16:f.end,bbox_css:css,bbox_pixel:css.map(v=>v*scale),
@@ -142,17 +189,18 @@ async def _prepare_navigation(client: _PoliteHTTP, context, url: str, timeout: f
 
 
 async def _await_fonts(page, timeout: float) -> None:
-    # evaluate itself has no timeout: the enclosing wall-clock watchdog covers it.
-    await page.evaluate("""() => {
-        window.__webRenderFontsReady = false;
-        document.fonts.ready.then(() => { window.__webRenderFontsReady = true; });
-    }""")
-    handle = await page.wait_for_function('window.__webRenderFontsReady === true', timeout=timeout * 1000)
-    await handle.dispose()
+    # Await the readiness promise directly. RAF polling can stall when scripts
+    # are disabled; the timeout lives in Python, independent of browser timers.
+    cap = min(timeout, 5.0)
+    try:
+        await asyncio.wait_for(page.evaluate('() => document.fonts.ready.then(() => true)'), timeout=cap)
+    except asyncio.TimeoutError as error:
+        raise asyncio.TimeoutError(f'fonts.ready exceeded {cap:g}s cap') from error
 
 
 def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathLike, *,
-                 viewport: tuple[int, int] | Mapping[str, int] = (794, 1123), scale: float = 2.0,
+                 viewport: tuple[int, int] | Mapping[str, int] = (794, 1123), scale: float = 1.5,
+                 max_page_height: int = 20_000,
                  print_to_pdf: bool = True, screenshot: bool = True,
                  block_media: bool = True, licences: Mapping[str, str] | None = None,
                  offline: bool = False, interval: float = 1.0,
@@ -161,8 +209,9 @@ def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathL
     if isinstance(viewport, Mapping):
         viewport = (viewport['width'], viewport['height'])
     if (len(viewport) != 2 or any(not isinstance(v, int) or v <= 0 for v in viewport)
+            or not isinstance(max_page_height, int) or max_page_height <= 0
             or not math.isfinite(scale) or scale <= 0 or not math.isfinite(timeout) or timeout <= 0):
-        raise ValueError('viewport, scale and timeout must be positive')
+        raise ValueError('viewport, scale, max_page_height and timeout must be positive')
     client = client or _PoliteHTTP(interval=interval, timeout=timeout)
     try:
         from playwright.async_api import async_playwright, Error, TimeoutError as PlaywrightTimeout
@@ -201,6 +250,16 @@ def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathL
                     work.mkdir(exist_ok=False)
                     fetched_at = datetime.now(timezone.utc).isoformat()
                     started = time.monotonic()
+                    timings = dict.fromkeys(('goto', 'fonts', 'dom_lines', 'screenshot', 'pdf', 'records'), 0.0)
+
+                    @contextmanager
+                    def measure(step):
+                        step_started = time.monotonic()
+                        try:
+                            yield
+                        finally:
+                            timings[step] += time.monotonic() - step_started
+
                     context = None
                     blocked: list[Record] = []
                     responses = []
@@ -241,110 +300,130 @@ def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathL
 
                         await context.route('**/*', route_request)
                         page.on('response', response_event)
-                        if 'html' in spec:
-                            await page.set_content(str(spec['html']), wait_until='load', timeout=timeout * 1000)
-                            status, final_url = spec.get('api_status'), url
-                            raw_html = str(spec['html']).encode('utf-8')
-                        else:
-                            if remote:
-                                await _prepare_navigation(client, context, url, timeout)
-                            response = await page.goto(url, wait_until='load', timeout=timeout * 1000)
-                            status, final_url = response.status if response else None, page.url
-                            state.update(final_url=final_url, http_status=status)
-                            if remote:
-                                if status is None or not 200 <= status < 300:
-                                    raise ValueError('capture HTTP status ' + str(status))
-                                raw_html = await response.body()
-                                if len(raw_html) > client.limit:
-                                    raise ValueError('web response exceeds byte limit: ' + final_url)
+                        with measure('goto'):
+                            if 'html' in spec:
+                                await page.set_content(str(spec['html']), wait_until='load', timeout=timeout * 1000)
+                                status, final_url = spec.get('api_status'), url
+                                raw_html = str(spec['html']).encode('utf-8')
                             else:
-                                raw_html = local.read_bytes()
+                                if remote:
+                                    await _prepare_navigation(client, context, url, timeout)
+                                response = await page.goto(url, wait_until='load', timeout=timeout * 1000)
+                                status, final_url = response.status if response else None, page.url
+                                state.update(final_url=final_url, http_status=status)
+                                if remote:
+                                    if status is None or not 200 <= status < 300:
+                                        raise ValueError('capture HTTP status ' + str(status))
+                                    raw_html = await response.body()
+                                    if len(raw_html) > client.limit:
+                                        raise ValueError('web response exceeds byte limit: ' + final_url)
+                                else:
+                                    raw_html = local.read_bytes()
                         state.update(final_url=final_url, http_status=status, bytes=len(raw_html))
-                        await page.add_style_tag(content=_FREEZE)
-                        await page.evaluate("""(blocked) => {
-                            document.querySelectorAll('video,audio').forEach(e=>e.pause());
-                            window.__webRenderImagesReady = blocked;
-                            if(!blocked) {
-                                document.querySelectorAll('img').forEach(e=>e.loading='eager');
-                                Promise.all(Array.from(document.images).map(i=>i.decode().catch(()=>{})))
-                                    .then(()=>{window.__webRenderImagesReady=true;});
-                            }
-                            window.scrollTo(0,0);
-                        }""", block_media)
-                        await _await_fonts(page, timeout)
-                        if not block_media:
-                            handle = await page.wait_for_function('window.__webRenderImagesReady === true', timeout=timeout * 1000)
-                            await handle.dispose()
-                        title = await page.title()
-                        lang = await page.evaluate('document.documentElement.lang')
-                        dom = await page.evaluate(_DOM, scale)
+                        with measure('fonts'):
+                            await page.add_style_tag(content=_FREEZE)
+                            await page.evaluate("""(blocked) => {
+                                document.querySelectorAll('video,audio').forEach(e=>e.pause());
+                                if(!blocked)document.querySelectorAll('img').forEach(e=>e.loading='eager');
+                                window.scrollTo(0,0);
+                            }""", block_media)
+                            await _await_fonts(page, timeout)
+                            if not block_media:
+                                await asyncio.wait_for(page.evaluate('''() => Promise.all(
+                                    Array.from(document.images).map(i=>i.decode().catch(()=>{})))'''), timeout=timeout)
+                        with measure('dom_lines'):
+                            title = await page.title()
+                            lang = await page.evaluate('document.documentElement.lang')
+                            dom = await page.evaluate(_DOM, scale)
                         dom.update(source_url=final_url, licence=licence)
-                        html_path = work / 'source.html'
-                        html_path.write_bytes(raw_html)
-                        (work / 'rendered.html').write_text(await page.content(), encoding='utf-8')
-                        if 'source_json' in spec:
-                            _write(work / 'source.json', spec['source_json'])
+                        with measure('records'):
+                            html_path = work / 'source.html'
+                            html_path.write_bytes(raw_html)
+                            (work / 'rendered.html').write_text(await page.content(), encoding='utf-8')
+                            if 'source_json' in spec:
+                                _write(work / 'source.json', spec['source_json'])
                         png_path = work / 'page.png' if screenshot else None
+                        screenshot_capture = dict(enabled=screenshot, page_height_css=dom['height'],
+                                                  height_css=min(dom['height'], max_page_height),
+                                                  max_height_css=max_page_height, truncated=screenshot and dom['height'] > max_page_height)
                         if png_path:
-                            await page.screenshot(path=str(png_path), full_page=True, animations='disabled',
-                                                  scale='device', timeout=timeout * 1000)
+                            with measure('screenshot'):
+                                await page.screenshot(path=str(png_path), full_page=True, animations='disabled',
+                                                      clip=dict(x=0, y=0, width=dom['width'], height=screenshot_capture['height_css']),
+                                                      scale='device', timeout=timeout * 1000)
                         pdf_path = work / 'page.pdf' if print_to_pdf else None
                         print_dom_path = work / 'print_dom.json' if print_to_pdf else None
                         if pdf_path:
-                            await page.emulate_media(media='print')
-                            await page.set_viewport_size({'width': math.ceil(_A4[0]), 'height': math.ceil(_A4[1])})
-                            # Match the continuous print layout's fractional A4 width. Fragmentation is audited separately.
-                            await page.add_style_tag(content=f'html {{width:{_A4[0]}px!important}}')
-                            await _await_fonts(page, timeout)
-                            print_dom = await page.evaluate(_DOM, 1.0)
+                            with measure('pdf'):
+                                await page.emulate_media(media='print')
+                                await page.set_viewport_size({'width': math.ceil(_A4[0]), 'height': math.ceil(_A4[1])})
+                                # Match the continuous print layout's fractional A4 width. Fragmentation is audited separately.
+                                await page.add_style_tag(content=f'html {{width:{_A4[0]}px!important}}')
+                            with measure('fonts'):
+                                await _await_fonts(page, timeout)
+                            with measure('dom_lines'):
+                                print_dom = await page.evaluate(_DOM, 1.0)
                             print_dom.update(source_url=final_url, licence=licence,
                                              layout='continuous print DOM; pagination may differ', a4_css=list(_A4))
-                            _write(print_dom_path, print_dom)
-                            await page.pdf(path=str(pdf_path), format='A4', print_background=True,
-                                           margin=dict(top='0', right='0', bottom='0', left='0'),
-                                           prefer_css_page_size=False, display_header_footer=False)
+                            with measure('records'):
+                                _write(print_dom_path, print_dom)
+                            with measure('pdf'):
+                                await page.pdf(path=str(pdf_path), format='A4', print_background=True,
+                                               margin=dict(top='0', right='0', bottom='0', left='0'),
+                                               prefer_css_page_size=False, display_header_footer=False)
                         dom_path = work / 'dom.json'
-                        _write(dom_path, dom)
-                        for response, subresource in responses:
-                            resource = dict(url=response.url, status=response.status,
-                                            resource_type=response.request.resource_type, subresource=subresource, bytes=None)
-                            try:
-                                await response.finished()
-                                resource['bytes'] = (await response.request.sizes())['responseBodySize']
-                            except Error:
-                                network['unmeasured_responses'] += 1
-                            else:
-                                network['response_bytes'] += resource['bytes']
-                                if subresource:
-                                    network['subresource_bytes'] += resource['bytes']
-                            network['resources'].append(resource)
-                        state['bytes'] += network['subresource_bytes']
-                        receipt = dict(schema='web-render-v1', page_id=page_id, url=url, fetched_at=fetched_at,
-                                       final_url=final_url, status=status, capture_status='rendered', title=title, lang=lang,
-                                       licence=licence, source=spec.get('source'), api_url=spec.get('api_url'),
-                                       viewport=list(viewport), scale=scale, user_agent=await page.evaluate('navigator.userAgent'),
-                                       render_url=page.url, timeout=timeout, watchdog_seconds=2 * timeout,
-                                       elapsed_seconds=time.monotonic() - started, bytes=state['bytes'], network=network,
-                                       chromium_version=browser.version, fonts=dom['fonts'],
-                                       computed_font_families=dom['computed_font_families'],
-                                       sha256=dict(html=_sha(html_path), pdf=_sha(pdf_path) if pdf_path else None,
-                                                   png=_sha(png_path) if png_path else None,
-                                                   dom=_sha(dom_path), print_dom=_sha(print_dom_path) if print_dom_path else None,
-                                                   rendered_html=_sha(work / 'rendered.html')),
-                                       files=dict(html='source.html', pdf='page.pdf' if pdf_path else None,
-                                                  png='page.png' if png_path else None, dom='dom.json',
-                                                  print_dom='print_dom.json' if print_dom_path else None,
-                                                  rendered_html='rendered.html'),
-                                       determinism=dict(animations=False, javascript=False, service_workers=False,
-                                                        fonts_awaited=True, block_media=block_media,
-                                                        lazy_images='blocked' if block_media else 'eager', locale='el-GR', timezone='UTC'),
-                                       blocked_requests=blocked, dom_warnings=dom['warnings'],
-                                       api_final_url=spec.get('api_final_url'),
-                                       label_limits='DOM fragments exclude generated content, hidden nodes, text-transform and non-LTR text')
-                        receipt_path = work / 'receipt.json'
-                        if 'source_json' in spec:
-                            receipt['sha256']['source_json'] = _sha(work / 'source.json')
-                            receipt['files']['source_json'] = 'source.json'
+                        with measure('records'):
+                            _write(dom_path, dom)
+
+                            async def resource_size(response, subresource):
+                                resource = dict(url=response.url, status=response.status,
+                                                resource_type=response.request.resource_type, subresource=subresource, bytes=None)
+                                try:
+                                    # Redirects/unfinished resources must not hold the receipt open.
+                                    # Query sizes concurrently with one bounded budget, never finished().
+                                    sizes = await asyncio.wait_for(response.request.sizes(), timeout=min(timeout, 1.0))
+                                    resource['bytes'] = sizes['responseBodySize']
+                                except (asyncio.TimeoutError, Error):
+                                    pass
+                                return resource
+
+                            network['resources'] = await asyncio.gather(*(resource_size(r, sub) for r, sub in responses))
+                            for resource in network['resources']:
+                                if resource['bytes'] is None:
+                                    network['unmeasured_responses'] += 1
+                                else:
+                                    network['response_bytes'] += resource['bytes']
+                                    if resource['subresource']:
+                                        network['subresource_bytes'] += resource['bytes']
+                            state['bytes'] += network['subresource_bytes']
+                            receipt = dict(schema='web-render-v1', page_id=page_id, url=url, fetched_at=fetched_at,
+                                           final_url=final_url, status=status, capture_status='rendered', title=title, lang=lang,
+                                           licence=licence, source=spec.get('source'), api_url=spec.get('api_url'),
+                                           viewport=list(viewport), scale=scale, user_agent=await page.evaluate('navigator.userAgent'),
+                                           render_url=page.url, timeout=timeout, watchdog_seconds=2 * timeout,
+                                           font_timeout_seconds=min(timeout, 5.0), screenshot_capture=screenshot_capture,
+                                           elapsed_seconds=time.monotonic() - started, timings=timings, bytes=state['bytes'], network=network,
+                                           chromium_version=browser.version, fonts=dom['fonts'],
+                                           computed_font_families=dom['computed_font_families'],
+                                           sha256=dict(html=_sha(html_path), pdf=_sha(pdf_path) if pdf_path else None,
+                                                       png=_sha(png_path) if png_path else None,
+                                                       dom=_sha(dom_path), print_dom=_sha(print_dom_path) if print_dom_path else None,
+                                                       rendered_html=_sha(work / 'rendered.html')),
+                                           files=dict(html='source.html', pdf='page.pdf' if pdf_path else None,
+                                                      png='page.png' if png_path else None, dom='dom.json',
+                                                      print_dom='print_dom.json' if print_dom_path else None,
+                                                      rendered_html='rendered.html'),
+                                           determinism=dict(animations=False, javascript=False, service_workers=False,
+                                                            fonts_awaited=True, block_media=block_media,
+                                                            lazy_images='blocked' if block_media else 'eager', locale='el-GR', timezone='UTC'),
+                                           blocked_requests=blocked, dom_warnings=dom['warnings'],
+                                           api_final_url=spec.get('api_final_url'),
+                                           label_limits='DOM fragments exclude generated content, hidden nodes, text-transform and non-LTR text')
+                            receipt_path = work / 'receipt.json'
+                            if 'source_json' in spec:
+                                receipt['sha256']['source_json'] = _sha(work / 'source.json')
+                                receipt['files']['source_json'] = 'source.json'
+                        receipt['elapsed_seconds'] = time.monotonic() - started
                         _write(receipt_path, receipt)
                         return PageRecord(page_id, str(html_path), str(pdf_path) if pdf_path else None,
                                           str(png_path) if png_path else None, str(dom_path),
@@ -362,7 +441,7 @@ def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathL
                                        final_url=state['final_url'], status=progress_status, capture_status=progress_status,
                                        http_status=state['http_status'], licence=licence, source=spec.get('source'),
                                        timeout=timeout, watchdog_seconds=2 * timeout,
-                                       elapsed_seconds=time.monotonic() - started, bytes=state['bytes'], network=network,
+                                       elapsed_seconds=time.monotonic() - started, timings=timings, bytes=state['bytes'], network=network,
                                        blocked_requests=blocked,
                                        error=str(error).splitlines()[0] if str(error) else 'per-page watchdog exceeded',
                                        files=dict(html=None, pdf=None, png=None, dom=None, print_dom=None, rendered_html=None),
@@ -378,7 +457,9 @@ def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathL
                             except (asyncio.TimeoutError, Error):
                                 pass
                     records.append(record)
-                    print(f"WEB_PAGE {index + 1}/{len(sources)} {progress_status} {url} {record.receipt['bytes']}", flush=True)
+                    steps = ' '.join(f'{key}={value:.3f}s' for key, value in timings.items())
+                    print(f"WEB_PAGE {index + 1}/{len(sources)} {progress_status} {url} {record.receipt['bytes']} "
+                          f"seconds={record.receipt['elapsed_seconds']:.3f} {steps}", flush=True)
             finally:
                 try:
                     await asyncio.wait_for(browser.close(), timeout=10)
