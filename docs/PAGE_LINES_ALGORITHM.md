@@ -50,6 +50,12 @@ are fitted together.
 
 Iterate on the mathematics on those six lines until both hold; then widen to the page.
 
+**Owner direction (9 October, 00:15): start from pixels.** From now on the starting segments should come from our own
+pixel segmentation, not the PDF's text-layer boxes: one path for every page (Anemi and other scans have no text layer),
+and the line set our recogniser reads comes from our geometry rather than from InVision's segmentation errors. The
+text-layer boxes remain optional hints and a diagnostic (their text). To confirm before switching: run the page
+detector on the Vouli pages from pixels alone and with the boxes, and compare.
+
 ## Where the code stands (commit `a5750e2`)
 
 | Step | Code | Status |
