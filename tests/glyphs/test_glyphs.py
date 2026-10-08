@@ -524,3 +524,27 @@ def test_cpg4_f1_cut_fractions_do_not_depend_on_tight_or_margin(cut):
         L = [l for l in separate_lines(Image.fromarray(crop), xh_prior=xh, **kw) if l.side == 'main'][0]
         vals.append(float((L.top_cut if cut == 'top' else L.bottom_cut).mean()))
     assert max(vals) - min(vals) < 1e-9 and vals[0] > .2
+
+
+
+def test_recut_page_keeps_each_line_and_excludes_its_neighbours():
+    """Owner 8 Oct 18:05–18:25: recut from the page along the fitted line, bounded collaboratively by the neighbours'
+    fitted lines. Tight two-column synthetic page, accent-cutting text-layer boxes: every line is recovered whole,
+    with no neighbour ink and no run past its ends."""
+    import importlib.util, os, random as _r
+    os.environ['HARD'] = '1'
+    spec = importlib.util.spec_from_file_location('rsp', Path(__file__).parents[2] / 'scripts/glyphs/eval/recut_synth_pages.py')
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    from greekocr.glyphs.recut import recut_page
+    rng = _r.Random(3)
+    page, lab, info, ang, pitch = m.make_page(rng, DIDOT, 34, 'rule')
+    items = [(li, m.tight_box(lab, li['id'], li['xh'], rng)) for li in info if (lab == li['id']).sum() >= 200]
+    res = recut_page(page, [b for _, b in items])
+    for (li, box), rcs in zip(items, res):
+        tgt = lab == li['id']
+        shown = np.zeros_like(tgt)
+        for rc in rcs:
+            shown |= rc.erased
+        assert (tgt & shown).sum() >= .95 * tgt.sum(), li
+        ink = (lab > 0) & shown
+        assert (ink & ~tgt).sum() <= .02 * ink.sum(), li
