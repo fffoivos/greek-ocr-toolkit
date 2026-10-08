@@ -132,6 +132,48 @@ CALLS={
 'plugin_options':'options = plugin_options("weights.pt", "codec/v1.json", routing_sidecar="routes.jsonl")',
 'ocr_engines':'engines = ocr_engines()',
 'main':'exit_code = main(["annotate", "ἅλφα Latin"])',
+'to_gray':'gray = to_gray(Image.open("crop.png"))',
+'binarise':'ink = binarise(gray)',
+'line_glyphs':'glyphs = line_glyphs(Image.open("crop.png"), xh_prior=None)',
+'Band':'band = line_glyphs(Image.open("crop.png")).band',
+'at':'mean_line, baseline = band.at(120.0)',
+'cx':'centre_x = component.cx',
+'w':'width_px = box.w',
+'h':'height_px = component.h',
+'LineGlyphs':'glyphs = line_glyphs(Image.open("crop.png"))',
+'width':'crop_width = glyphs.width',
+'height':'crop_height = glyphs.height',
+'LetterBox':'box = letter_boxes(glyphs)[0]',
+'split':'cut_from_merged_blob = box.split',
+'letter_boxes':'boxes = letter_boxes(line_glyphs(Image.open("crop.png")))',
+'Crossing':'crossing = skew_line(glyphs).crossings[0]',
+'CutLetter':'cut = skew_line(glyphs).cut_letters[0]',
+'CutSpan':'span = skew_line(glyphs).cut_spans[0]',
+'SecondLine':'second = second_line(glyphs)',
+'second_line':'second = second_line(line_glyphs(Image.open("crop.png")))',
+'SkewLine':'line = skew_line(glyphs)',
+'skew_line':'line = skew_line(line_glyphs(Image.open("crop.png")))',
+'double_line':'two_lines = skew_line(glyphs).double_line',
+'confidence':'fit_confidence = skew_line(glyphs).confidence',
+'LetterInk':'letter = ink_profile(glyphs).letters[0]',
+'InkProfile':'profile = ink_profile(glyphs)',
+'ink_profile':'profile = ink_profile(line_glyphs(Image.open("crop.png")))',
+'TruthGlyph':'glyph = render_truth_line("ἀνδρώας", "GFSDidot-Regular.ttf").glyphs[0]',
+'Rendered':'rendered = render_truth_line("ἀνδρώας", "GFSDidot-Regular.ttf", degrade=False)',
+'ink_truth':'signed_defect_per_column = rendered.ink_truth',
+'UnsupportedText':'error = UnsupportedText("font cannot draw ᾿")',
+'font_covers':'ok, reason = font_covers("GFSDidot-Regular.ttf", "ἀνδρώας")',
+'font_supports_polytonic':'ok, reason = font_supports_polytonic("GFSDidot-Regular.ttf")',
+'render_truth_line':'rendered = render_truth_line("ἀνδρώας κύστεως", "GFSDidot-Regular.ttf", size=40, bend=("left", -1.0, .3))',
+'usable_fonts':'fonts, rejected = usable_fonts(["GFSDidot-Regular.ttf", "XCharter-Regular.otf"])',
+'GlyphScore':'total = GlyphScore()',
+'add':'total.add(score_rendered(rendered))',
+'score_rendered':'score = score_rendered(render_truth_line("ἀνδρώας", "GFSDidot-Regular.ttf"))',
+'summarise':'rates = summarise(score)',
+'clipped_fraction':'share = clipped_fraction(line_glyphs(Image.open("crop.png")))',
+'document_of':'document = document_of("s2-60f24a3d8a2d714767f2-p00003-l00024.png")',
+'document_priors':'priors = document_priors(["crops/a.png", "crops/b.png"])',
+'line_record':'record = line_record("crop.png", priors=priors)',
 }
 
 
@@ -153,7 +195,9 @@ def api_entries():
                 yield module,node.name,node,None
                 if isinstance(node,ast.ClassDef):
                     for method in node.body:
-                        if isinstance(method,ast.FunctionDef) and not method.name.startswith('_'):
+                        # properties are documented attributes of their class, not callables
+                        is_property=any(isinstance(d,ast.Name) and d.id=='property' for d in method.decorator_list) if isinstance(method,ast.FunctionDef) else False
+                        if isinstance(method,ast.FunctionDef) and not method.name.startswith('_') and not is_property:
                             yield module,method.name,method,node.name
 
 

@@ -658,3 +658,6 @@ The coordinator supplied four original text-layer crops (`_old.png`) and their v
 ## T6 confidence worker update
 
 The two CLLG implementation files above now support optional confidence records. Their original source identity is retained in `greekocr/_vendor/origins.json`; `docs/T6_VENDOR_UPDATE.json` binds exact before/after byte and non-import AST hashes and the complete diff. Plain string-list JSON output is regression-tested byte for byte, including Unicode. Model loading, transforms and prediction remain unchanged; the worker source hash changes. No actual reader model or GPU was run.
+| `tests/fixtures/fonts/GFSDidot-Regular.ttf` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/assets/fonts/GFSDidot-Regular.ttf` | 6f54bfc4b3de088dbe55de9e525328a34daeaff3 | HEAD | byte-identical |
+| `tests/fixtures/fonts/XCharter-Regular.otf` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/assets/fonts/XCharter-Regular.otf` | 6f54bfc4b3de088dbe55de9e525328a34daeaff3 | HEAD | byte-identical |
+| `tests/fixtures/fonts/PROVENANCE.json` | `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/tests/fixtures/fonts/PROVENANCE.json` | none (new, toolkit-authored 8 Oct 2026) | new | new |

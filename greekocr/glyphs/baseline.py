@@ -1,0 +1,187 @@
+"""Skew line (the underline), trail, boundary crossings and cut-off points of a line crop, from its letter band.
+
+Conventions: image rows grow downwards. `angle_deg` > 0 means the line rises to the right on the page image;
+`trail_px` = baseline row at the right end minus the left end (> 0 trails down, < 0 trails up).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import math
+
+import numpy as np
+from numpy.typing import NDArray
+
+from greekocr.glyphs.components import LineGlyphs, _fit_curve, _ransac_line
+from greekocr.glyphs.letters import LetterBox, letter_boxes
+
+__all__ = ['DOUBLE_RATIO', 'Crossing', 'CutLetter', 'CutSpan', 'SecondLine', 'SkewLine', 'second_line', 'skew_line']
+
+# A second text line inside the crop: its band's letter support ≥ DOUBLE_RATIO × the main band's. Set on the 44
+# o4d_lines fixtures against the implementer's provisional labels (7 double: 0.27–0.61; 20 single: ≤ 0.22) and
+# checked on rendered two-line crops (docs/GLYPHS_PLAN.md).
+DOUBLE_RATIO = .25
+DOUBLE_BODIES = 0   # body count is reported but not gated: a second line cut by the crop has none (fixture line22)
+
+
+@dataclass(frozen=True)
+class Crossing:
+    x: float
+    line: str      # 'baseline' | 'meanline'
+    edge: str      # 'top' | 'bottom'
+    meaning: str   # human-readable
+
+
+@dataclass(frozen=True)
+class CutSpan:
+    x0: int
+    x1: int        # exclusive
+    edge: str      # 'top' | 'bottom'
+    min_visible: float   # smallest visible fraction of the letter body in the span (0 = body entirely outside)
+
+
+@dataclass(frozen=True)
+class CutLetter:
+    x0: int
+    x1: int
+    edge: str          # 'top' | 'bottom'
+    body_cut: float    # fraction of the letter body (x-height band) outside the crop at this letter
+    touches: bool      # the letter's ink reaches the crop edge
+
+
+@dataclass(frozen=True)
+class SecondLine:
+    support: int
+    ratio: float          # support / main band support
+    bodies: int           # letters whose body is ≥ 60 % visible on the second band
+    offset_xh: float      # median vertical offset from the main baseline, in x-heights (+ below)
+    visible: float        # mean fraction of its letter body inside the crop over its supported x-range
+    coverage: float       # supported x-range / crop width
+    baseline: NDArray[np.float64]
+
+
+def second_line(glyphs: LineGlyphs) -> SecondLine | None:
+    """Fit a band to the ink the main band does not explain (outside its body ± 0.3 x-heights)."""
+    xh, h, w = glyphs.band.xh, glyphs.height, glyphs.width
+    t1, b1 = glyphs.band.top, glyphs.band.bottom
+    px, py = [], []
+    for c in glyphs.components:
+        if c.role == 'rule' or c.area < .08 * xh * xh or not (.3 * xh <= c.w <= 1.8 * xh):
+            continue
+        i = int(np.clip(c.cx, 0, w - 1))
+        if t1[i] - .3 * xh <= (c.y0 + c.y1) / 2 <= b1[i] + .3 * xh:
+            continue
+        touch = set(c.touches)
+        if 'bottom' not in touch and ('top' in touch or .6 * xh <= c.h <= 1.4 * xh):
+            px.append(c.cx); py.append(float(c.y1))
+        if 'top' not in touch and ('bottom' in touch or .6 * xh <= c.h <= 1.4 * xh):
+            px.append(c.cx); py.append(float(c.y0) + xh)
+    if len(px) < 4:
+        return None
+    bx, by = np.array(px), np.array(py)
+    inl = _ransac_line(bx, by, .15 * xh + 1, np.random.default_rng(0))
+    if inl.sum() < 4:
+        return None
+    curve, _ = _fit_curve(bx[inl], by[inl], w)
+    lo, hi = int(bx[inl].min()), int(bx[inl].max()) + 1
+    vis = np.clip(np.minimum(curve, h) - np.maximum(curve - xh, 0), 0, xh) / xh
+    # visible letter bodies on the second band: components covering ≥ 0.6 of its middle region (tips do not)
+    bodies = 0
+    for c in glyphs.components:
+        if c.role in ('mark', 'rule') or c.w > 2 * xh:
+            continue
+        i = int(np.clip(c.cx, 0, w - 1))
+        if min(c.y1, curve[i]) - max(c.y0, curve[i] - xh) >= .6 * xh:
+            bodies += 1
+    return SecondLine(int(inl.sum()), round(int(inl.sum()) / max(1, glyphs.band.n_support), 3), bodies,
+                      round(float(np.median(curve - b1)) / xh, 2), round(float(vis[lo:hi].mean()), 3),
+                      round((hi - lo) / w, 3), curve)
+
+
+@dataclass(frozen=True)
+class SkewLine:
+    angle_deg: float
+    trail_px: float
+    degree: int
+    baseline: NDArray[np.float64]
+    meanline: NDArray[np.float64]
+    visible: NDArray[np.float64]     # per column: fraction of the letter body inside the crop, 0..1
+    support_x: tuple[float, float]
+    n_support: int
+    residual_px: float | None        # median |support − fit|; None without support
+    xh: float
+    xh_source: str
+    crossings: tuple[Crossing, ...]
+    cut_spans: tuple[CutSpan, ...]
+    cut_letters: tuple[CutLetter, ...]
+    second: SecondLine | None = None
+
+    @property
+    def double_line(self) -> bool:
+        return self.second is not None and self.second.ratio >= DOUBLE_RATIO and self.second.bodies >= DOUBLE_BODIES
+
+    @property
+    def confidence(self) -> str:
+        if self.residual_px is None:
+            return 'low'
+        if self.n_support >= 15 and self.residual_px <= .12 * self.xh and self.xh_source != 'letter_width':
+            return 'high'
+        return 'medium' if self.n_support >= 6 else 'low'
+
+
+def _crossings(y: NDArray[np.float64], level: float, line: str, edge: str) -> list[Crossing]:
+    out = []
+    above = y < level
+    for i in np.nonzero(above[1:] != above[:-1])[0]:
+        # linear interpolation between columns i and i+1
+        x = i + (level - y[i]) / (y[i + 1] - y[i]) if y[i + 1] != y[i] else float(i)
+        entering = (edge == 'top' and not above[i + 1]) or (edge == 'bottom' and above[i + 1])
+        part = 'top of the letters' if line == 'meanline' else 'whole letter body'
+        verb = 'enters the crop' if entering else 'leaves the crop'
+        out.append(Crossing(float(x), line, edge, f'{part} {verb} through the {edge} edge'))
+    return out
+
+
+def _spans(mask: NDArray[np.bool_], visible: NDArray[np.float64], edge: str, min_len: int) -> list[CutSpan]:
+    out = []
+    padded = np.concatenate([[False], mask, [False]])
+    edges = np.nonzero(padded[1:] != padded[:-1])[0]
+    for a, b in zip(edges[::2], edges[1::2]):
+        if b - a >= min_len:
+            out.append(CutSpan(int(a), int(b), edge, round(float(visible[a:b].min()), 3)))
+    return out
+
+
+def skew_line(glyphs: LineGlyphs, boxes: list[LetterBox] | None = None) -> SkewLine:
+    band, h, w = glyphs.band, glyphs.height, glyphs.width
+    base, mean = band.bottom, band.top
+    sx = np.array([p[0] for p in band.support], float)
+    sy = np.array([p[1] for p in band.support], float)
+    if len(sx) >= 2 and np.ptp(sx) > 0:
+        slope = float(np.polyfit(sx, sy, 1)[0])
+        resid = float(np.median(np.abs(sy - base[np.clip(sx.astype(int), 0, w - 1)])))
+    else:
+        slope, resid = float((base[-1] - base[0]) / max(w - 1, 1)), None
+    visible = np.clip(np.minimum(base, h) - np.maximum(mean, 0), 0, None) / band.xh
+    visible = np.clip(visible, 0, 1)
+    crossings = (_crossings(mean, 0.0, 'meanline', 'top') + _crossings(base, 0.0, 'baseline', 'top')
+                 + _crossings(base, float(h), 'baseline', 'bottom') + _crossings(mean, float(h), 'meanline', 'bottom'))
+    crossings.sort(key=lambda c: c.x)
+    min_len = max(2, int(.3 * band.xh))
+    cut_top = (mean < -.1 * band.xh) & (visible < .95)
+    cut_bottom = (base > h + .1 * band.xh) & (visible < .95)
+    spans = _spans(cut_top, visible, 'top', min_len) + _spans(cut_bottom, visible, 'bottom', min_len)
+    spans.sort(key=lambda s: s.x0)
+    cut_letters = []
+    for b in boxes if boxes is not None else letter_boxes(glyphs):
+        cx = int(np.clip((b.x0 + b.x1) // 2, 0, w - 1))
+        top_cut = float(np.clip(-mean[cx] / band.xh, 0, 1))
+        bot_cut = float(np.clip((base[cx] - h) / band.xh, 0, 1))
+        if b.y0 == 0 or top_cut > .1:
+            cut_letters.append(CutLetter(b.x0, b.x1, 'top', round(top_cut, 3), b.y0 == 0))
+        if b.y1 == h or bot_cut > .1:
+            cut_letters.append(CutLetter(b.x0, b.x1, 'bottom', round(bot_cut, 3), b.y1 == h))
+    return SkewLine(angle_deg=round(-math.degrees(math.atan(slope)), 3), trail_px=round(float(base[-1] - base[0]), 2),
+                    degree=band.degree, baseline=base, meanline=mean, visible=visible,
+                    support_x=(float(sx.min()), float(sx.max())) if len(sx) else (0.0, 0.0), n_support=band.n_support,
+                    residual_px=None if resid is None else round(resid, 2), xh=band.xh, xh_source=band.xh_source, crossings=tuple(crossings),
+                    cut_spans=tuple(spans), cut_letters=tuple(cut_letters), second=second_line(glyphs))

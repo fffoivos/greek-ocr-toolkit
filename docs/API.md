@@ -356,6 +356,306 @@ from greekocr.deploy.pods import ensure_pod
 receipt = ensure_pod(client, "pod_state.json", timeout=1500)
 ```
 
+### `greekocr.glyphs.baseline.Crossing`
+
+```python
+from greekocr.glyphs.baseline import Crossing
+crossing = skew_line(glyphs).crossings[0]
+```
+
+### `greekocr.glyphs.baseline.CutSpan`
+
+```python
+from greekocr.glyphs.baseline import CutSpan
+span = skew_line(glyphs).cut_spans[0]
+```
+
+### `greekocr.glyphs.baseline.CutLetter`
+
+```python
+from greekocr.glyphs.baseline import CutLetter
+cut = skew_line(glyphs).cut_letters[0]
+```
+
+### `greekocr.glyphs.baseline.SecondLine`
+
+```python
+from greekocr.glyphs.baseline import SecondLine
+second = second_line(glyphs)
+```
+
+### `greekocr.glyphs.baseline.second_line`
+
+`def second_line(glyphs: LineGlyphs) -> SecondLine | None`
+
+Fit a band to the ink the main band does not explain (outside its body ± 0.3 x-heights).
+
+```python
+from greekocr.glyphs.baseline import second_line
+second = second_line(line_glyphs(Image.open("crop.png")))
+```
+
+### `greekocr.glyphs.baseline.SkewLine`
+
+```python
+from greekocr.glyphs.baseline import SkewLine
+line = skew_line(glyphs)
+```
+
+### `greekocr.glyphs.baseline.skew_line`
+
+`def skew_line(glyphs: LineGlyphs, boxes: list[LetterBox] | None=None) -> SkewLine`
+
+```python
+from greekocr.glyphs.baseline import skew_line
+line = skew_line(line_glyphs(Image.open("crop.png")))
+```
+
+### `greekocr.glyphs.components.to_gray`
+
+`def to_gray(crop: Image.Image | NDArray[Any]) -> NDArray[np.float64]`
+
+Grayscale float array in [0, 255], ink dark.
+
+```python
+from greekocr.glyphs.components import to_gray
+gray = to_gray(Image.open("crop.png"))
+```
+
+### `greekocr.glyphs.components.binarise`
+
+`def binarise(gray: NDArray[np.float64], *, window: int | None=None, k: float=0.2) -> NDArray[np.bool_]`
+
+Ink mask = Sauvola local threshold (window ≈ crop height) AND a loose global floor, PLUS faint components.
+
+```python
+from greekocr.glyphs.components import binarise
+ink = binarise(gray)
+```
+
+### `greekocr.glyphs.components.Band`
+
+The letter band as functions of x: top = mean line, bottom = baseline (row coordinates, may lie outside the crop).
+
+```python
+from greekocr.glyphs.components import Band
+band = line_glyphs(Image.open("crop.png")).band
+```
+
+### `greekocr.glyphs.components.Band.at`
+
+`def at(self, x: float) -> tuple[float, float]`
+
+```python
+from greekocr.glyphs.components import Band
+mean_line, baseline = band.at(120.0)
+```
+
+### `greekocr.glyphs.components.Component`
+
+One 8-connected ink component. `rel_*` fields are normalised by the line x-height.
+
+```python
+from greekocr.glyphs.components import Component
+component = Component(1, (10, 20, 25, 45), 100, 17.0, 32.0)
+```
+
+### `greekocr.glyphs.components.LineGlyphs`
+
+```python
+from greekocr.glyphs.components import LineGlyphs
+glyphs = line_glyphs(Image.open("crop.png"))
+```
+
+### `greekocr.glyphs.components.line_glyphs`
+
+`def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int=0, xh_prior: float | None=None) -> LineGlyphs`
+
+Components with descriptors and roles plus the letter band they define. CPU, a few ms for a 1500×80 strip.
+
+```python
+from greekocr.glyphs.components import line_glyphs
+glyphs = line_glyphs(Image.open("crop.png"), xh_prior=None)
+```
+
+### `greekocr.glyphs.evaluate.GlyphScore`
+
+```python
+from greekocr.glyphs.evaluate import GlyphScore
+total = GlyphScore()
+```
+
+### `greekocr.glyphs.evaluate.GlyphScore.add`
+
+`def add(self, other: 'GlyphScore') -> None`
+
+```python
+from greekocr.glyphs.evaluate import GlyphScore
+total.add(score_rendered(rendered))
+```
+
+### `greekocr.glyphs.evaluate.score_rendered`
+
+`def score_rendered(sample: Rendered, glyphs: LineGlyphs | None=None, boxes: list[LetterBox] | None=None) -> GlyphScore`
+
+```python
+from greekocr.glyphs.evaluate import score_rendered
+score = score_rendered(render_truth_line("ἀνδρώας", "GFSDidot-Regular.ttf"))
+```
+
+### `greekocr.glyphs.evaluate.summarise`
+
+`def summarise(score: GlyphScore) -> dict[str, object]`
+
+```python
+from greekocr.glyphs.evaluate import summarise
+rates = summarise(score)
+```
+
+### `greekocr.glyphs.ink.LetterInk`
+
+```python
+from greekocr.glyphs.ink import LetterInk
+letter = ink_profile(glyphs).letters[0]
+```
+
+### `greekocr.glyphs.ink.InkProfile`
+
+```python
+from greekocr.glyphs.ink import InkProfile
+profile = ink_profile(glyphs)
+```
+
+### `greekocr.glyphs.ink.ink_profile`
+
+`def ink_profile(glyphs: LineGlyphs, boxes: list[LetterBox] | None=None, *, reference_contrast: float | None=None) -> InkProfile`
+
+```python
+from greekocr.glyphs.ink import ink_profile
+profile = ink_profile(line_glyphs(Image.open("crop.png")))
+```
+
+### `greekocr.glyphs.letters.LetterBox`
+
+```python
+from greekocr.glyphs.letters import LetterBox
+box = letter_boxes(glyphs)[0]
+```
+
+### `greekocr.glyphs.letters.letter_boxes`
+
+`def letter_boxes(glyphs: LineGlyphs) -> list[LetterBox]`
+
+```python
+from greekocr.glyphs.letters import letter_boxes
+boxes = letter_boxes(line_glyphs(Image.open("crop.png")))
+```
+
+### `greekocr.glyphs.report.document_of`
+
+`def document_of(name: str) -> str | None`
+
+```python
+from greekocr.glyphs.report import document_of
+document = document_of("s2-60f24a3d8a2d714767f2-p00003-l00024.png")
+```
+
+### `greekocr.glyphs.report.clipped_fraction`
+
+`def clipped_fraction(glyphs: LineGlyphs) -> float`
+
+Share of letter boxes whose ink touches the top or bottom crop edge.
+
+```python
+from greekocr.glyphs.report import clipped_fraction
+share = clipped_fraction(line_glyphs(Image.open("crop.png")))
+```
+
+### `greekocr.glyphs.report.document_priors`
+
+`def document_priors(paths: Iterable[PathLike]) -> dict[str, dict[str, float]]`
+
+Median x-height per document over its complete crops: {document: {'xh': .., 'n': ..}}.
+
+```python
+from greekocr.glyphs.report import document_priors
+priors = document_priors(["crops/a.png", "crops/b.png"])
+```
+
+### `greekocr.glyphs.report.line_record`
+
+`def line_record(path: PathLike, *, priors: Mapping[str, Mapping[str, float]] | None=None, label: str='', step: int=4) -> dict[str, Any]`
+
+```python
+from greekocr.glyphs.report import line_record
+record = line_record("crop.png", priors=priors)
+```
+
+### `greekocr.glyphs.synthetic.UnsupportedText`
+
+The font cannot draw every character of the requested text.
+
+```python
+from greekocr.glyphs.synthetic import UnsupportedText
+error = UnsupportedText("font cannot draw ᾿")
+```
+
+### `greekocr.glyphs.synthetic.TruthGlyph`
+
+```python
+from greekocr.glyphs.synthetic import TruthGlyph
+glyph = render_truth_line("ἀνδρώας", "GFSDidot-Regular.ttf").glyphs[0]
+```
+
+### `greekocr.glyphs.synthetic.Rendered`
+
+```python
+from greekocr.glyphs.synthetic import Rendered
+rendered = render_truth_line("ἀνδρώας", "GFSDidot-Regular.ttf", degrade=False)
+```
+
+### `greekocr.glyphs.synthetic.font_covers`
+
+`def font_covers(path: PathLike, text: str) -> tuple[bool, str]`
+
+Every grapheme of `text` renders, differs from .notdef, and keeps its marks.
+
+```python
+from greekocr.glyphs.synthetic import font_covers
+ok, reason = font_covers("GFSDidot-Regular.ttf", "ἀνδρώας")
+```
+
+### `greekocr.glyphs.synthetic.font_supports_polytonic`
+
+`def font_supports_polytonic(path: PathLike, size: int=48) -> tuple[bool, str]`
+
+Gate on a fixed polytonic probe (incl. spacing breathings); per-text coverage is enforced at render time.
+
+```python
+from greekocr.glyphs.synthetic import font_supports_polytonic
+ok, reason = font_supports_polytonic("GFSDidot-Regular.ttf")
+```
+
+### `greekocr.glyphs.synthetic.render_truth_line`
+
+`def render_truth_line(text: str, font_path: PathLike, *, size: int=40, rng: random.Random | None=None, degrade: bool=True, pad: int | None=None, neighbours: tuple[str, str] | None=None, ink_defects: Sequence[tuple[float, float, str, float]]=(), bend: tuple[str, float, float] | None=None, second_line: str | None=None) -> Rendered`
+
+Render `text` with per-pixel truth and an optional randomised scan model (skew ±2°, blur, ink gain, noise).
+
+```python
+from greekocr.glyphs.synthetic import render_truth_line
+rendered = render_truth_line("ἀνδρώας κύστεως", "GFSDidot-Regular.ttf", size=40, bend=("left", -1.0, .3))
+```
+
+### `greekocr.glyphs.synthetic.usable_fonts`
+
+`def usable_fonts(paths: Sequence[PathLike]) -> tuple[list[Path], dict[str, str]]`
+
+```python
+from greekocr.glyphs.synthetic import usable_fonts
+fonts, rejected = usable_fonts(["GFSDidot-Regular.ttf", "XCharter-Regular.otf"])
+```
+
 ### `greekocr.ops.rate_limit.rate_limited_client`
 
 `def rate_limited_client(source: str, root: PathLike, *, offline: bool=True, interval: float=2, budget: int=2000000000) -> DiscoveryHTTP`
@@ -1109,75 +1409,6 @@ from greekocr.synth import assemble_mix
 rows, counts = assemble_mix([[{"line_id":"a"}], [{"line_id":"b"}]], [.25,.75], seed=0)
 ```
 
-### `greekocr.warmstart.map_donor_state`
-
-`def map_donor_state(family: str, state: Mapping[str, Any]) -> tuple[Record, Record, list[str]]`
-
-```python
-from greekocr.warmstart import map_donor_state
-mapped, layers, dropped = map_donor_state("R03", upstream_tensor_state)
-```
-
-### `greekocr.warmstart.map_paddle_state`
-
-`def map_paddle_state(state: Mapping[str, Any], layer_map: Record, expected: Mapping[str, Any]) -> Record`
-
-```python
-from greekocr.warmstart import map_paddle_state
-mapped = map_paddle_state(paddle_state, reviewed_layer_map, expected_torch_state)
-```
-
-### `greekocr.warmstart.preprocess`
-
-`def preprocess(image: Image.Image, contract: Record) -> Any`
-
-```python
-from greekocr.warmstart import preprocess
-tensor = preprocess(image, {"color":"BGR", "height":48, "interpolation":"linear", "pad_rule":"paddle_dynamic", "pad_width":320})
-```
-
-### `greekocr.warmstart.compare_endpoints`
-
-`def compare_endpoints(native: Mapping[str, Any], converted: Mapping[str, Any]) -> Record`
-
-```python
-from greekocr.warmstart import compare_endpoints
-receipt = compare_endpoints(native_endpoints, converted_endpoints)
-```
-
-### `greekocr.warmstart.convert_donor`
-
-`def convert_donor(family: str, checkpoint: PathLike, config: PathLike, out: PathLike, revision: str, *, codec: PathLike, seed: int=0) -> Record`
-
-```python
-from greekocr.warmstart import convert_donor
-receipt = convert_donor("R03", "upstream.pt", "config.json", "converted", "immutable-sha", codec="codec/v1.json")
-```
-
-### `greekocr.warmstart.verify_init`
-
-`def verify_init(path: PathLike) -> Record`
-
-```python
-from greekocr.warmstart import verify_init
-checkpoint = verify_init("converted/donor_init.pt")
-```
-
-### `greekocr.warmstart.qualify_parity`
-
-`def qualify_parity(spec: Record, converted: PathLike, crops: PathLike, out: PathLike) -> Record`
-
-```python
-from greekocr.warmstart import qualify_parity
-receipt = qualify_parity(donor_spec, "converted/native_before_swap.pt", "100_crops.jsonl", "parity")
-```
-
-<!-- T7_VERIFY_API -->
-
-## Image readability and Greek readings
-
-Offline measurements: `image_checks`, `readability_profile`, `text_checks`. Judges require an explicit invocation and share a persistent call ledger; their costs and model identity are receipt-bound. See [VERIFY.md](VERIFY.md).
-
 ### `greekocr.verify.images.ImageChecks`
 
 Line summaries. Units, sign conventions and provisional thresholds: docs/VERIFY.md.
@@ -1307,4 +1538,67 @@ Check normalized graphemes, not NFC-vs-NFD representation differences.
 ```python
 from greekocr.verify.text import text_checks
 checks = text_checks("ἡ χώρα")
+```
+
+### `greekocr.warmstart.map_donor_state`
+
+`def map_donor_state(family: str, state: Mapping[str, Any]) -> tuple[Record, Record, list[str]]`
+
+```python
+from greekocr.warmstart import map_donor_state
+mapped, layers, dropped = map_donor_state("R03", upstream_tensor_state)
+```
+
+### `greekocr.warmstart.map_paddle_state`
+
+`def map_paddle_state(state: Mapping[str, Any], layer_map: Record, expected: Mapping[str, Any]) -> Record`
+
+```python
+from greekocr.warmstart import map_paddle_state
+mapped = map_paddle_state(paddle_state, reviewed_layer_map, expected_torch_state)
+```
+
+### `greekocr.warmstart.preprocess`
+
+`def preprocess(image: Image.Image, contract: Record) -> Any`
+
+```python
+from greekocr.warmstart import preprocess
+tensor = preprocess(image, {"color":"BGR", "height":48, "interpolation":"linear", "pad_rule":"paddle_dynamic", "pad_width":320})
+```
+
+### `greekocr.warmstart.compare_endpoints`
+
+`def compare_endpoints(native: Mapping[str, Any], converted: Mapping[str, Any]) -> Record`
+
+```python
+from greekocr.warmstart import compare_endpoints
+receipt = compare_endpoints(native_endpoints, converted_endpoints)
+```
+
+### `greekocr.warmstart.convert_donor`
+
+`def convert_donor(family: str, checkpoint: PathLike, config: PathLike, out: PathLike, revision: str, *, codec: PathLike, seed: int=0) -> Record`
+
+```python
+from greekocr.warmstart import convert_donor
+receipt = convert_donor("R03", "upstream.pt", "config.json", "converted", "immutable-sha", codec="codec/v1.json")
+```
+
+### `greekocr.warmstart.verify_init`
+
+`def verify_init(path: PathLike) -> Record`
+
+```python
+from greekocr.warmstart import verify_init
+checkpoint = verify_init("converted/donor_init.pt")
+```
+
+### `greekocr.warmstart.qualify_parity`
+
+`def qualify_parity(spec: Record, converted: PathLike, crops: PathLike, out: PathLike) -> Record`
+
+```python
+from greekocr.warmstart import qualify_parity
+receipt = qualify_parity(donor_spec, "converted/native_before_swap.pt", "100_crops.jsonl", "parity")
 ```
