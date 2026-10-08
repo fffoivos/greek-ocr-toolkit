@@ -67,10 +67,11 @@ def straighten_edges(base: NDArray[np.float64], xh: float, height: int, *, above
 
 
 def separate_lines(crop: Image.Image | NDArray[Any], *, min_visible: float = .5, tight: bool = True,
-                   margin: float = .2, level_deg: float = .3, **kw: Any) -> list[LineImage]:
+                   margin: float = .2, level_deg: float = 0.0, **kw: Any) -> list[LineImage]:
     """One straightened image per text line. Recogniser-facing default: tight=True, margin=0.2 x-heights — the image is
-    cropped to its own ink ± margin after straightening; baselines within level_deg of level are only shifted, not
-    resampled. Calibration (docs/GLYPHS_CALIBRATION.md, 240 strips, two readers): E1 median NFD CER on level lines
+    cropped to its own ink ± margin after straightening. level_deg > 0 shifts (does not resample) baselines within
+    level_deg of level — NOT qualified (CP-G4 F5: changes E1 readings on 10/40 level strips), so off by default.
+    Calibration (docs/GLYPHS_CALIBRATION.md, 240 strips, two readers): E1 median NFD CER on level lines
     0.028 → 0.028, on 1–5° lines 0.188–0.860 → 0.028–0.042; a fixed-height paper pad (tight=False, for display) cost
     level lines 0.028 → 0.069."""
     img = crop if isinstance(crop, Image.Image) else Image.fromarray(np.asarray(crop).astype(np.uint8))
@@ -91,15 +92,15 @@ def separate_lines(crop: Image.Image | NDArray[Any], *, min_visible: float = .5,
             arr, missing, up = straighten(gray, base_line, xh, paper=g.paper)
             above_top, below_bottom = straighten_edges(base_line, xh, g.height)
             body = slice(up - int(round(xh)), up)                       # mean line → baseline rows
-            if tight:
+            top_cut, bottom_cut = above_top[body].mean(axis=0), below_bottom[body].mean(axis=0)   # source damage: before
+            if tight:                                                   # any output cropping (CP-G4 F1)
                 ink = binarise(arr) & ~missing
                 rows = np.nonzero(ink.any(axis=1))[0]
                 if rows.size:
                     t0 = max(0, int(rows[0] - margin * xh)); t1 = min(arr.shape[0], int(rows[-1] + 1 + margin * xh))
-                    arr, missing, above_top, below_bottom = arr[t0:t1], missing[t0:t1], above_top[t0:t1], below_bottom[t0:t1]
+                    arr, missing = arr[t0:t1], missing[t0:t1]
                     up -= t0
-                    body = slice(max(0, up - int(round(xh))), max(0, up))
             out.append(LineImage(Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), 'L'), missing, up, xh,
                                  seg.x0 + x0, seg.x0 + x1, k, L.side, L.shift_xh, L.visible,
-                                 above_top[body].mean(axis=0), below_bottom[body].mean(axis=0)))
+                                 top_cut, bottom_cut))
     return out

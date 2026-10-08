@@ -487,7 +487,8 @@ def test_g3c2_faint_bold_letters_in_tight_crops_survive(text, dilate):
 
 def test_readability_verdicts_on_owner_cases():
     from greekocr.glyphs.readability import readability, READER_LIMITS
-    assert READER_LIMITS['cllg'] == {'accent_cut': .3, 'top_cut': .05, 'tail_cut': .6, 'bottom_cut': .1, 'skew_deg': 4.0}
+    assert READER_LIMITS['cllg'] == {'accent_cut': .3, 'top_cut': .05, 'tail_cut': None, 'bottom_cut': .1, 'skew_deg': 4.0}
+    assert all(v is None for v in READER_LIMITS['e1'].values())
     crops = Path(__file__).parents[1] / 'fixtures'
     owner = readability(Image.open(crops / 'o4d_lines' / 'regressions' / 's2-60f24a3d8a2d714767f2-p00003-l00024_old.png'), xh_prior=26.0)
     assert owner.verdict == 'unreadable' and any('top' in r for r in owner.reasons)
@@ -497,13 +498,29 @@ def test_readability_verdicts_on_owner_cases():
     assert quiet.verdict == 'readable' and quiet.target == 'clear' and not quiet.spans
 
 
-def test_tight_straightening_is_tight_and_keeps_level_lines_unresampled():
+def test_tight_straightening_is_tight_and_level_deg_option_shifts_only():
     from greekocr.glyphs.lines_api import separate_lines
     r = render_truth_line(TEXTS[0], DIDOT, size=36, degrade=False)
-    tight = [l for l in separate_lines(r.image) if l.side == 'main'][0]
+    tight = [l for l in separate_lines(r.image, level_deg=.3) if l.side == 'main'][0]
     padded = [l for l in separate_lines(r.image, tight=False) if l.side == 'main'][0]
     assert tight.image.height < padded.image.height
-    # a level line is only shifted: its straightened rows equal source rows exactly (no interpolation)
+    # with level_deg (not the default: unqualified, CP-G4 F5) a level line is only shifted: rows equal source rows
     src = np.asarray(r.image, float)
     out = np.asarray(tight.image, float)
     assert any(np.array_equal(out[i], src[j, tight.x0:tight.x1]) for i in range(out.shape[0]) for j in range(src.shape[0]) if out[i].std() > 5)
+
+
+
+@pytest.mark.parametrize('cut', ['top', 'bottom'])
+def test_cpg4_f1_cut_fractions_do_not_depend_on_tight_or_margin(cut):
+    """CP-G4 F1: the reported source damage is a property of the crop, not of the output margin."""
+    from greekocr.glyphs.lines_api import separate_lines
+    r = render_truth_line('α' * 16, DIDOT, size=40, degrade=False)
+    g = np.asarray(r.image)
+    b = int(np.median(r.base_truth)); xh = r.xh
+    crop = g[int(b - .6 * xh):] if cut == 'top' else g[:int(b - .35 * xh)]
+    vals = []
+    for kw in ({'tight': False}, {'tight': True, 'margin': .2}, {'tight': True, 'margin': .5}):
+        L = [l for l in separate_lines(Image.fromarray(crop), xh_prior=xh, **kw) if l.side == 'main'][0]
+        vals.append(float((L.top_cut if cut == 'top' else L.bottom_cut).mean()))
+    assert max(vals) - min(vals) < 1e-9 and vals[0] > .2

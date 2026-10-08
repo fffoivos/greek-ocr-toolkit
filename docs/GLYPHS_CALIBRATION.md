@@ -44,11 +44,11 @@ Against the tools' measurements (the scale used on real lines):
 
 | measured quantity | readable up to | evidence |
 |---|---|---|
-| accent / tall-letter zone cut | ≈ 0.3 | bins < 0.3: median CER ≤ 0.017; ≥ 0.3: 0.08–0.22, 57–93 % of strips out |
-| letter body cut at the top | ≈ 0.05 | every bin ≥ 0.05: median CER ≥ 0.18 (the accent zone is already gone) |
-| tail zone cut | ≈ 0.6 | bins < 0.6: median CER ≤ 0.02; 0.6–1.0: 0.03–0.05, 20–43 % out |
+| accent / tall-letter zone cut | ≈ 0.3 | bins < 0.3: median CER ≤ 0.017; ≥ 0.3: 0.08–0.22, 57–93 % of strips out; the first adverse bin rests on 6 base texts |
+| letter body cut at the top | ≈ 0.05 | every bin ≥ 0.05: median CER ≥ 0.18 (the accent zone is already gone); the first adverse bin rests on 6 base texts |
+| tail zone cut | **no limit established** | no measured bin leaves the band: 0.6–0.7 / 0.7–0.8 / 0.8–1.0 median NFC 0.047 / 0.036 / 0.032 (n 23 / 5 / 20); only the injected tail_cut 1.0 reaches 0.051 NFC (0.040 NFD) |
 | letter body cut at the bottom | ≈ 0.1 | 0.05–0.10: 0.050, 30 % out; 0.10–0.15: 0.070, 67 % out |
-| skew | ≈ 4° | tightly cropped |
+| skew | 4° is a **policy**, not a crossing | 3° in band; 5° at the band edge (NFC 0.050, NFD 0.041); 4° was not tested |
 | ink contrast (paper − ink) | none found | CER 0 down to contrast < 30 |
 | broken / merged letter shares | not predictive | CER does not follow them except at the extremes (letters vanished; ink 0.8+) |
 
@@ -108,12 +108,35 @@ paper padding, and tight output cropped to its ink ± 0.5 / 0.3 / 0.2 x-heights.
 - **Level lines (rotated 0°, n = 40): tight m0.2 equals the original** — median NFD 0.028 vs 0.028; paired bootstrap
   (10,000 resamples) Δmedian 95 % CI [−0.011, +0.011], mean paired Δ +0.006 [−0.004, +0.017]; mark F1 0.87 → 0.86.
   The coordinator's bar (≤ +0.005 median NFD) is met.
-- The earlier level-line cost was the margin, not the resampling: a shift-only path for baselines within 0.3° of level
-  (taken by 37 of the 40 level strips) reads identically to the resampled tight m0.3 output.
+- The earlier level-line cost was mostly the margin, not the resampling. (An earlier sentence here said the shift-only
+  path reads identically; CP-G4 measured 10/40 level strips changed under E1 — retracted.)
 - Every skew bin: tight m0.2 holds E1 at 0.028–0.042 median NFD (original 0.188 at 1° → 0.860 at 5°); mean over all
-  240 strips 0.396 → 0.045, mark F1 0.53 → 0.86. CLLG 0.000 in every bin and variant.
-- Decision: recogniser-facing output = `separate_lines(..., tight=True, margin=0.2)`; margin stays a parameter; the
-  padded form is for display.
+  240 strips 0.396 → 0.045, mark F1 0.53 → 0.86. CLLG median 0.000 in every bin and variant except the original (unstraightened) 5° bin (NFD 0.041).
+- Decision: recogniser-facing output = `separate_lines(..., tight=True, margin=0.2, level_deg=0)` — the configuration
+  actually scored. The shift-only path (`level_deg` > 0) is NOT qualified: it changes E1 readings on 10 of the 40 level
+  strips (CP-G4 F5), so it is off by default. Margin stays a parameter; the padded form is for display.
+- The level-line result is a passing **in-sample point estimate**, not an equivalence: the 95 % interval of Δmedian
+  [−0.011, +0.011] allows a regression larger than the +0.005 bar; 12 strips worse, 10 better, 18 unchanged; the
+  margin was chosen on the same 40 texts.
+
+## E1 limits: none established
+
+E1's clean band (median 0.22 + 2 × IQR 0.41 ≈ 1.05) is inflated by the renderer's ±2° skew, so no injected condition
+leaves it and no E1 cut or skew limit follows from the rule. (Earlier versions exported E1 limits; retracted, CP-G4 F4.)
+E1 needs level controls (frozen scan parameters, CP-G4 F6) before any E1 limit can be measured.
+
+## Known gaps (CP-G4, 8 Oct)
+
+- F3: calibration measured support-averaged crop-edge cuts per strip; production gates on edge-touching ink and
+  applies the limits per x-position, with a 50 %-of-width verdict boundary that is policy, not calibrated. Not yet the
+  same measurement.
+- F2: from the crop alone, accents cut through a blank gap leave no evidence (false "readable"), and fragments of the
+  line above at the top edge can be taken for the main line (false "unreadable").
+- F6: cut conditions use one median baseline on strips that keep the renderer's random skew, so a nominal cut varies
+  along the line; ink-defect renders consume an extra random draw, so fade/thin/break/thick strips differ from their
+  clean controls in skew and scan noise.
+- Direction (owner 8 Oct 18:05): recut each line from its page along its fitted geometry, so the crop edge no longer
+  removes accents or tails and what a crop lost is measured directly.
 
 ## Real crops under the CLLG limits (444 crops: 400 parliament sample + 44 fixtures)
 

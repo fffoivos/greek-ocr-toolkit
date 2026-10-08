@@ -25,15 +25,22 @@ from greekocr.glyphs.letters import letter_boxes
 
 __all__ = ['LIMITS', 'READER_LIMITS', 'Readability', 'readability']
 
-# Limits measured on 1,760 calibrated synthetic strips read by two OCR models (docs/GLYPHS_CALIBRATION.md, 8 Oct):
-# the measured level at which a reader's median character error leaves its clean band. Ink states (broken / merged
-# shares) were not predictive of reading errors and are reported but do not drive the verdict.
-READER_LIMITS: dict[str, dict[str, float]] = {
-    'cllg': {'accent_cut': .3, 'top_cut': .05, 'tail_cut': .6, 'bottom_cut': .1, 'skew_deg': 4.0},
-    'e1':   {'accent_cut': .1, 'top_cut': .05, 'tail_cut': .4, 'bottom_cut': .05, 'skew_deg': .5},
+# Limits from 1,760 synthetic strips (40 base texts × 44 conditions) read by two OCR models (docs/GLYPHS_CALIBRATION.md,
+# 8 Oct). Rule: the first measured bin whose median CER leaves the reader's clean band. Provenance per value (CP-G4 F4):
+#   cllg accent_cut .3, top_cut .05, bottom_cut .1  — measured crossings (adverse bins rest on ~6 base texts: thin)
+#   cllg tail_cut None — no measured tail bin left the band (0.6–1.0 bins: median NFC .032–.047); no limit established
+#   cllg skew_deg 4.0  — POLICY: 3° in band, 5° at the band edge (NFC .050, NFD .041); 4° was not tested
+#   e1   — none established: its clean band (median .22 + 2 × IQR .41) is inflated by the renderer's ±2° skew, so no
+#          condition leaves it; E1 must be re-measured on level controls before any E1 limit exists.
+# None = no limit: the quantity is still measured and reported but never flags. Measured on crop-edge geometry as
+# calib_measure.py computes it (support-averaged per strip); production applies them per x-position (CP-G4 F3: not
+# yet the same measurement — the page recut replaces crop-edge guessing with what the crop actually lost).
+READER_LIMITS: dict[str, dict[str, float | None]] = {
+    'cllg': {'accent_cut': .3, 'top_cut': .05, 'tail_cut': None, 'bottom_cut': .1, 'skew_deg': 4.0},
+    'e1':   {'accent_cut': None, 'top_cut': None, 'tail_cut': None, 'bottom_cut': None, 'skew_deg': None},
 }
 LIMITS = READER_LIMITS['cllg']
-UNREADABLE_SHARE = .5
+UNREADABLE_SHARE = .5   # POLICY, not calibrated against OCR outcomes (CP-G4 F3)
 
 
 @dataclass
@@ -54,7 +61,7 @@ def _spans(mask: np.ndarray, values: np.ndarray, reason: str, seg: int, x_off: i
     return out
 
 
-def readability(crop: Image.Image, *, xh_prior: float | None = None, limits: dict[str, float] = LIMITS) -> Readability:
+def readability(crop: Image.Image, *, xh_prior: float | None = None, limits: dict[str, float | None] = LIMITS) -> Readability:
     """Verdict and reasons for one crop under a reader's limits (READER_LIMITS['cllg'] by default)."""
     kw = {'xh_prior': xh_prior} if xh_prior else {}
     segs = [s for s in column_segments(crop, **kw) if s.glyphs is not None]
@@ -88,6 +95,8 @@ def readability(crop: Image.Image, *, xh_prior: float | None = None, limits: dic
         lo, hi = main.x0, main.x1 + 1
         bad = np.zeros(w, bool)
         for key, arr in prof.items():
+            if limits.get(key) is None:
+                continue
             m = np.zeros(w, bool); m[lo:hi] = arr[lo:hi] > limits[key]
             spans += _spans(m, arr, key, k, sg.x0, max(2, int(.5 * xh)))
             bad |= m
@@ -99,7 +108,7 @@ def readability(crop: Image.Image, *, xh_prior: float | None = None, limits: dic
                      **{f'{key}_mean': float(arr[lo:hi].mean()) for key, arr in prof.items()})
         measures['segments'].append(seg_m)
         line_bad = []
-        if abs(sk.angle_deg) > limits['skew_deg']: line_bad.append(f'skew {sk.angle_deg:+.1f}°')
+        if limits.get('skew_deg') is not None and abs(sk.angle_deg) > limits['skew_deg']: line_bad.append(f'skew {sk.angle_deg:+.1f}°')
         if not ink.letters: line_bad.append('no letters found')
         if line_bad:
             bad[lo:hi] = True
