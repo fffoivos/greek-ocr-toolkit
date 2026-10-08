@@ -1,0 +1,15 @@
+# Portable O4c recordings (offline tests)
+
+`recordings.json` binds each API/text excerpt to the fetched URL, original response SHA-256, fixture SHA-256 and UTC timestamp. Excerpts are explicitly labelled; they are not complete catalogue responses or full OCR corpora. Synthetic protocol/negative envelopes are constructed only inside the tests and are labelled there.
+
+The one-page PDF is derived from the existing S17 file `0271e3cae77160b4bfe0a489b75cecd6ea21b18245b786b7f8fb86e0e1fd3e2d.pdf`, original zero-based page 2. Source: ΓΕΡΟΥΣΙΑ ΤΩΝ ΕΛΛΗΝΩΝ / Βουλή των Ελλήνων, **ΣΥΝΕΔΡΙΑΣΗ ΜΓ΄(43) 05 ΙΟΥΛΙΟΥ 1850**, [library record](https://hdl.handle.net/20.500.14199/1501), [original PDF](https://digitallibrary.parliament.gr/records/api/core/bitstreams/1e324159-04b6-48b3-bf9a-45999818bc18/content). Per-record rights: `Αναφορά Δημιουργού 4.0 Διεθνές (CC BY 4.0)` ([licence](https://creativecommons.org/licenses/by/4.0/)). The fixture is a page subset, with original text/image objects preserved; PDF container bytes changed. `pdf_provenance.json` binds both original and derivative bytes. This baseline page is solely a parser/geometry regression fixture and does not count as additional O4c supply.
+
+The Greek text excerpt is from IA item `b28038630`, *A Greek-English lexicon* (1883), whose record declares Public Domain Mark 1.0. The Cyrillic excerpt is from `tolstojvojnaimirtom_3_4`, whose record declares CC0 1.0. Exact declarations are retained in the corresponding metadata fixtures. Text is uncorrected OCR and is not gold/admitted training text.
+
+`archive_pdf_prefix.bin` is only the lexicon's recorded 512-byte HTTP Range response (`bytes=0-511`), not a full PDF. Its receipt in `recordings.json` binds source URL, range and hash. It proves the PDF signature and bounded media access; embedded text and full-file integrity are not inferred from the prefix.
+
+`parliament_truncated_page.json` is a recorded page-cardinality excerpt. The server reported size 1000 and returned only 100 objects. Its provenance is separate, and the test rejects it rather than advancing by 1000.
+
+Commons/Gallica/Anemi robots files are recorded policies for this discovery interval. Their purpose is to prove forbidden paths fail before API/media requests. Anemi's recorded HTML includes real `.tkl` record IDs; Wellcome's recorded catalogue contains query matches that do not establish eligible scan supply.
+
+`korrespondenzblatt_page5.jpg` is a bounded blank-page probe with its own provenance receipt. The useful German printed-page sample is in `../print_probes/`, alongside the Syriac conflict samples, digital-looking Tolstoy samples and target-script scan samples. Each JPEG has an HTTP receipt; `../print_reviews.jsonl` binds the visually reviewed pages, source URLs and SHA-256. These are recorded page fixtures/evidence, not a scan corpus. The four misleading Cyrillic layers are excluded; two CC0 digital-looking editions have unverified scan origin and are also excluded. Per-document exact rights remain in discovery metadata; PDM records are declarations, with underlying rights unverified.

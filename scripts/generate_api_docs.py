@@ -1,0 +1,125 @@
+"""Generate the public API inventory; every exported callable gets a two-line example."""
+from __future__ import annotations
+import ast
+from pathlib import Path
+
+ROOT=Path(__file__).resolve().parents[1]
+CALLS={
+'Recipe':'recipe = Recipe("custom", recipe_path, expected_sha256, origin_commit)',
+'recipe_registry':'registry = recipe_registry()',
+'verify_recipe_sha':'digest = verify_recipe_sha("v5")',
+'build_shards':'receipt = build_shards("v5", "/node/linefactory", "out", pool="pool.jsonl", workdir="/node/greek-page-ocr")',
+'build_mix':'manifest = build_mix([{"kind":"synthetic", "build_dir":"synth", "fraction":1}], "mix.json", repo="/node/greek-page-ocr")',
+'validate_mix':'resolved = validate_mix("mix.json", repo="/node/greek-page-ocr", role="train")',
+'assemble_mix':'rows, counts = assemble_mix([[{"line_id":"a"}], [{"line_id":"b"}]], [.25,.75], seed=0)',
+'DocumentPartition':'partition = DocumentPartition("reviewed_partition.json")',
+'assign':'work, split = DocumentPartition("reviewed_partition.json").assign("book-id")',
+'resolve_exclusions':'excluded = resolve_exclusions({"mirror":"canonical-work"}, ["mirror"])',
+'build_partition':'receipt = build_partition("o5_info.json", "c1.json", "document_map.json", "partition.json", reviewed=True)',
+'extract_lines':'receipt = extract_lines("sources.json", "partition.json", "lines", pages=[0,1])',
+'adjudicate_lines':'rows = adjudicate_lines(candidate_rows, ours.read, teacher.read)',
+'adjudicate_file':'receipt = adjudicate_file("records.jsonl", "adjudicated", ours.read, teacher.read)',
+'native_rows':'rows = list(native_rows({"format":"pairs", "document_map":"documents.tsv"}, "dataset"))',
+'import_dataset':'receipt = import_dataset("datasets.json", "partition.json", "imported")',
+'import_real_shards':'receipt = import_real_shards("adjudicated/records.jsonl", "crops", "/node/linefactory", "real", partition="o4b-documents-v1")',
+'line_categories':'tags = line_categories({"text":"ΑΒΓ ... 123", "width":1600})',
+'script_class':'kind = script_class("ἅλφα Latin")',
+'word_tags':'tags = word_tags("ἅλφα Latin")',
+'load_word_tags':'tags_or_none = load_word_tags("real")',
+'load_ours':'reader = load_ours("weights.pt", "codec/v1.json")',
+'load_kalchas':'reader = load_kalchas({"checkout":"/node/kalchas", "checkpoint":"/node/kalchas/kalchas/checkpoints/Kalchas/model9_best_loss_1.35.pt"})',
+'load_cllg':'reader = load_cllg({"checkpoint":"ppocr_v6_tau090.safetensors", "readme":"README.md", "contract":"readme_contract.json"})',
+'load_cllg_worker':'reader = load_cllg_worker("ppocr_v6_tau090.safetensors", python="/node/venvs/cllg/bin/python")',
+'build_cllg_contract':'contract = build_cllg_contract("README.md", "ppocr_v6_tau090.safetensors", "readme_contract.json")',
+'load_paddle_r01':'reference = load_paddle_r01(r01_spec)',
+'load_r03':'reference = load_r03(r03_spec)',
+'load_service':'reader = load_service("mistral", {"factory":"my_service:factory"}, enabled=True)',
+'strict_cer':'cer = strict_cer("α\\u0313", "α")',
+'edit_distance':'edits = edit_distance("Α", "A")',
+'score_readings':'report = score_readings([{"text":"ἅ", "prediction":"ά", "cohort":"gold", "script_class":"greek_poly", "crop_path":"crop.png"}])',
+'summarize_predictions':'report = summarize_predictions(raw_nfd_prediction_rows)',
+'write_readout':'report = write_readout(["predictions.jsonl"], "readout", transfer_enabled=False)',
+'map_donor_state':'mapped, layers, dropped = map_donor_state("R03", upstream_tensor_state)',
+'map_paddle_state':'mapped = map_paddle_state(paddle_state, reviewed_layer_map, expected_torch_state)',
+'preprocess':'tensor = preprocess(image, {"color":"BGR", "height":48, "interpolation":"linear", "pad_rule":"paddle_dynamic", "pad_width":320})',
+'compare_endpoints':'receipt = compare_endpoints(native_endpoints, converted_endpoints)',
+'convert_donor':'receipt = convert_donor("R03", "upstream.pt", "config.json", "converted", "immutable-sha", codec="codec/v1.json")',
+'verify_init':'checkpoint = verify_init("converted/donor_init.pt")',
+'qualify_parity':'receipt = qualify_parity(donor_spec, "converted/native_before_swap.pt", "100_crops.jsonl", "parity")',
+'parse_source':'row = parse_source("parliament", recorded_metadata)',
+'discovery_command':'argv = discovery_command("archive", "evidence/archive.jsonl", offline=True)',
+'run_discovery':'completed = run_discovery("archive", "evidence/archive.jsonl", offline=True, args=["--max-pages","1"])',
+'http_client':'client = http_client("anemi", "evidence/anemi", offline=True, interval=2)',
+'refetch_pdf_cache':'receipts = refetch_pdf_cache("pdf_cache_refetch.jsonl", "pdf_cache")',
+'stage_parliament':'receipts = stage_parliament("/node/project", "parliament_s2")',
+'file_sha256':'digest = file_sha256("records.jsonl")',
+'verify_files':'verify_files({"records.jsonl": expected_sha256})',
+'write_receipt':'write_receipt("receipt.json", {"training":False})',
+'require_env':'secrets = require_env(["PRIME_INTELLECT_CONTROL_KEY"])',
+'rate_limited_client':'client = rate_limited_client("archive", "evidence/archive", offline=True)',
+'Observation':'observation = Observation(alive=True, log_bytes=100, done=False)',
+'WatchResult':'result = WatchResult(state="DONE", polls=1, elapsed_s=0.1)',
+'watch':'result = watch("job", bounded_probe, max_seconds=1800, emit=print)',
+'bounded_ssh':'completed = bounded_ssh("worker", ["tail","-n","1","job.log"], timeout=45)',
+'EnvironmentRecipe':'recipe = EnvironmentRecipe("ocr", "3.11", "https://download.pytorch.org/whl/cu126", ("safetensors==0.7.0",))',
+'environment_recipes':'recipes = environment_recipes()',
+'environment_plan':'commands = environment_plan("cllg-gpu", "/node/venvs/cllg-gpu", wheelhouse="/node/wheels")',
+'write_environment_script':'script = write_environment_script("e2ws", "/node/venvs/e2ws", "setup.sh", paddle_requirements="/node/PaddleOCR/requirements.txt")',
+'PodClient':'client = PodClient(lambda method, path, body: {"status":"ACTIVE"})',
+'request':'result = PodClient(mock_transport).request("GET", "/api/v1/pods/pod-id")',
+'pod_client':'client = pod_client()',
+'select_offer':'offer = select_offer(recorded_offers)',
+'create_pod':'receipt = create_pod(client, name="greek-ocr-worker", public_key=ssh_public_key)',
+'pod_status':'status = pod_status(client, "pod-id")',
+'terminate_pod':'result = terminate_pod(client, "pod-id")',
+'ensure_pod':'receipt = ensure_pod(client, "pod_state.json", timeout=1500)',
+'plugin_options':'options = plugin_options("weights.pt", "codec/v1.json", routing_sidecar="routes.jsonl")',
+'ocr_engines':'engines = ocr_engines()',
+'main':'exit_code = main(["annotate", "ἅλφα Latin"])',
+}
+
+
+def api_entries():
+    for path in sorted((ROOT/'greekocr').rglob('*.py')):
+        relative=path.relative_to(ROOT)
+        if '_vendor' in path.parts or path.name.startswith('_') and path.name!='__init__.py':continue
+        if 'docling_plugin' in path.parts and path.name!='docling_plugin.py':continue
+        tree=ast.parse(path.read_text())
+        exports=[]
+        for node in tree.body:
+            if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='__all__' for t in node.targets):
+                exports=ast.literal_eval(node.value)
+        if path.name=='docling_plugin.py':exports=['ocr_engines']
+        module='.'.join(relative.with_suffix('').parts)
+        if module.endswith('.__init__'):module=module[:-9]
+        for node in tree.body:
+            if isinstance(node,(ast.FunctionDef,ast.ClassDef)) and node.name in exports:
+                yield module,node.name,node,None
+                if isinstance(node,ast.ClassDef):
+                    for method in node.body:
+                        if isinstance(method,ast.FunctionDef) and not method.name.startswith('_'):
+                            yield module,method.name,method,node.name
+
+
+def generate():
+    lines=['# Public API', '', 'The public surface is the typed functions/classes explicitly exported by the API modules below. `_vendor`, the discovery runner and recognizer internals are private. Re-exported functions are documented once at their defining module. The preserved Docling entry point is also documented.', '',
+           'Every example has two lines. Lowercase names such as `candidate_rows`, `client`, `image`, `recorded_metadata`, and `donor_spec` denote caller-supplied, locally staged inputs; they do not acquire data. Operational examples are node-side invocations, not actions performed during this phase.', '',
+           'Shared types: `PathLike = str | Path`, `Record = dict[str, Any]`; reader, batch-reader, native-reference and HTTP return values have structural protocols in `greekocr/types.py`.', '',
+           'Recipe registry is immutable snapshot identity; mix custody additionally requires exact committed HEAD blobs in the explicit `repo`. Extraction page indices are zero-based. Word-tag absence returns `None` and must be disclosed. Native import document maps are TSV (`path`, `source_doc_id`).', '',
+           'Strict scoring requires raw NFD GT and unchanged predictions. Bake-off decomposes both text and prediction; reading records need `text`, `prediction`, `cohort`, `script_class`, `crop_path`. E1 summaries need `gt`, `prediction`, `arm`, `seed`, `instrument`, `script_class`, `crop_path` and optional category metadata.', '',
+           'Discovery defaults to offline and uses a caller-owned evidence directory. R01/R03 specs bind local pinned checkouts/configs/weights and reviewed native preprocessing. CLLG workers expose `read_batch`, `close`, `binding`, `last_batch_ms`; close them when finished. Service hooks require explicit enabling and the original credential environment variables.', '',
+           'Node environment plans do not execute. Kraken requires the staged wheel with SHA-256 `82faba07d9fa4746cb822c669e822570f8a8c42a9ac1570ad187326cedbd48e4`; E2WS additionally requires a pinned PaddleOCR requirements file. Use original environment evidence in `docs/origins/greek-page-ocr/docs/ocr_program_2026-10-06/E2_NOTES.md`. Pod clients obtain `PRIME_INTELLECT_CONTROL_KEY` from env; mock `PodClient` for offline work. Watches need bounded probes and direct terminal confirmation.', '']
+    for module,name,node,owner in api_entries():
+        qualified=module+'.'+(owner+'.' if owner else '')+name
+        lines+=['### `'+qualified+'`','']
+        if isinstance(node,ast.FunctionDef):
+            signature='def '+name+'('+ast.unparse(node.args)+')'+(' -> '+ast.unparse(node.returns) if node.returns else '')
+            lines += ['`'+signature+'`','']
+        description=ast.get_docstring(node)
+        if description:lines += [description.splitlines()[0],'']
+        imported=owner or name
+        lines+=['```python','from '+module+' import '+imported,CALLS[name],'```','']
+    (ROOT/'docs/API.md').write_text('\n'.join(lines))
+    print('documented',sum(1 for _ in api_entries()),'public callable entries')
+
+if __name__=='__main__':generate()
