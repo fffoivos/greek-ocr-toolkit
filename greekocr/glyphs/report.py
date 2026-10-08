@@ -23,7 +23,7 @@ from greekocr.types import PathLike
 
 __all__ = ['clipped_fraction', 'document_of', 'document_priors', 'line_record']
 
-LINE_ID = re.compile(r'(s2-[0-9a-f]+)-p(\d+)-l(\d+)')
+LINE_ID = re.compile(r'((?:s2|an)-[0-9a-f]+)-p(\d+)-l(\d+)')   # s2: Vouli; an: Anemi
 
 
 def document_of(name: str) -> str | None:
