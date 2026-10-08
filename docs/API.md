@@ -377,6 +377,159 @@ from greekocr.real.extract import extract_lines
 receipt = extract_lines("sources.json", "partition.json", "lines", pages=[0,1])
 ```
 
+### `greekocr.real.geometry.Component`
+
+An 8-connected ink component in top-origin, half-open page pixels.
+
+```python
+from greekocr.real.geometry import Component
+component = Component(1, (10, 20, 25, 45), 100, 17.0, 32.0)
+```
+
+### `greekocr.real.geometry.BaselineCurve`
+
+y = c2*t*t + c1*t + c0, t=(page_x-x_origin)/x_scale.
+
+```python
+from greekocr.real.geometry import BaselineCurve
+curve = BaselineCurve(2.0, 1.0, 40.0, 100.0, 100.0)
+```
+
+### `greekocr.real.geometry.BaselineCurve.evaluate`
+
+`def evaluate(self, x: float) -> float`
+
+Evaluate a page-space baseline at a page-space horizontal position.
+
+```python
+from greekocr.real.geometry import BaselineCurve
+page_y = BaselineCurve(2.0, 1.0, 40.0, 100.0, 100.0).evaluate(120.0)
+```
+
+### `greekocr.real.geometry.GeometryDiagnostics`
+
+Output-strip geometry plus the unchanged input candidate's legacy evidence.
+
+```python
+from greekocr.real.geometry import GeometryDiagnostics
+diagnostics = GeometryDiagnostics(1, 2, 12.0, 25.0, .15, False, 150, 1.0, (0, 8), ())
+```
+
+### `greekocr.real.geometry.Admission`
+
+Geometry decision, named policy thresholds and diagnostic evidence.
+
+```python
+from greekocr.real.geometry import Admission
+decision = Admission(True, "scan", (), thresholds, diagnostic_record)
+```
+
+### `greekocr.real.geometry.Admission.receipt`
+
+`def receipt(self) -> dict[str, Any]`
+
+Return a JSON-serializable policy receipt; admission is never human gold.
+
+```python
+from greekocr.real.geometry import Admission
+record = result.receipt()
+```
+
+### `greekocr.real.geometry.LineCrop`
+
+Rectified grayscale strip and page-space provenance; text stays provisional.
+
+```python
+from greekocr.real.geometry import LineCrop
+crop = LineCrop(image, box, padded_box, refined_box, curve, kept, dropped, diagnostics, 30, 5)
+```
+
+### `greekocr.real.geometry.LineCrop.receipt`
+
+`def receipt(self) -> dict[str, Any]`
+
+Return deterministic geometry metadata, excluding raster image bytes.
+
+```python
+from greekocr.real.geometry import LineCrop
+record = result.receipt()
+```
+
+### `greekocr.real.geometry.TextLayerBox`
+
+A pixel line box, raw label and optional original vendored admission row.
+
+```python
+from greekocr.real.geometry import TextLayerBox
+candidate = TextLayerBox((10, 20, 800, 70), "ἀλήθεια λέξεις", recorded_legacy_row)
+```
+
+### `greekocr.real.geometry.ink_components`
+
+`def ink_components(page_image: Image.Image, box: Box | None=None) -> tuple[Component, ...]`
+
+Measure significant ink in a pixel box (or the whole locally staged image).
+
+```python
+from greekocr.real.geometry import ink_components
+components = ink_components(image, (10, 20, 800, 70))
+```
+
+### `greekocr.real.geometry.split_multiline`
+
+`def split_multiline(box: Box, components: Sequence[Component]) -> list[PixelBox]`
+
+Split supported baseline clusters inside a box; never assign label substrings.
+
+```python
+from greekocr.real.geometry import split_multiline
+boxes = split_multiline((10, 20, 800, 120), components)
+```
+
+### `greekocr.real.geometry.refine_line`
+
+`def refine_line(page_image: Image.Image, box: Box, *, pad: int=DEFAULT_PAD) -> LineCrop`
+
+Select one baseline, fit glyph bottoms robustly and sample a curved ink strip.
+
+```python
+from greekocr.real.geometry import refine_line
+crop = refine_line(image, (10, 20, 800, 70), pad=16)
+```
+
+### `greekocr.real.geometry.scan_admission`
+
+`def scan_admission(diagnostics: GeometryDiagnostics | Mapping[str, Any], *, profile: Profile='scan') -> Admission`
+
+Gate rectified scan geometry or replay the complete unchanged vendored rule.
+
+```python
+from greekocr.real.geometry import scan_admission
+decision = scan_admission(crop.diagnostics, profile="scan")
+```
+
+### `greekocr.real.geometry.hyphen_at_line_end`
+
+`def hyphen_at_line_end(crop: LineCrop | Image.Image, text: str) -> bool`
+
+Flag a terminal dash after a body glyph when the raw label lacks a hyphen.
+
+```python
+from greekocr.real.geometry import hyphen_at_line_end
+missing = hyphen_at_line_end(crop, "ἀλήθεια λέξεις")
+```
+
+### `greekocr.real.geometry.refine_page_lines`
+
+`def refine_page_lines(pdf_page_image: Image.Image, text_layer_boxes: Sequence[TextLayerBox | Box | Mapping[str, Any]], *, pad: int=DEFAULT_PAD) -> list[LineCrop]`
+
+Refine pixel boxes in input order; split labels are withheld for caller assignment.
+
+```python
+from greekocr.real.geometry import refine_page_lines
+crops = refine_page_lines(image, text_layer_boxes, pad=16)
+```
+
 ### `greekocr.real.importers.native_rows`
 
 `def native_rows(spec: Record, root: PathLike) -> Iterator[Record]`
