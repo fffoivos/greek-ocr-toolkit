@@ -36,7 +36,12 @@ def column_rules(crop: Image.Image | NDArray[Any]) -> list[tuple[int, int]]:
     gray = to_gray(crop)
     h = gray.shape[0]
     ink = binarise(gray)
-    lab, n = ndi.label(ink, structure=EIGHT)
+    # Join small vertical breaks in a printed rule before measuring its height. Otherwise a curled start can be
+    # fitted together with the opposite print column and mistaken for ink from a neighbouring line.
+    gap = max(3, h // 8)
+    padded = np.pad(ink, ((gap, gap), (0, 0)), mode='edge')
+    joined = ndi.binary_closing(padded, structure=np.ones((gap, 1), bool))[gap:-gap]
+    lab, n = ndi.label(joined, structure=EIGHT)
     boxes = [sl for sl in ndi.find_objects(lab) if sl is not None]
     def candidate(sl) -> bool:
         hh, ww = sl[0].stop - sl[0].start, sl[1].stop - sl[1].start
@@ -72,7 +77,9 @@ def column_segments(crop: Image.Image | NDArray[Any], **kw: Any) -> list[Segment
     # soft cuts: very wide blank gaps; kept only when the two sides do not continue one line. Gap widths are in
     # x-heights, so they need a trustworthy x-height: a crop too clipped to measure its own (and given no prior) gets
     # no soft cuts (the owner's example crop: x-height 9 px measured vs ~21-26 px real would cut it in four)
-    probe = line_glyphs(img, **kw)
+    # Classify ink within each ruled column: the opposite column must not make a curled word a neighbour.
+    probes = [(a, line_glyphs(img.crop((a, 0, b, h)), **kw)) for a, b in merged]
+    probe = max((g for _, g in probes), key=lambda g: g.band.n_support)
     xh = probe.band.xh
     boxes = letter_boxes(probe)
     clipped = sum(b.y0 == 0 or b.y1 == h for b in boxes) / max(1, len(boxes))
@@ -80,9 +87,10 @@ def column_segments(crop: Image.Image | NDArray[Any], **kw: Any) -> list[Segment
     has_prior = prior is not None and np.isfinite(prior) and prior > 0      # by value (CP-G3 F5: None counted as a prior)
     trusted = has_prior or (probe.band.n_support >= 8 and clipped < .35)
     cols = np.zeros(w, bool)
-    for c in probe.components:
-        if c.role in ('letter', 'fragment', 'punct', 'mark', 'large'):
-            cols[c.x0:c.x1] = True
+    for offset, g in probes:
+        for c in g.components:
+            if c.role in ('letter', 'fragment', 'punct', 'mark', 'large'):
+                cols[offset + c.x0:offset + c.x1] = True
     soft: list[tuple[int, int]] = []
     on = np.nonzero(cols)[0]
     if on.size and trusted:

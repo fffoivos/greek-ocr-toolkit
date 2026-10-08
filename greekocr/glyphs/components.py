@@ -16,9 +16,9 @@ from scipy import ndimage as ndi
 __all__ = ['Band', 'Component', 'LineGlyphs', 'binarise', 'line_glyphs', 'to_gray']
 
 EIGHT = np.ones((3, 3), dtype=bool)
-# Bend tracking (8 Oct, after the owner's line04 report): keep the bending curve only if its p90 residual is below
-# SEL_RATIO × the straight line's on the same tracked evidence and the straight residual exceeds SEL_FLOOR x-heights.
-# Rendered bent lines (seed 41, 100 bent + 100 straight): lines with any column > 0.25 xh off 84 % → 45 %, straight unchanged.
+# Model selection on the recovered evidence: a curve must improve the p90 residual over the straight fit by
+# SEL_RATIO, with a straight residual above SEL_FLOOR x-heights. The end_bend check also covers a short curl
+# affecting fewer than 10 % of the letters.
 SEL_RATIO, SEL_FLOOR = .85, .06
 # Gap between a small component and the letter body, in x-heights, beyond which it belongs to a neighbouring line.
 # Calibrated on rendered polytonic lines with neighbour intrusions (31 fonts, 250 lines): accents above sit 0.02–0.19
@@ -254,50 +254,37 @@ def _fit_curve(xs: NDArray[np.float64], ys: NDArray[np.float64], width: int) -> 
 
 
 def _track(xs: NDArray[np.float64], ys: NDArray[np.float64], inl: NDArray[np.bool_], xh: float,
-           k: int = 6) -> NDArray[np.bool_]:
-    """Extend the inlier set outward, letter by letter: a point joins when it lies within tolerance of the local line
-    through its k nearest accepted neighbours on the side it is approached from. Follows gradual bends and end curl
-    while ascender tops and descender bottoms (≥ 0.4 x-height off) stay out."""
+           bottom: NDArray[np.float64], kinds: list[str]) -> NDArray[np.bool_]:
+    """Compare smooth end bends against all the letters at once, keeping the established core as the anchor.
+
+    Each candidate is a parabola that joins the core with no change in position or slope. Letter bottoms vote once;
+    a top-based estimate is an alternative, weaker vote for the same letter. A bend needs three newly explained
+    letters, so one misleading component cannot turn the line towards its neighbour.
+    """
     acc = inl.copy()
-    tol = .25 * xh + 1
-    # strays at the ends: 1–2 accepted points cut off by a gap > 3 x-heights at either end of the accepted set (a stray
-    # that sat on the first straight fit, e.g. one letter inside a curled line end) become ordinary candidates again, so tracking
-    # walks through the region between them instead of believing the line already reaches them (owner review 8 Oct)
-    ai = np.nonzero(acc)[0]
-    if len(ai) >= 4:
-        o = ai[np.argsort(xs[ai])]
-        cuts = np.nonzero(np.diff(xs[o]) > 3 * xh)[0]
-        if len(cuts):
-            groups = np.split(o, cuts + 1)
-            for gi in (0, -1):                       # only tiny groups (1–2 points) at either end are set aside
-                if len(groups) > 1 and len(groups[gi]) <= 2:
-                    acc[groups[gi]] = False
-    order = np.argsort(xs)
-    changed = True
-    while changed:
-        changed = False
-        ax = xs[acc]
-        if len(ax) < 2:
-            break
-        lo, hi = ax.min(), ax.max()
-        for direction in (-1, 1):
-            cand = [i for i in order if not acc[i] and (xs[i] < lo if direction < 0 else xs[i] > hi)]
-            cand.sort(key=lambda i: abs(xs[i] - (lo if direction < 0 else hi)))
-            for i in cand:
-                idx = np.nonzero(acc)[0]
-                near = idx[np.argsort(np.abs(xs[idx] - xs[i]))[:k]]
-                if len(near) >= 2 and np.ptp(xs[near]) > 0:
-                    c = np.polyfit(xs[near], ys[near], 1)
-                    if abs(c[0]) > .25:
-                        c = np.array([0.0, np.median(ys[near])])
-                else:
-                    c = np.array([0.0, np.median(ys[near])])
-                if abs(ys[i] - np.polyval(c, xs[i])) <= tol:
-                    acc[i] = True; changed = True
-                elif abs(xs[i] - (lo if direction < 0 else hi)) > 3 * xh:
-                    break     # 3 x-heights past the line's current end without agreement: stop on this side (measured
-                    # from the end, owner review 8 Oct: measured from the mean of the predicting letters, it stopped
-                    # after one rejected descender and left left-edge curls unfollowed)
+    prediction = bottom[np.clip(xs.astype(int), 0, len(bottom) - 1)].copy()
+    _, group = np.unique(xs, return_inverse=True)
+    weights = np.array([1. if k == 'bottom' else .5 for k in kinds])
+    tol = .2 * xh + 1
+    def score(values: NDArray[np.float64]) -> float:
+        votes = weights * np.maximum(0., 1 - ((ys - values) / tol) ** 2)
+        letters = np.zeros(group.max() + 1)
+        np.maximum.at(letters, group, votes)
+        return float(letters.sum())
+    for direction in (-1, 1):
+        distance = direction * (xs - (xs.min() if direction == 1 else xs.max()))
+        best_score, best = score(prediction), prediction
+        for depth in np.arange(4 * xh, min(24 * xh, np.ptp(xs) / 2), 2 * xh):
+            shape = np.maximum(depth - distance, 0.) ** 2 / (2 * depth)
+            for slope in np.arange(-.5, .501, .025):
+                trial = prediction + slope * shape
+                value = score(trial)
+                if value > best_score:
+                    best_score, best = value, trial
+        added = (np.abs(ys - prediction) > tol) & (np.abs(ys - best) <= tol)
+        if len(np.unique(xs[added])) >= 3 and best_score - score(prediction) >= 2:
+            prediction = best
+            acc = np.abs(ys - prediction) <= tol
     return acc
 
 
@@ -431,8 +418,15 @@ def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int = 0, xh_prior: fl
         inl = grown
         bottom, deg = _fit_curve(bx[inl], by[inl], w)
     if inl.sum() >= 3:
-        tracked = _track(bx, by, inl, xh)
-        if tracked.sum() > inl.sum():
+        # Tall letters may continue a core established by the short body letters.
+        tall = [r for r in raw if not ({'top', 'bottom'} & set(r['touches'])) and 1.4 * xh < r['y1'] - r['y0'] <= 1.9 * xh
+                and .3 * xh <= r['x1'] - r['x0'] <= 1.8 * xh and r['area'] >= .08 * xh * xh]
+        bx = np.r_[bx, [(r['x0'] + r['x1']) / 2 for r in tall]]
+        by = np.r_[by, [r['y1'] for r in tall]]
+        pk.extend(['bottom'] * len(tall))
+        inl = np.r_[inl, np.zeros(len(tall), bool)]
+        tracked = _track(bx, by, inl, xh, bottom, pk)
+        if np.any(tracked & ~inl):
             # model selection on the tracked evidence: the bending curve must clearly beat a straight line
             sx, sy = bx[tracked], by[tracked]
             curve, cdeg = _smooth_curve(sx, sy, w, xh)

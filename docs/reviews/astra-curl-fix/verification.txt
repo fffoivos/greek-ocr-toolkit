@@ -1,0 +1,97 @@
+Curl fix verification (8 October 2026)
+
+Scope and method
+---------------
+All nine flagged starts follow their own main line in column_segments. _track no longer accepts one point and
+uses it to predict the next. It compares smooth endpoint bends against the whole evidence set, anchored to the
+existing core. A candidate is a quadratic end correction which joins the core continuously in position and slope.
+It is scored with a compact residual kernel, one vote per horizontal letter position; a top estimate is a weaker
+alternative to its bottom. A bend needs at least three newly explained positions and two additional votes. The
+existing smoothing and line-versus-curve selection then fit the recovered support. Tall letter bottoms can join
+an established core, but do not change the initial RANSAC fit or x-height estimate.
+
+Two column fixes are necessary for these starts: close small vertical breaks before detecting a printed rule,
+and classify ink separately within each ruled column before finding soft cuts. Otherwise a right-column baseline
+can label a curled left word as neighbouring ink and cause a false split inside the left column.
+
+The bounded search tests endpoint slopes from -0.5 to +0.5, with bend lengths 4-24 x-heights, limited to half the
+supported width. It does not impose a shared page template. This is an endpoint-curl correction, not a general
+replacement for the page-level algorithm or a solution for arbitrary internal waves.
+
+Tests
+-----
+PYTHONDONTWRITEBYTECODE=1 /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.venv/bin/python \
+  -m pytest tests/glyphs tests/test_provenance_cli_api.py -p no:cacheprovider -q
+1220 passed in 34.76 seconds: 101 existing glyph tests, 9 new curl cases, 1110 provenance/API tests.
+One golden entry was corrected after visual inspection: s2-54bb0e1944e2387380ca-p00003-l00039. Its baseline now
+follows the first word's visible curled bottoms; mean change 2.32 px, angle 0.355 -> -0.293 degrees. The reason is
+recorded in the golden file, and its vendored hash/transform are updated without rewriting the historical source
+hash. See golden_change.png. No new public names; API documentation does not need regeneration.
+
+Fixed contact measurements (absolute residual, median / max, crop pixels)
+------------------------------------------------------------------------
+                 ALL BASELINE CONTACTS                 BODY LETTERS ONLY
+crop        n   before          after             n    before          after
+l00017      9   16.00 / 34.26     0.63 / 1.57      0    N/A             N/A
+l00018      8   65.13 / 67.68*    0.37 / 0.54      0    N/A             N/A
+l00021     10   60.82 / 61.93*    0.53 / 2.17      4    61.20 / 61.93   0.55 / 2.17
+l00023     10    0.81 /  4.79     0.81 / 4.79     10     0.81 /  4.79   0.81 / 4.79
+l00025     10    9.56 / 18.15     1.03 / 2.05     10     9.56 / 18.15   1.03 / 2.05
+l00029     11    4.46 / 32.62     0.69 / 2.01     11     4.46 / 32.62   0.69 / 2.01
+l00030      8    8.59 / 25.32     0.30 / 0.92      8     8.59 / 25.32   0.30 / 0.92
+l00032      8   14.35 / 36.11     0.41 / 1.60      1     2.02 /  2.02   0.70 / 0.70
+l00035      9   12.26 / 33.28     0.53 / 1.47      9    12.26 / 33.28   0.53 / 1.47
+
+These are fixed, hand-selected visible bottoms at x < 400, selected from the original crops rather than from the
+new fitter's accepted support. Descenders, punctuation, accents and neighbouring lines are excluded. The curled
+words in 17 and 18 are capitals, so their body-only x-height statistic is genuinely unavailable; 21 also has digits
+and 32 is mostly capitals. Both categories are explicit in test_curl.py and curl_metrics.json. l00023 was already
+followed before this fix and stays correct.
+* Three old l00018 contacts and two old l00021 contacts fell inside false split gaps: no baseline existed there.
+Before statistics use only available predictions (5 and 8); after predicts all 8 and 10. Per-point results, kinds,
+counts and missing values are in curl_metrics.json. No artificial interpolation across absent segments is scored.
+
+444-crop comparison
+-------------------
+The before snapshots were measured from untouched 81641ea. Each run uses seed 0 and no document prior. The exact
+pool is the 400 o4d_sample400/crops PNGs plus 44 o4d_lines/line*.png files. Every crop has a direct line_glyphs fit
+and a column_segments fit. Direct full-crop band.bottom changed by >3 px mean in 10/444 crops. The main baselines
+of the column segments, compared in crop coordinates wherever both runs provide a baseline, changed by >3 px in
+7/444 crops. All widths, compared-column counts, segmentation spans and both means are in baseline_changes.json.
+The three additional direct-only >3 px cases span print columns; their column-aware means are 0.00, 1.26 and 1.30 px.
+
+All seven column-aware changes are shown in changed_lines.png with a visual assessment:
+- line07_medium: 5.45 px; improved, follows the clipped first word rather than neighbouring ink.
+- s2-60f24a3d8a2d714767f2-p00003-l00024: 5.08 px; indeterminate without a prior. This 26 px-high crop measures a
+  local x-height of only 9 px. With the reporting pipeline's document prior of 26 px, before/after mean change is
+  2.51 px. The unchanged golden regression test for this tightly clipped line passes. The raw standalone fit cannot
+  be certified as an improvement from these missing pixels; no claim of zero regressions is made for that case.
+- line12_large: 4.12 px; improved, the first words now follow the main line rather than the one below.
+- s2-3229200bf47ca465a42d-p00002-l00009: 3.64 px; improved left curl, joining the rest of the line smoothly.
+- s2-86865c33eef5932c013b-p00009-l00038: 3.59 px; improved right curl, following the raised last word.
+- s2-49598b2e848ab1f0ee1e-p00009-l00012: 3.43 px; improved left curl with the right column independently fitted.
+- s2-cd2f0d7e898209004b8e-p00003-l00031: 3.22 px; baseline closer to visible bottoms instead of below the first word.
+
+All nine requested starts are fixed and all tests pass. Overall acceptance is reported PARTIAL because the
+standalone heavily clipped comparison crop remains visually indeterminate. l00027/37/38 were not acceptance targets.
+
+Artifacts and reproduction
+--------------------------
+curl_after.png: the left 760 pixels of the nine crops; before orange, after teal, fixed contacts purple.
+changed_lines.png: all seven column-baseline changes over 3 px, plus the permitted golden correction.
+golden_change.png: enlarged view of the one corrected golden line.
+curl_metrics.json, baseline_changes.json: machine-readable measurements and definitions.
+tests_final.txt: complete final pytest output.
+
+Run .astra/measure.py before at 81641ea and .astra/measure.py final_candidate at this change, using the specified
+Python and PYTHONDONTWRITEBYTECODE=1 from the corresponding worktree root. Preserve the resulting .npz/.json files
+in .astra, then run .astra/render_results.py from the changed tree. The full before/after snapshots are retained
+locally, not committed (about 28 MB). Only compact measurements, scripts and review images are selected for the intended commit.
+
+Git delivery limitation
+-----------------------
+The sandbox denied staging: cannot create greek-ocr-toolkit/.git/worktrees/greek-ocr-toolkit-astra-curl/index.lock
+(Operation not permitted). Nothing was committed or pushed. curl-fix.patch contains the complete intended change
+and passed git apply --check --reverse against this worktree. commit_change.sh checks branch, base commit, an empty
+staging area and every intended file hash before staging and committing with the exact required attribution. Run
+bash .astra/commit_change.sh from a terminal with Git metadata write access.
