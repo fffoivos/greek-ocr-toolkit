@@ -65,7 +65,7 @@ the tools' measured skew, E1's median CER on clean strips is 0.075 (< 0.5°), 0.
 every bin. E1 also degrades steadily with every cut and with fading (contrast < 45: CER 0.42–0.54).
 
 **Straightening removes it.** The same 240 clean and skew strips, straightened by
- (baseline flattened) and read again; "padded" = height-normalised with paper
+`greekocr.glyphs.lines_api.separate_lines` (baseline flattened) and read again; "padded" = height-normalised with paper
 padding (1.9 x-heights above, 1.0 below the baseline), "tight" = then cropped to its own ink ± 0.3 x-heights (the
 calibration crops' margin). Median CER per bin (NFC scoring), mean in the last row:
 
