@@ -103,6 +103,13 @@ detector-dependent evaluator and are superseded.
 - **P5**: unusual characters; text-side checks mapped to x via reader character cuts.
 - **P6**: Luna cross-check; commercial OCR bake-off (credentials = owner).
 
+## Capitals (owner 8 Oct 16:45: be careful with them) — measured, scripts/glyphs/eval/capitals_eval.py, seed 81
+Rendered lines opening with a speaker-style name in capitals ('ΠΕΤΡΙΔΗΣ. …') and all-capitals lines (120 lines,
+2,057 capitals): baselines unaffected (median error 0.05 / 0.04 x-heights); capitals called intact 75 %, merged 17 %
+— of which 312 of 354 are visibly touching a neighbour in the scan (serifs), so ≈ 2 % of capitals are wrongly merged —
+split in two 4.5 %, broken 3 %. A capital-sized width reference was tried and reverted: it moved capitals < 1 % and
+cost one-box letters on lowercase lines (tall lowercase δ, λ, θ share the capital shape test).
+
 ## Known open problems
 - Band estimation when most letters in a crop are clipped (owner example): needs page/document x-height prior (P3).
 - A broken descender piece under a vowel can be read as an iota subscript (no letter identity).
