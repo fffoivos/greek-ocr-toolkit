@@ -12,6 +12,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands = parser.add_subparsers(dest='command', required=True)
     from greekocr.verify.cli import add_parser as add_verify_parser
     add_verify_parser(commands)
+    from greekocr.readers.services.docai_driver import add_parser as add_docai_parser
+    add_docai_parser(commands)
     commands.add_parser('recipes')
     verify = commands.add_parser('verify-recipe'); verify.add_argument('recipe'); verify.add_argument('--sha256')
     score = commands.add_parser('score'); score.add_argument('readings', type=Path)
@@ -74,6 +76,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == 'verify':
             from greekocr.verify.cli import run as run_verify
             result = run_verify(args)
+        elif args.command == 'readers':
+            from greekocr.readers.services.docai_driver import run as run_docai
+            result = run_docai(args)
+            if result.get('complete') is False:
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 3
         elif args.command == 'recipes':
             from greekocr.synth import recipe_registry
             result = {k:dict(path=str(v.path),sha256=v.sha256,origin_commit=v.origin_commit) for k,v in recipe_registry().items()}
