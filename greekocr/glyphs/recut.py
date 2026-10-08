@@ -40,6 +40,7 @@ K_LOCAL = 6           # letters in the local baseline fit while walking
 SEAM_BIAS = .02       # seam cost per pixel of distance from the mid-gap row (ink costs 1 per pixel crossed)
 WINDOW = 4.2          # x-heights above / below the baseline in the straightened working window
 SAME_LINE = .5        # a split line within this many x-heights of another box's line is that box's line
+NEAR_BOXES = 3.5      # with `only`: boxes within this many median box heights (and overlapping in x) are fitted too
 LOST_MIN = .15        # a side is cut off when the line's own ink beyond it exceeds this × x-height² pixels
 
 
@@ -393,9 +394,11 @@ def _recut_fit(gray: NDArray[np.float64], f: LineFit, *, neighbours: list[LineFi
 
 
 def _page_fits(gray: NDArray[np.float64], boxes: list[tuple[int, int, int, int]], *, xh_prior: float | None = None,
-               splits: bool = True) -> tuple[list[LineFit], float | None, float | None, list[str]]:
-    """Steps 1–2 for the page: fit every box, keep split lines no other box owns, page letter size and pitch."""
-    fits = [f for i, b in enumerate(boxes) for f in fit_box(gray, b, xh_prior, box_index=i, splits=splits)]
+               splits: bool = True, use: set[int] | None = None) -> tuple[list[LineFit], float | None, float | None, list[str]]:
+    """Steps 1–2 for the page: fit every box (or the boxes in `use`), keep split lines no other box owns, page letter
+    size and pitch."""
+    fits = [f for i, b in enumerate(boxes) if use is None or i in use
+            for f in fit_box(gray, b, xh_prior, box_index=i, splits=splits)]
     mains = [f for f in fits if f.kind == 'main']
     log = []
     kept = list(mains)
@@ -436,7 +439,17 @@ def fix_page(page: Image.Image | NDArray[Any], boxes: list[tuple[int, int, int, 
     """The whole-page operation (module docstring): every text-layer box of a page in, every text line out.
     `only`: indices of the boxes whose lines to return (all boxes are still fitted and bound their neighbours)."""
     gray = to_gray(page) if isinstance(page, Image.Image) else np.asarray(page, np.float64)
-    fits, page_xh, pitch, log = _page_fits(gray, boxes, xh_prior=xh_prior)
+    use = None
+    if only is not None:                                   # fit only the targets and the boxes that can bound them
+        hs = [b[3] - b[1] for b in boxes]
+        reach = NEAR_BOXES * float(np.median(hs)) if hs else 0.0
+        use = set(only)
+        for i in only:
+            tx0, ty0, tx1, ty1 = boxes[i]
+            for j, (x0, y0, x1, y1) in enumerate(boxes):
+                if min(x1, tx1) > max(x0, tx0) and abs((y0 + y1) / 2 - (ty0 + ty1) / 2) <= reach:
+                    use.add(j)
+    fits, page_xh, pitch, log = _page_fits(gray, boxes, xh_prior=xh_prior, use=use)
     per_box: dict[int, list[LineFit]] = {}
     for f in fits:
         per_box.setdefault(f.box_index, []).append(f)
