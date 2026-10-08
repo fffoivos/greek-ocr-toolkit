@@ -63,8 +63,34 @@ E1's CER on clean strips is high (median 0.22), but those strips carry the rende
 the tools' measured skew, E1's median CER on clean strips is 0.075 (< 0.5°), 0.139 (0.5–1°), 0.370 (1–1.5°),
 0.533 (1.5–2°); at exactly 0° on tight crops it is 0.033 (skew 1° → 0.21, 2° → 0.53, 5° → 0.85). CLLG is 0.000 in
 every bin. E1 also degrades steadily with every cut and with fading (contrast < 45: CER 0.42–0.54).
-A re-read of the same strips straightened by `greekocr.glyphs.lines_api.separate_lines` is in progress
-(`strips_v2_straight/`).
+
+**Straightening removes it.** The same 240 clean and skew strips, straightened by
+`greekocr.glyphs.lines_api.separate_lines` (baseline flattened, height normalised from the four guide lines) and read
+again (`strips_v2_straight/`, median CER before → after):
+
+| strips | n | E1 | CLLG |
+|---|---|---|---|
+| clean, measured skew < 0.5° | 6 | 0.075 → 0.067 | 0.000 → 0.000 |
+| clean, 0.5–1° | 12 | 0.139 → 0.070 | 0.000 → 0.000 |
+| clean, 1–1.5° | 3 | 0.370 → 0.067 | 0.000 → 0.000 |
+| clean, 1.5–2° | 19 | 0.533 → 0.083 | 0.000 → 0.000 |
+| rotated 0° | 40 | 0.033 → 0.083 | 0.000 → 0.000 |
+| rotated 1° | 40 | 0.208 → 0.085 | 0.000 → 0.000 |
+| rotated 2° | 40 | 0.533 → 0.097 | 0.000 → 0.000 |
+| rotated 3° | 40 | 0.683 → 0.093 | 0.000 → 0.000 |
+| rotated 5° | 40 | 0.846 → 0.097 | 0.050 → 0.000 |
+| all 240 (mean) | 240 | 0.411 → 0.109 | 0.016 → 0.007 |
+
+Cost: exactly level, tightly cropped lines read slightly worse by E1 after straightening (0.033 → 0.083), because the
+straightened image is height-normalised with paper padding (1.9 x-heights above, 1.0 below the baseline) rather than
+E1's usual tight crop. CLLG is not harmed anywhere.
+
+## Real crops under the CLLG limits (444 crops: 400 parliament sample + 44 fixtures)
+
+With `greekocr.glyphs.readability` (limits above; ink states reported but not used): 195 readable, 241 partly
+readable (some x-range over a limit), 8 unreadable (half the width or more over); 247 crops have the accent /
+tall-letter zone cut at the top somewhere (tight text-layer boxes), 36 the letter body; 81 crops have an ambiguous
+target (more than one column or more than one full text line).
 
 ## Caveats
 
