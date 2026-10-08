@@ -640,11 +640,31 @@ above_top, below_bottom = straighten_edges(glyphs.band.bottom, glyphs.band.xh, g
 
 ### `greekocr.glyphs.lines_api.separate_lines`
 
-`def separate_lines(crop: Image.Image | NDArray[Any], *, min_visible: float=0.5, **kw: Any) -> list[LineImage]`
+`def separate_lines(crop: Image.Image | NDArray[Any], *, min_visible: float=0.5, tight: bool=True, margin: float=0.2, level_deg: float=0.3, **kw: Any) -> list[LineImage]`
+
+One straightened image per text line. Recogniser-facing default: tight=True, margin=0.2 x-heights — the image is
 
 ```python
 from greekocr.glyphs.lines_api import separate_lines
 lines = separate_lines(Image.open("crop.png"), min_visible=.5)
+```
+
+### `greekocr.glyphs.readability.Readability`
+
+```python
+from greekocr.glyphs.readability import Readability
+verdict = readability(Image.open("crop.png"))
+```
+
+### `greekocr.glyphs.readability.readability`
+
+`def readability(crop: Image.Image, *, xh_prior: float | None=None, limits: dict[str, float]=LIMITS) -> Readability`
+
+Verdict and reasons for one crop under a reader's limits (READER_LIMITS['cllg'] by default).
+
+```python
+from greekocr.glyphs.readability import readability
+verdict = readability(Image.open("crop.png"), xh_prior=None, limits=READER_LIMITS["cllg"])
 ```
 
 ### `greekocr.glyphs.report.document_of`

@@ -51,6 +51,24 @@ def _noise_sigma(gray: NDArray[np.float64], paper: float) -> float:
     return float(1.4826 * np.median(np.abs(bright - np.median(bright)))) if bright.size else 5.0
 
 
+SOFT_EDGE = .22   # boundary sharpness below which a large faint blob is shading, not print
+
+
+def _edge_sharpness(gray: NDArray[np.float64], mask: NDArray[np.bool_], *, paper: float,
+                    exclude: NDArray[np.bool_] | None = None) -> float:
+    """Median gradient magnitude on a blob's boundary divided by its contrast to the crop's paper level. Boundary
+    pixels on the crop border (no outside) or near `exclude` (strong ink: letters printed inside a shadow) do not count."""
+    ys, xs = np.nonzero(mask)
+    y0, y1, x0, x1 = max(0, ys.min() - 4), ys.max() + 5, max(0, xs.min() - 4), xs.max() + 5
+    g, m = gray[y0:y1, x0:x1], mask[y0:y1, x0:x1]
+    mag = np.hypot(ndi.sobel(g, 1), ndi.sobel(g, 0)) / 8
+    edge = m & ~ndi.binary_erosion(m, border_value=1)          # border_value=1: the crop border is not an edge
+    if exclude is not None:
+        edge &= ~ndi.binary_dilation(exclude[y0:y1, x0:x1], iterations=4)
+    contrast = max(1.0, paper - float(np.median(g[m])))
+    return float(np.median(mag[edge])) / contrast if edge.any() else 1.0
+
+
 def binarise(gray: NDArray[np.float64], *, window: int | None = None, k: float = .2) -> NDArray[np.bool_]:
     """Ink mask = Sauvola local threshold (window ≈ crop height) AND a loose global floor, PLUS faint components.
 
@@ -88,10 +106,13 @@ def binarise(gray: NDArray[np.float64], *, window: int | None = None, k: float =
         keep = sizes >= 24
         keep[0] = False
         ink |= keep[flab]
-    # faint ink must be letter-like, not a solid patch: a faint-only blob is dropped when it is both large (its short
-    # side ≥ 30 % of the crop height) and solid (thickness ≥ 40 % of its short side). Owner 8 Oct: a page-edge shadow
-    # (73 px thick, 136 px tall) had become a 'letter'; CP-G3 F1: a reference taken from strong strokes let three dark
-    # specks delete real faint letters, so no stroke reference is used.
+    # faint ink must be letter-like, not a shading patch. A faint-only blob is dropped when it is large (short side
+    # ≥ 30 % of the crop height), thick (2 × max distance-to-edge ≥ 40 % of the CROP height) AND soft-edged: printed ink
+    # steps from paper to ink within a pixel or two (boundary sharpness ≈ 0.36 on blurred renders, thin to very heavy),
+    # a shadow fades in (owner's page-edge shadow 0.14). Heavily over-inked faint capitals are kept (CP-G3c2).
+    # Owner 8 Oct: a page-edge shadow (73 px thick in a 136 px crop) had become a 'letter'. CP-G3 F1: a stroke reference
+    # let dark specks delete faint letters; CP-G3c2: thickness relative to the blob's own short side deleted faint BOLD
+    # letters (bold Ε, Ι) in tight crops — strokes stay well under 40 % of the crop height even in bold type.
     if (ink & ~strong).any():
         dt = ndi.distance_transform_edt(ink)
         alab, an = ndi.label(ink, structure=EIGHT)
@@ -103,7 +124,8 @@ def binarise(gray: NDArray[np.float64], *, window: int | None = None, k: float =
                 continue
             short = min(sl[0].stop - sl[0].start, sl[1].stop - sl[1].start)
             thick = 2 * float(dt[sl][alab[sl] == i].max())
-            drop[i] = short >= .3 * h and thick >= .4 * short
+            if short >= .3 * h and thick >= .4 * h:
+                drop[i] = _edge_sharpness(gray, alab == i, paper=paper, exclude=strong) < SOFT_EDGE
         ink &= ~drop[alab]
     return ink
 

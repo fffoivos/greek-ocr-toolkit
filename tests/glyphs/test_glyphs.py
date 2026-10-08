@@ -464,3 +464,46 @@ def test_g3_over_inked_capitals_are_kept_as_letters():
     gray = np.where(ink, 20, 235).astype(np.uint8)
     g = line_glyphs(Image.fromarray(gray), xh_prior=28)
     assert len(letter_boxes(g)) >= 1
+
+
+
+@pytest.mark.parametrize('text,dilate', [('Ε', 3), ('Ι', 2), ('Ι', 1), ('ΘΩΜΒ', 4)])
+def test_g3c2_faint_bold_letters_in_tight_crops_survive(text, dilate):
+    """CP-G3c2: faint bold letters (synthetic bold by dilation) in tight crops with dark specks keep their ink."""
+    from greekocr.glyphs.components import binarise
+    from scipy import ndimage as ndi
+    canvas = Image.new('L', (420, 140), 0)
+    ImageDraw.Draw(canvas).text((45, 20), text, font=ImageFont.truetype(str(DIDOT), 60), fill=255)
+    truth = ndi.binary_dilation(np.asarray(canvas) > 127, iterations=dilate)
+    rows = np.nonzero(truth.any(axis=1))[0]
+    truth = truth[max(0, rows[0] - 2):rows[-1] + 3]                    # tight crop, as the reviewer's probes
+    gray = np.full(truth.shape, 235.); gray[truth] = 195
+    for x in (8, 18, 28):
+        gray[truth.shape[0] // 2:truth.shape[0] // 2 + 2, x:x + 2] = 20
+    assert (binarise(gray) & truth).sum() >= .9 * truth.sum()
+
+
+# ---------- readability (calibrated limits) and tight straightening (8 Oct 17:00–17:40) ----------
+
+def test_readability_verdicts_on_owner_cases():
+    from greekocr.glyphs.readability import readability, READER_LIMITS
+    assert READER_LIMITS['cllg'] == {'accent_cut': .3, 'top_cut': .05, 'tail_cut': .6, 'bottom_cut': .1, 'skew_deg': 4.0}
+    crops = Path(__file__).parents[1] / 'fixtures'
+    owner = readability(Image.open(crops / 'o4d_lines' / 'regressions' / 's2-60f24a3d8a2d714767f2-p00003-l00024_old.png'), xh_prior=26.0)
+    assert owner.verdict == 'unreadable' and any('top' in r for r in owner.reasons)
+    two_col = readability(Image.open(crops / 'o4d_lines' / 'line08_medium.png'))
+    assert two_col.target == 'ambiguous' and any('columns' in r for r in two_col.reasons)
+    quiet = readability(Image.open(crops / 'o4d_sample400' / 'crops' / 's2-d12a9a4feb23254f4080-p00007-l00034.png'))
+    assert quiet.verdict == 'readable' and quiet.target == 'clear' and not quiet.spans
+
+
+def test_tight_straightening_is_tight_and_keeps_level_lines_unresampled():
+    from greekocr.glyphs.lines_api import separate_lines
+    r = render_truth_line(TEXTS[0], DIDOT, size=36, degrade=False)
+    tight = [l for l in separate_lines(r.image) if l.side == 'main'][0]
+    padded = [l for l in separate_lines(r.image, tight=False) if l.side == 'main'][0]
+    assert tight.image.height < padded.image.height
+    # a level line is only shifted: its straightened rows equal source rows exactly (no interpolation)
+    src = np.asarray(r.image, float)
+    out = np.asarray(tight.image, float)
+    assert any(np.array_equal(out[i], src[j, tight.x0:tight.x1]) for i in range(out.shape[0]) for j in range(src.shape[0]) if out[i].std() > 5)

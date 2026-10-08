@@ -1,0 +1,341 @@
+<title>Line Readability Check</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500&display=swap">
+<style>
+/* Layout: one long instrument sheet; each scanned line is a full-width strip with its readings stacked beneath it on a shared x-axis. */
+:root {
+  --bg: #f3f5f6;
+  --surface: #ffffff;
+  --fg: #1a1f25;
+  --muted: #5a6470;
+  --rule: #d6dce1;
+  --accent: #0d6e72;      /* the fitted underline */
+  --under: #c2560f;       /* broken / under-inked */
+  --over: #2c5bb0;        /* over-inked */
+  --cut: #b42318;         /* letters cut by the crop edge */
+  --second: #7a4cc2;      /* a second text line inside the crop */
+  --feature: #fff4d6;
+  --font-display: "IBM Plex Serif", Georgia, serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161b; --surface: #182028; --fg: #e4e9ee; --muted: #97a2ad; --rule: #2a333d;
+    --accent: #4db5b8; --under: #f0924c; --over: #86a9ee; --cut: #f0695f; --feature: #2e2a1c; --second: #b49af0; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11161b; --surface: #182028; --fg: #e4e9ee; --muted: #97a2ad; --rule: #2a333d;
+  --accent: #4db5b8; --under: #f0924c; --over: #86a9ee; --cut: #f0695f; --feature: #2e2a1c; --second: #b49af0; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1640px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; display: grid; gap: 28px; }
+h1 { font-family: var(--font-display); font-weight: 500; font-size: 1.9rem; margin: 0; text-wrap: balance; }
+h2 { font-size: 1.05rem; font-weight: 600; margin: 0; }
+p { margin: 0; max-width: 72ch; }
+.intro { display: grid; gap: 12px; }
+.muted { color: var(--muted); }
+.key { display: flex; flex-wrap: wrap; gap: 10px 22px; font-size: .86rem; color: var(--muted); }
+.key span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 22px; height: 0; border-top: 3px solid; display: inline-block; }
+.sw.box { height: 12px; border: 2px solid; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 28px; font-size: .88rem; }
+.facts div { min-width: 0; }
+.facts b { display: block; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.line { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; display: grid; gap: 10px; }
+.line.featured { border-color: var(--cut); box-shadow: inset 4px 0 0 var(--cut); }
+.section-head { display: grid; gap: 6px; padding-top: 10px; }
+.section-head h2 { font-family: var(--font-display); font-weight: 500; font-size: 1.35rem; }
+.chip.second { border-color: var(--second); color: var(--second); }
+.verdict { font-weight: 600; }
+.verdict.readable { border-color: var(--accent); color: var(--accent); }
+.verdict.partly { border-color: var(--under); color: var(--under); }
+.verdict.unreadable { border-color: var(--cut); color: var(--cut); background: color-mix(in srgb, var(--cut) 10%, transparent); }
+.reasons { font-size: .88rem; }
+.straight { display: grid; gap: 6px; }
+.straight figure { margin: 0; display: grid; gap: 2px; }
+.straight figcaption { font-size: .75rem; color: var(--muted); font-family: var(--font-data); }
+.straight img { display: block; max-width: 100%; height: auto; image-rendering: auto; border: 1px solid var(--rule); background: var(--surface); }
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.summary div { border: 1px solid var(--rule); border-radius: 6px; padding: 10px 12px; background: var(--surface); }
+.summary b { display: block; font-family: var(--font-data); font-size: 1.5rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.id { font-family: var(--font-data); font-size: .85rem; overflow-wrap: anywhere; min-width: 0; }
+.label { font-size: .78rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-family: var(--font-data); font-size: .78rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--rule); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chip.warn { border-color: var(--cut); color: var(--cut); }
+.chip.under { border-color: var(--under); color: var(--under); }
+.chip.over { border-color: var(--over); color: var(--over); }
+.note { background: var(--feature); padding: 10px 12px; border-radius: 4px; font-size: .9rem; }
+.events { font-size: .85rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 18px; font-variant-numeric: tabular-nums; }
+.scroll { overflow-x: auto; }
+svg.fig { display: block; }
+svg text { font-family: var(--font-data); font-size: 11px; fill: var(--muted); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: .88rem; }
+.toolbar label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <h1>Line Readability Check</h1>
+    <p id="lede"></p>
+    <p class="muted">No OCR reading and no PDF text layer is used anywhere on this page. Everything comes from the pixels of each crop,
+      plus the median letter height of the same document for crops too clipped to measure their own.</p>
+    <div class="key" aria-label="Legend">
+      <span><i class="sw" style="border-color:var(--accent)"></i>underline (baseline fit), solid where letters support it</span>
+      <span><i class="sw" style="border-color:var(--accent);border-top-style:dashed"></i>top of the short letters (α, ε, ο…)</span>
+      <span><i class="sw" style="border-color:var(--cut)"></i>letter body cut by the crop edge</span>
+      <span><i class="sw box" style="border-color:var(--under)"></i>letter broken into pieces, or faint</span>
+      <span><i class="sw box" style="border-color:var(--over)"></i>letter run into its neighbour (merged blob)</span>
+      <span><i class="sw box" style="border-color:var(--muted)"></i>intact letter</span>
+      <span><i class="sw" style="border-color:var(--second)"></i>neighbour lines in the crop, with their four guide lines</span>
+      <span><i class="sw" style="border-color:var(--accent);border-top-style:dotted"></i>top of tall letters / bottom of hanging letters</span>
+    </div>
+    <div class="facts">
+      <div><b>How the verdict is made</b>Four guide lines are fitted to each line. Along x, the tool measures how much of each zone the crop edge removes: the accent / tall-letter zone and the letter body at the top, the tail zone and the letter body at the bottom (counted only where ink reaches the edge). A line is readable when nothing exceeds a limit, partly readable when some x-range does, unreadable when half the width or more does.</div>
+      <div><b>Where the limits come from</b>1,760 synthetic lines cut, inked and tilted by known amounts were read by two OCR models. For the strong polytonic reader (CLLG) the error stays near zero until: accent zone cut 0.3, letter body cut at the top 0.05, tail zone cut 0.6, letter body cut at the bottom 0.1, skew 4°. Fading had no measurable effect; broken or merged letters mattered only at extremes, so they are shown but do not change the verdict.</div>
+      <div><b>Target clarity</b>Clear when the crop holds one column and one full text line. Ambiguous when a column rule or a wide unaligned gap splits it, or when a second line shows its letter bodies; lines showing only edges do not make the target ambiguous.</div>
+      <div><b>Straightened lines</b>Under each crop: the line as the lines API hands it to an OCR model — straightened along its fitted baseline and cropped to its ink. On the synthetic set this brought the weaker reader's error from 40% to 4.5% on tilted lines without changing level ones.</div>
+      <div><b>Known limits</b>Limits are measured on synthetic Didot-like print with two readers. The text-layer boxes are tight, so many real crops lose accents at the top. A neighbour line can be placed half a letter height off when only some of its letters show. Wide capitals are sometimes called merged.</div>
+    </div>
+    <div class="summary" id="summary"></div>
+    <div class="toolbar">
+      <label for="zoom"><input id="zoom" type="checkbox"> Show crops at 2× (scroll sideways)</label>
+      <label for="marks"><input id="marks" type="checkbox" checked> Show accent boxes</label>
+      <span class="muted" id="built"></span>
+    </div>
+  </header>
+  <main id="lines" style="display:grid;gap:22px"></main>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const NS = 'http://www.w3.org/2000/svg';
+const LEFT = 64, PAD = 46, VIS_H = 34, INK_H = 96, GAP = 14;
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function path(points) { return points.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' '); }
+function sampled(arr, step, width) { return arr.map((v, i) => [Math.min(i * step, width - 1), v]); }
+function colourFor(L) { return L.state === 'broken' || L.state === 'faint' ? 'var(--under)' : L.state === 'merged' ? 'var(--over)' : 'var(--muted)'; }
+const STATE = { intact: 'intact', broken: 'broken into pieces', faint: 'faint', merged: 'run into a neighbour' };
+function fmt(n, d = 1) { return (n > 0 ? '+' : '') + Number(n).toFixed(d); }
+
+function figure(r, scale, showMarks) {
+  const W = r.width, H = r.height;
+  const top = PAD, imgBottom = PAD + H, visTop = imgBottom + PAD + GAP, inkTop = visTop + VIS_H + GAP + 8;
+  const totalH = inkTop + INK_H + 18;
+  const svg = el('svg', { class: 'fig', viewBox: `0 0 ${LEFT + W + 12} ${totalH}`, width: (LEFT + W + 12) * scale, height: totalH * scale, role: 'img',
+    'aria-label': `Line ${r.id}: ${r.n_columns} column(s), ${r.n_lines} line(s), skew ${r.angle_deg} degrees, ${r.n_broken} broken, ${r.n_faint} faint and ${r.n_merged} merged letters` });
+  const g = el('g', { transform: `translate(${LEFT},0)` }, svg);
+  el('rect', { x: 0, y: top, width: W, height: H, fill: 'var(--surface)', stroke: 'var(--rule)' }, g);
+  el('image', { href: `data:image/${r.img_type || 'png'};base64,` + r.png, x: 0, y: top, width: W, height: H, preserveAspectRatio: 'none' }, g);
+  const yOf = s => inkTop + INK_H / 2 - s * INK_H / 2;
+  el('rect', { x: 0, y: visTop, width: W, height: VIS_H, fill: 'none', stroke: 'var(--rule)' }, g);
+  el('line', { x1: 0, x2: W, y1: yOf(0), y2: yOf(0), stroke: 'var(--muted)', 'stroke-width': 1 }, g);
+  for (const v of [1, .5, -.5, -1]) el('line', { x1: 0, x2: W, y1: yOf(v), y2: yOf(v), stroke: 'var(--rule)', 'stroke-width': 1 }, g);
+  const RCOL = { accent_cut: 'var(--under)', top_cut: 'var(--cut)', tail_cut: 'var(--under)', bottom_cut: 'var(--cut)' };
+  const RTXT = { accent_cut: 'accents / tall letters cut', top_cut: 'letter bodies cut (top)', tail_cut: 'tails cut', bottom_cut: 'letter bodies cut (bottom)' };
+  for (const sp of ((r.readability || {}).spans || [])) {
+    const atTop = sp.reason === 'accent_cut' || sp.reason === 'top_cut';
+    const band = el('rect', { x: sp.x0, y: atTop ? top - 14 : imgBottom + 10, width: sp.x1 - sp.x0, height: 4, fill: RCOL[sp.reason], 'fill-opacity': .85 }, g);
+    el('title', {}, band).textContent = `${RTXT[sp.reason]} over x ${sp.x0}–${sp.x1}; worst ${Math.round(sp.worst * 100)}% of the zone`;
+  }
+  const segs = r.segments || [r];
+  segs.forEach((seg, k) => {
+    const Ws = seg.width || W, gs = el('g', { transform: `translate(${seg.x_offset || 0},0)` }, g);
+    if (segs.length > 1) {
+      el('rect', { x: 0, y: top - 2, width: Ws, height: H + 4, fill: 'none', stroke: 'var(--second)', 'stroke-dasharray': '6 4', 'stroke-opacity': .5 }, gs);
+      const t = el('text', { x: 4, y: top + H + PAD - 6, style: 'fill:var(--second)' }, gs); t.textContent = `column ${k + 1}`;
+    }
+    for (const s of seg.cut_spans) {
+      const y = s.edge === 'top' ? top - 5 : imgBottom + 1;
+      const rect = el('rect', { x: s.x0, y, width: s.x1 - s.x0, height: 4, fill: 'var(--cut)' }, gs);
+      el('title', {}, rect).textContent = `letter body cut at the ${s.edge} edge; least visible ${Math.round(s.min_visible * 100)}%`;
+    }
+    for (const c of (seg.cut_letters || []).filter(c => c.body_cut > 0.25)) {
+      const x = (c.x0 + c.x1) / 2, y = c.edge === 'top' ? top - 7 : imgBottom + 7;
+      const d = c.edge === 'top' ? `M${x - 5} ${y - 7} L${x + 5} ${y - 7} L${x} ${y}` : `M${x - 5} ${y + 7} L${x + 5} ${y + 7} L${x} ${y}`;
+      el('title', {}, el('path', { d, fill: 'var(--cut)' }, gs)).textContent = `${Math.round(c.body_cut * 100)}% of this letter's body is outside the ${c.edge} edge`;
+    }
+    for (const L of seg.letters) {
+      const flagged = L.state !== 'intact';
+      const b = el('rect', { x: L.x0, y: top + L.y0, width: L.x1 - L.x0, height: L.y1 - L.y0, fill: 'none', stroke: colourFor(L),
+        'stroke-width': flagged ? 2 : 1, 'stroke-opacity': flagged ? 1 : .5 }, gs);
+      el('title', {}, b).textContent = `${STATE[L.state]} · ${L.pieces} piece${L.pieces === 1 ? '' : 's'} in the middle region` +
+        (L.merged > 1 ? ` · ${L.merged} letters in one blob` : '') + ` · ink contrast ${Math.round(L.contrast * 100)}% of the line's typical`;
+    }
+    if (showMarks) for (const m of seg.marks) el('rect', { x: m[0], y: top + m[1], width: m[2] - m[0], height: m[3] - m[1], fill: 'none', stroke: 'var(--accent)', 'stroke-width': 1, 'stroke-opacity': .6, 'stroke-dasharray': '2 2' }, gs);
+    const clipId = 'c' + Math.random().toString(36).slice(2);
+    el('rect', { x: 0, y: 2, width: Ws, height: H + 2 * PAD - 4 }, el('clipPath', { id: clipId }, el('defs', {}, svg)));
+    const lines = el('g', { 'clip-path': `url(#${clipId})` }, gs);
+    const base = sampled(seg.baseline, r.step, Ws).map(([x, y]) => [x, y + top]);
+    const mean = sampled(seg.meanline, r.step, Ws).map(([x, y]) => [x, y + top]);
+    el('path', { d: path(base), fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2, 'stroke-dasharray': '6 5', 'stroke-opacity': .7 }, lines);
+    const sup = base.filter(([x]) => x >= seg.support_x[0] && x <= seg.support_x[1]);
+    if (sup.length > 1) el('path', { d: path(sup), fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2.5 }, lines);
+    el('path', { d: path(mean), fill: 'none', stroke: 'var(--accent)', 'stroke-width': 1.2, 'stroke-dasharray': '3 4' }, lines);
+    for (const L of (seg.lines || [])) {
+      const col = L.side === 'main' ? 'var(--accent)' : 'var(--second)';
+      const pts = key => sampled(L[key], r.step, Ws).map(([x, y]) => [x, y + top]);
+      const inRange = key => pts(key).filter(([x]) => x >= L.x0 && x <= L.x1);
+      if (L.side !== 'main') {
+        el('path', { d: path(inRange('base')), fill: 'none', stroke: col, 'stroke-width': 2 }, lines);
+        el('path', { d: path(inRange('mean')), fill: 'none', stroke: col, 'stroke-width': 1.2, 'stroke-dasharray': '4 4' }, lines);
+      }
+      el('path', { d: path(inRange('ascender')), fill: 'none', stroke: col, 'stroke-width': 1, 'stroke-dasharray': '1 3' }, lines);
+      el('path', { d: path(inRange('descender')), fill: 'none', stroke: col, 'stroke-width': 1, 'stroke-dasharray': '1 3' }, lines);
+      if (L.side !== 'main') {
+        const lab = el('text', { x: Math.max(4, L.x0) + 2, y: Math.min(Math.max(L.base[0] + top - 4, 12), H + 2 * PAD - 4), style: 'fill:var(--second)' }, lines);
+        lab.textContent = `${L.side} ${L.shift_xh > 0 ? '+' : ''}${L.shift_xh.toFixed(1)} · ${L.kind === 'full' ? 'full' : 'edges'}`;
+      }
+    }
+    for (const c of seg.crossings) {
+      el('line', { x1: c.x, x2: c.x, y1: 2, y2: H + 2 * PAD - 2, stroke: 'var(--cut)', 'stroke-width': 1, 'stroke-dasharray': '2 3' }, gs);
+      const t = el('text', { x: c.x + 4, y: c.edge === 'top' ? 12 : H + 2 * PAD - 4 }, gs);
+      t.textContent = 'x=' + (c.x + (seg.x_offset || 0)); t.setAttribute('style', 'fill:var(--cut)');
+    }
+    const vis = sampled(seg.visible, r.step, Ws).map(([x, v]) => [x, visTop + VIS_H * (1 - v)]);
+    el('path', { d: path([[0, visTop + VIS_H], ...vis, [Ws - 1, visTop + VIS_H]]) + ' Z', fill: 'var(--accent)', 'fill-opacity': .22, stroke: 'none' }, gs);
+    el('path', { d: path(vis), fill: 'none', stroke: 'var(--accent)', 'stroke-width': 1.5 }, gs);
+    for (const L of seg.letters) {
+      if (!L.score) { el('rect', { x: L.x0 + 1, y: yOf(0) - 1, width: Math.max(1, L.x1 - L.x0 - 2), height: 2, fill: 'var(--muted)', 'fill-opacity': .5 }, gs); continue; }
+      const y0 = yOf(Math.max(0, L.score)), y1 = yOf(Math.min(0, L.score));
+      const bar = el('rect', { x: L.x0 + 1, y: y0, width: Math.max(1, L.x1 - L.x0 - 2), height: Math.max(1, y1 - y0), fill: colourFor(L),
+        'fill-opacity': L.state === 'faint' ? .45 : .9 }, gs);
+      el('title', {}, bar).textContent = `${STATE[L.state]} (${fmt(L.score, 1)})`;
+    }
+  });
+  el('text', { x: -8, y: top + H / 2 + 4, 'text-anchor': 'end' }, g).textContent = 'crop';
+  el('text', { x: -8, y: visTop + VIS_H / 2 + 4, 'text-anchor': 'end' }, g).textContent = 'inside';
+  el('text', { x: W + 4, y: visTop + 9 }, g).textContent = '1';
+  el('text', { x: W + 4, y: visTop + VIS_H }, g).textContent = '0';
+  el('text', { x: -8, y: yOf(0) + 4, 'text-anchor': 'end' }, g).textContent = 'ink';
+  el('text', { x: -8, y: yOf(0.85) + 4, 'text-anchor': 'end', style: 'fill:var(--over)' }, g).textContent = 'merged';
+  el('text', { x: -8, y: yOf(-0.85) + 4, 'text-anchor': 'end', style: 'fill:var(--under)' }, g).textContent = 'broken';
+  el('text', { x: W + 4, y: yOf(1) + 4 }, g).textContent = '+1';
+  el('text', { x: W + 4, y: yOf(-1) + 4 }, g).textContent = '−1';
+  el('text', { x: W + 4, y: yOf(0) + 4 }, g).textContent = '0';
+  return svg;
+}
+
+function card(r, scale, showMarks) {
+  const featured = r.section === 'owner' && r.id.includes('60f24a3d8a2d714767f2-p00003-l00024');
+  const art = document.createElement('article');
+  art.className = 'line' + (featured ? ' featured' : '');
+  art.id = r.id.replace(/[^A-Za-z0-9_.~-]/g, '');
+  const head = document.createElement('div'); head.className = 'head';
+  head.innerHTML = `<h2 class="id"></h2><span class="label"></span>`;
+  head.querySelector('.id').textContent = r.id;
+  head.querySelector('.label').textContent = r.label;
+  const chips = document.createElement('div'); chips.className = 'chips';
+  const add = (text, cls, title) => { const c = document.createElement('span'); c.className = 'chip ' + (cls || ''); c.textContent = text; if (title) c.title = title; chips.appendChild(c); };
+  add(`skew ${fmt(r.angle_deg, 2)}°`, Math.abs(r.angle_deg) > 1 ? 'warn' : '', 'positive = rises to the right');
+  add(`trail ${fmt(r.trail_px, 0)} px`, Math.abs(r.trail_px) > r.xh * .5 ? 'warn' : '', 'baseline change from left to right edge');
+  add(r.degree === 2 ? 'curved fit' : 'straight fit');
+  add(`letter height ${r.xh}px · ${r.prior ? 'document prior (n=' + r.prior.n + ')' : r.xh_source.replace('_', ' ')}`);
+  add(`fit ${r.confidence} · ${r.n_support} pts`);
+  add(`${r.n_broken} broken`, r.n_broken ? 'under' : '');
+  add(`${r.n_faint} faint`, r.n_faint ? 'under' : '');
+  add(`${r.n_merged} merged`, r.n_merged ? 'over' : '');
+  const nCut = (r.segments || [r]).reduce((a, sg) => a + (sg.cut_spans || []).length, 0);
+  add(`${nCut} cut span${nCut === 1 ? '' : 's'}`, nCut ? 'warn' : '');
+  if (r.n_columns > 1) add(`${r.n_columns} columns`, 'second');
+  const parts = [`${r.n_columns > 1 ? r.n_columns + ' main' : 'main'}`];
+  const full = r.n_full_lines - r.n_columns, edges = r.n_edge_lines;
+  if (full > 0) parts.push(`${full} full`);
+  if (edges > 0) parts.push(`${edges} edges only`);
+  add(`${r.n_lines} line${r.n_lines === 1 ? '' : 's'} detected: ${parts.join(' + ')}`, r.n_lines > r.n_columns ? 'second' : '');
+  const rd = r.readability;
+  if (rd) {
+    const v = document.createElement('span'); v.className = `chip verdict ${rd.verdict}`;
+    v.textContent = { readable: 'readable', partly: 'partly readable', unreadable: 'unreadable' }[rd.verdict];
+    chips.prepend(v);
+    const t = document.createElement('span'); t.className = 'chip ' + (rd.target === 'clear' ? '' : 'second');
+    t.textContent = rd.target === 'clear' ? 'target clear' : 'target ambiguous'; chips.insertBefore(t, v.nextSibling);
+  }
+  art.append(head, chips);
+  if (rd && rd.reasons.length) {
+    const re = document.createElement('p'); re.className = 'reasons';
+    re.textContent = 'Why: ' + rd.reasons.join(' · ') + (rd.over_share ? ` — ${Math.round(rd.over_share * 100)}% of the line width over a limit` : '');
+    art.appendChild(re);
+  }
+  if (featured) {
+    const n = document.createElement('p'); n.className = 'note';
+    n.textContent = 'Your example: the first letters are only about a quarter visible. The bend-following fit now reads about 32% of the letter body inside the crop at the start (earlier: 0–6%), rising to full visibility and falling again where the line leaves through the top.';
+    art.appendChild(n);
+  }
+  if (r.before) {
+    const b = document.createElement('p'); b.className = 'events';
+    b.textContent = `Before: ${r.before}  →  now: ${r.now}`;
+    art.appendChild(b);
+  }
+  if (r.note) {
+    const n = document.createElement('p'); n.className = 'note'; n.textContent = 'Inspection note: ' + r.note; art.appendChild(n);
+  }
+  const crossings = (r.segments || [r]).flatMap(sg => sg.crossings.map(c => ({ ...c, x: c.x + (sg.x_offset || 0) })));
+  if (crossings.length) {
+    const ev = document.createElement('div'); ev.className = 'events';
+    for (const c of crossings) { const s = document.createElement('span'); s.textContent = `x=${c.x}: ${c.meaning}`; ev.appendChild(s); }
+    art.appendChild(ev);
+  }
+  const sc = document.createElement('div'); sc.className = 'scroll';
+  sc.appendChild(figure(r, scale, showMarks));
+  art.appendChild(sc);
+  if ((r.straightened || []).length) {
+    const st = document.createElement('div'); st.className = 'straight';
+    for (const L of r.straightened) {
+      const f = document.createElement('figure');
+      const im = document.createElement('img'); im.src = 'data:image/jpeg;base64,' + L.jpg; im.alt = `straightened line, column ${L.segment + 1}`;
+      im.width = L.w; im.height = L.h; im.loading = 'lazy';
+      im.style.width = Math.min(100, 100 * L.w / r.width).toFixed(1) + '%';
+      const c = document.createElement('figcaption');
+      c.textContent = `straightened (tight, for OCR)${r.n_columns > 1 ? ' · column ' + (L.segment + 1) : ''} · body cut top ${Math.round(L.top_cut * 100)}% / bottom ${Math.round(L.bottom_cut * 100)}%`;
+      f.append(im, c); st.appendChild(f);
+    }
+    art.appendChild(st);
+  }
+  return art;
+}
+
+function render() {
+  const main = document.getElementById('lines');
+  main.textContent = '';
+  const zoom = document.getElementById('zoom').checked, marks = document.getElementById('marks').checked;
+  const width = main.clientWidth || 1200;
+  const heads = { owner: ['Your cases', 'The crops you pointed at today, with every fix applied and the readability verdict.'],
+    sample: ['Real lines by readability', `A stratified sample of the ${DATA.pool} real crops: every unreadable one, then cut-offs by zone, columns, several lines in a crop, and readable lines at random. Each card names the selection reason above the chips.`] };
+  document.getElementById('lede').textContent = 'Readability of real parliament line crops for OCR: where the line is, whether it is cut, and whether one target line is clear — with limits measured by two OCR readers on calibrated synthetic lines.';
+  let last = '';
+  for (const r of DATA.lines) {
+    if (r.section !== last) {
+      last = r.section;
+      const h = document.createElement('section'); h.className = 'section-head';
+      const t = document.createElement('h2'); t.textContent = heads[r.section][0];
+      const d = document.createElement('p'); d.className = 'muted'; d.textContent = heads[r.section][1];
+      h.append(t, d); main.appendChild(h);
+    }
+    const fit = Math.min(1, (width - 34) / (LEFT + r.width + 12));
+    main.appendChild(card(r, zoom ? 2 : fit, marks));
+  }
+}
+{
+  const c = DATA.verdict_counts || {}, n = DATA.pool || 0, box = document.getElementById('summary');
+  for (const [k, lab] of [['readable', 'readable'], ['partly', 'partly readable'], ['unreadable', 'unreadable']]) {
+    const d = document.createElement('div'); const b = document.createElement('b'); b.textContent = (c[k] || 0);
+    d.append(b, document.createTextNode(`${lab} of ${n} real crops`)); box.appendChild(d);
+  }
+}
+document.getElementById('built').textContent = `built ${DATA.built} · ${DATA.lines.length} lines`;
+document.getElementById('zoom').addEventListener('change', render);
+document.getElementById('marks').addEventListener('change', render);
+let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 150); });
+render();
+</script>
