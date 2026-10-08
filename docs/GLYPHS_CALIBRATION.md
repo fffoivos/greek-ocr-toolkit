@@ -90,6 +90,31 @@ not regress" bar is therefore not yet cleared for E1; the remaining gap is likel
 is the next thing to test. CLLG is unharmed (5° 0.050 → 0.000). Recogniser-facing output uses tight=True; the padded
 form is for display.
 
+**Margin sweep (canonical NFD scoring).** Same 240 strips; cells = median NFD CER / median NFC CER / pooled accent
+(mark) F1 from greekocr._vendor.bench.e1_readout.mark_metrics; last row means. Columns: original, straightened with
+paper padding, and tight output cropped to its ink ± 0.5 / 0.3 / 0.2 x-heights.
+
+| E1 f50_s0 | n | original | straight padded | tight m0.5 | tight m0.3 | tight m0.2 |
+|---|---|---|---|---|---|---|
+| clean ±2° (measured <1°) | 18 | 0.080 / 0.103 / 0.76 | 0.053 / 0.070 / 0.85 | 0.053 / 0.061 / 0.85 | 0.028 / 0.033 / 0.89 | 0.035 / 0.042 / 0.88 |
+| clean ±2° (measured ≥1°) | 22 | 0.469 / 0.504 / 0.46 | 0.070 / 0.083 / 0.79 | 0.047 / 0.058 / 0.83 | 0.042 / 0.050 / 0.84 | 0.028 / 0.033 / 0.85 |
+| rotated 0° | 40 | 0.028 / 0.033 / 0.87 | 0.069 / 0.083 / 0.81 | 0.066 / 0.083 / 0.83 | 0.041 / 0.051 / 0.86 | 0.028 / 0.033 / 0.86 |
+| rotated 1° | 40 | 0.188 / 0.208 / 0.66 | 0.069 / 0.085 / 0.80 | 0.061 / 0.068 / 0.82 | 0.041 / 0.050 / 0.86 | 0.029 / 0.040 / 0.86 |
+| rotated 2° | 40 | 0.514 / 0.533 / 0.40 | 0.071 / 0.097 / 0.80 | 0.056 / 0.064 / 0.82 | 0.041 / 0.050 / 0.85 | 0.028 / 0.033 / 0.86 |
+| rotated 3° | 40 | 0.678 / 0.683 / 0.25 | 0.078 / 0.093 / 0.79 | 0.061 / 0.074 / 0.82 | 0.039 / 0.050 / 0.86 | 0.037 / 0.050 / 0.86 |
+| rotated 5° | 40 | 0.860 / 0.846 / 0.11 | 0.071 / 0.097 / 0.76 | 0.065 / 0.085 / 0.80 | 0.043 / 0.053 / 0.82 | 0.042 / 0.058 / 0.84 |
+| all 240 (mean) | 240 | 0.396 / 0.411 / 0.53 | 0.092 / 0.109 / 0.79 | 0.074 / 0.088 / 0.82 | 0.051 / 0.063 / 0.85 | 0.045 / 0.056 / 0.86 |
+
+- **Level lines (rotated 0°, n = 40): tight m0.2 equals the original** — median NFD 0.028 vs 0.028; paired bootstrap
+  (10,000 resamples) Δmedian 95 % CI [−0.011, +0.011], mean paired Δ +0.006 [−0.004, +0.017]; mark F1 0.87 → 0.86.
+  The coordinator's bar (≤ +0.005 median NFD) is met.
+- The earlier level-line cost was the margin, not the resampling: a shift-only path for baselines within 0.3° of level
+  (taken by 37 of the 40 level strips) reads identically to the resampled tight m0.3 output.
+- Every skew bin: tight m0.2 holds E1 at 0.028–0.042 median NFD (original 0.188 at 1° → 0.860 at 5°); mean over all
+  240 strips 0.396 → 0.045, mark F1 0.53 → 0.86. CLLG 0.000 in every bin and variant.
+- Decision: recogniser-facing output = ; margin stays a parameter; the
+  padded form is for display.
+
 ## Real crops under the CLLG limits (444 crops: 400 parliament sample + 44 fixtures)
 
 With `greekocr.glyphs.readability` (limits above; ink states reported but not used): 195 readable, 241 partly
