@@ -37,7 +37,11 @@ for i in range(N):
     fn += sum(1 for ti, t in enumerate(truths) if t[2] and ti not in used_t)
     fp += sum(1 for pi in range(len(L)) if pi not in used_p)
 e = np.array(errs)
-print('present true neighbours %d, predictions %d | matched %d (recall %.3f), missed %d, unmatched predictions (false lines) %d (precision %.3f), matched to a barely visible line %d'
-      % (present_n, pred_n, tp, tp / max(1, present_n), fn, fp, (tp + matched_absent) / max(1, pred_n), matched_absent))
-print('placement error over matches (x-heights): median %.3f p75 %.3f p90 %.3f | within 0.25: %.3f of matches, %.3f of present lines'
-      % (np.median(e), np.percentile(e, 75), np.percentile(e, 90), (e <= .25).mean(), (e <= .25).sum() / max(1, present_n)))
+strict_fp = fp + matched_absent      # a match to a neighbour below the presence bar is not a true positive here
+print('present true neighbours %d, predictions %d | matched %d (recall %.3f), missed %d | unmatched to a present line %d (strict precision %.3f) — of which %d sit on a barely visible neighbour (< 30 px)'
+      % (present_n, pred_n, tp, tp / max(1, present_n), fn, strict_fp, tp / max(1, pred_n), matched_absent))
+if e.size:
+    print('placement error over matches (x-heights): median %.3f p75 %.3f p90 %.3f | within 0.25: %.3f of matches, %.3f of present lines'
+          % (np.median(e), np.percentile(e, 75), np.percentile(e, 90), (e <= .25).mean(), (e <= .25).sum() / max(1, present_n)))
+else:
+    print('placement error: no matches')

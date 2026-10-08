@@ -88,18 +88,22 @@ def binarise(gray: NDArray[np.float64], *, window: int | None = None, k: float =
         keep = sizes >= 24
         keep[0] = False
         ink |= keep[flab]
-    # faint ink must be stroke-like: a faint region much thicker than the strong strokes is shading or a stain, not
-    # print (owner 8 Oct: a page-edge shadow became one 73-px-thick 'letter' spanning three lines)
-    if ink.any() and (ink & ~strong).any():
+    # faint ink must be letter-like, not a solid patch: a faint-only blob is dropped when it is both large (its short
+    # side ≥ 30 % of the crop height) and solid (thickness ≥ 40 % of its short side). Owner 8 Oct: a page-edge shadow
+    # (73 px thick, 136 px tall) had become a 'letter'; CP-G3 F1: a reference taken from strong strokes let three dark
+    # specks delete real faint letters, so no stroke reference is used.
+    if (ink & ~strong).any():
         dt = ndi.distance_transform_edt(ink)
-        slab, sn = ndi.label(strong, structure=EIGHT)
-        stroke = float(np.median(2 * ndi.maximum(dt, slab, np.arange(1, sn + 1)))) if sn else 4.0
         alab, an = ndi.label(ink, structure=EIGHT)
-        thick = 2 * ndi.maximum(dt, alab, np.arange(1, an + 1))
         has_strong = np.zeros(an + 1, bool)
         has_strong[np.unique(alab[strong])] = True
         drop = np.zeros(an + 1, bool)
-        drop[1:] = (thick > 3 * stroke) & ~has_strong[1:]
+        for i, sl in enumerate(ndi.find_objects(alab), start=1):
+            if sl is None or has_strong[i]:
+                continue
+            short = min(sl[0].stop - sl[0].start, sl[1].stop - sl[1].start)
+            thick = 2 * float(dt[sl][alab[sl] == i].max())
+            drop[i] = short >= .3 * h and thick >= .4 * short
         ink &= ~drop[alab]
     return ink
 

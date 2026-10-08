@@ -104,8 +104,10 @@ def _segment_record(g: LineGlyphs, x_offset: int, step: int) -> dict[str, Any]:
 def line_record(path: PathLike, *, priors: Mapping[str, Mapping[str, float]] | None = None,
                 label: str = '', step: int = 4) -> dict[str, Any]:
     """JSON-ready record of a crop: one entry per column segment (columns split at rules / unaligned wide gaps), each
-    with its skew, bends, guide lines, neighbour lines, cut-offs and letter states. Top-level measurement fields repeat
-    the main segment (most baseline support) for summaries."""
+    with its skew, bends, guide lines, neighbour lines, cut-offs and letter states in LOCAL coordinates (x_offset into
+    the crop). Top-level measurements repeat the main segment (most baseline support; `main_segment`, `main_x_offset`);
+    top-level letters / cut_spans / cut_letters / lines are flattened in CROP coordinates with a `segment` field
+    (guide-line arrays stay in the segments)."""
     path = Path(path)
     image = Image.open(path)
     probe = line_glyphs(image)
@@ -117,7 +119,11 @@ def line_record(path: PathLike, *, priors: Mapping[str, Mapping[str, float]] | N
         kw['xh_prior'] = prior_used['xh']
     segs = [sg for sg in column_segments(image, **kw) if sg.glyphs is not None]
     records = [_segment_record(sg.glyphs, sg.x0, step) for sg in segs]
-    main = max(records, key=lambda r: r['n_support']) if records else _segment_record(probe, 0, step)
+    if records:
+        main_i = max(range(len(records)), key=lambda i: records[i]['n_support'])
+        main = records[main_i]
+    else:
+        main_i, main = 0, _segment_record(probe, 0, step)
     kinds = [l['kind'] for r in records for l in r['lines']]
     out = dict(id=path.stem, label=label, document=doc, width=image.width, height=image.height, png=_png(image),
                prior=prior_used, step=step, segments=records or [main], n_columns=max(1, len(records)),
@@ -128,7 +134,20 @@ def line_record(path: PathLike, *, priors: Mapping[str, Mapping[str, float]] | N
         out[k] = main[k]
     for k in ('n_broken', 'n_faint', 'n_merged'):
         out[k] = sum(r[k] for r in records) if records else main[k]
-    out['cut_spans'] = [c for r in records for c in r['cut_spans']]
-    out['letters'] = [l for r in records for l in r['letters']]
-    out['lines'] = [l for r in records for l in r['lines']]
+    # flattened spatial entries are in CROP coordinates and name their segment (CP-G3 F3); the nested segment
+    # records keep local coordinates plus x_offset
+    def shifted(entry: dict, k: int, off: int) -> dict:
+        e = dict(entry, segment=k)
+        for key in ('x0', 'x1', 'x'):
+            if key in e:
+                e[key] = e[key] + off
+        return e
+    out['main_segment'] = main_i
+    out['main_x_offset'] = main['x_offset']
+    out['support_x'] = [v + main['x_offset'] for v in main['support_x']]
+    out['cut_spans'] = [shifted(c, k, r['x_offset']) for k, r in enumerate(records) for c in r['cut_spans']]
+    out['cut_letters'] = [shifted(c, k, r['x_offset']) for k, r in enumerate(records) for c in r['cut_letters']]
+    out['letters'] = [shifted(l, k, r['x_offset']) for k, r in enumerate(records) for l in r['letters']]
+    out['lines'] = [{key: val for key, val in shifted(l, k, r['x_offset']).items()
+                     if key not in ('ascender', 'mean', 'base', 'descender')} for k, r in enumerate(records) for l in r['lines']]
     return out

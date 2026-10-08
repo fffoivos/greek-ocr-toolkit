@@ -17,7 +17,7 @@ from PIL import Image
 from greekocr.glyphs.baseline import GuideLines, text_lines
 from greekocr.glyphs.columns import column_segments
 
-__all__ = ['LineImage', 'ABOVE', 'BELOW', 'separate_lines', 'straighten']
+__all__ = ['LineImage', 'ABOVE', 'BELOW', 'separate_lines', 'straighten', 'straighten_edges']
 
 ABOVE, BELOW = 1.9, 1.0      # output extent above / below the baseline, in x-heights: tall letters + accents; tails
 
@@ -34,13 +34,14 @@ class LineImage:
     side: str                         # 'main' | 'above' | 'below'
     shift_xh: float                   # offset from the segment's main baseline
     visible: float                    # mean fraction of the letter body inside the crop
-    top_cut: NDArray[np.float64]      # per output column: fraction of the letter body (mean line → baseline) cut at the top
-    bottom_cut: NDArray[np.float64]   # per output column: fraction of the tail zone (baseline → hanging bottom) cut at the bottom
+    top_cut: NDArray[np.float64]      # per output column: fraction of the letter body (mean line → baseline) above the crop top
+    bottom_cut: NDArray[np.float64]   # per output column: fraction of the letter body below the crop bottom
 
 
 def straighten(gray: NDArray[np.float64], base: NDArray[np.float64], xh: float, *, paper: float,
                above: float = ABOVE, below: float = BELOW) -> tuple[NDArray[np.float64], NDArray[np.bool_], int]:
-    """Resample every column so the baseline lands on one row; linear interpolation along each column."""
+    """Resample every column so the baseline lands on one row; linear interpolation along each column.
+    The returned mask marks output pixels whose source lay outside the crop (either edge); see straighten_edges."""
     h, w = gray.shape
     up, down = int(round(above * xh)), int(round(below * xh))
     out_h = up + down
@@ -54,6 +55,14 @@ def straighten(gray: NDArray[np.float64], base: NDArray[np.float64], xh: float, 
     out = gray[s0, cols] * (1 - f) + gray[s1, cols] * f
     out[missing] = paper
     return out, missing, up
+
+
+def straighten_edges(base: NDArray[np.float64], xh: float, height: int, *, above: float = ABOVE,
+                     below: float = BELOW) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
+    """Directional masks of the straightened grid: source above the crop top / below the crop bottom (CP-G3 F2)."""
+    up, down = int(round(above * xh)), int(round(below * xh))
+    src = base[None, :] + (np.arange(up + down, dtype=np.float64) - up)[:, None]
+    return src < 0, src > height - 1
 
 
 def separate_lines(crop: Image.Image | NDArray[Any], *, min_visible: float = .5, **kw: Any) -> list[LineImage]:
@@ -70,9 +79,9 @@ def separate_lines(crop: Image.Image | NDArray[Any], *, min_visible: float = .5,
             x0, x1 = (0, g.width) if L.side == 'main' else (max(0, L.x0 - int(xh)), min(g.width, L.x1 + int(xh)))
             gray = g.gray[:, x0:x1]
             arr, missing, up = straighten(gray, L.base[x0:x1], xh, paper=g.paper)
+            above_top, below_bottom = straighten_edges(L.base[x0:x1], xh, g.height)
             body = slice(up - int(round(xh)), up)                       # mean line → baseline rows
-            tail = slice(up, up + int(round(.6 * xh)))                  # baseline → hanging-letter bottom
             out.append(LineImage(Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), 'L'), missing, up, xh,
                                  seg.x0 + x0, seg.x0 + x1, k, L.side, L.shift_xh, L.visible,
-                                 missing[body].mean(axis=0), missing[tail].mean(axis=0)))
+                                 above_top[body].mean(axis=0), below_bottom[body].mean(axis=0)))
     return out

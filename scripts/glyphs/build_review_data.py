@@ -37,7 +37,9 @@ def summary(r: dict) -> str:
         parts.append(f"{r.get('n_under', 0)} under / {r.get('n_over', 0)} over (old ink score)")
     if 'double_line' in r:
         parts.append('two lines' if r['double_line'] else 'one line')
-    if 'lines' in r:
+    if 'n_lines' in r:
+        parts.append(f"{r['n_lines']} line(s) detected ({r['n_full_lines']} full, {r['n_edge_lines']} edges only), {r['n_columns']} column(s)")
+    elif 'lines' in r:
         parts.append(f"{len(r['lines']) - 1} neighbour line(s) placed")
     return ', '.join(parts)
 
@@ -63,8 +65,9 @@ else:
     chosen, out = set(), []
 
     def bend_px(r):
-        b = np.array(r['baseline']); x = np.arange(len(b))
-        lo, hi = (int(v / r['step']) for v in r['support_x'])
+        seg = r['segments'][r['main_segment']]
+        b = np.array(seg['baseline']); x = np.arange(len(b))
+        lo, hi = (int(v / r['step']) for v in seg['support_x'])
         return float(np.abs(b[lo:hi] - np.polyval(np.polyfit(x[lo:hi], b[lo:hi], 1), x[lo:hi])).max()) if hi - lo >= 4 else 0.0
 
     def take(key, label, n, cond=lambda r: True):
@@ -77,7 +80,7 @@ else:
     take(lambda r: abs(r['angle_deg']), 'Steep skew', 5, lambda r: r['confidence'] == 'high')
     take(bend_px, 'Strong bend in the line', 5, lambda r: r['degree'] == 2)
     take(lambda r: len(r['lines']), 'Several lines in one crop (neighbours placed)', 6, lambda r: len(r['lines']) >= 3)
-    take(lambda r: r['second']['ratio'] if r['second'] else 0, 'Second line inside the crop', 5, lambda r: r['double_line'])
+    take(lambda r: r['n_full_lines'], 'Second full line or column in the crop', 5, lambda r: r['n_full_lines'] >= 2)
     take(lambda r: len(r['cut_spans']) + sum(c['body_cut'] for c in r['cut_letters']) / 10, 'Letters cut by the crop edge', 5)
     take(lambda r: r['n_broken'] / max(1, len(r['letters'])), 'Many broken letters', 4, lambda r: len(r['letters']) >= 15)
     take(lambda r: r['n_faint'], 'Faint letters', 3, lambda r: r['n_faint'] > 0)

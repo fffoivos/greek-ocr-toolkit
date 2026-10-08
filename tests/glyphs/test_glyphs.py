@@ -397,3 +397,70 @@ def test_straighten_flattens_a_bent_rendered_line():
     out, missing, up = straighten(g.gray, g.band.bottom, g.band.xh, paper=g.paper)
     flat = line_glyphs(Image.fromarray(np.clip(out, 0, 255).astype(np.uint8)))
     assert abs(skew_line(flat).angle_deg) < .3 and np.ptp(flat.band.bottom) < .2 * g.band.xh
+
+
+
+# ---------- CP-G3 findings (reviewer's independent regressions, ported) ----------
+
+def test_g3_real_faint_capitals_survive_small_dark_punctuation():
+    from greekocr.glyphs.components import binarise
+    canvas = Image.new('L', (420, 140), 0)
+    ImageDraw.Draw(canvas).text((45, 20), 'ΘΩΜΒ', font=ImageFont.truetype(str(DIDOT), 60), fill=255)
+    truth = np.asarray(canvas) > 127
+    gray = np.full(truth.shape, 235.); gray[truth] = 195
+    for x in (8, 18, 28):
+        gray[80:82, x:x + 2] = 20
+    assert (binarise(gray) & truth).sum() >= .95 * truth.sum()
+
+
+def test_g3_page_edge_shadow_is_still_not_ink():
+    from greekocr.glyphs.components import binarise, to_gray
+    im = Image.open(Path(__file__).parents[1] / 'fixtures' / 'o4d_sample400' / 'crops' / 's2-3229200bf47ca465a42d-p00004-l00018.png')
+    ink = binarise(to_gray(im))
+    assert ink[:, :60].mean() < .3          # the shadow region is not one solid blob of 'ink'
+
+
+@pytest.mark.parametrize('base,wrong_edge', [(-10., 'bottom_cut'), (40., 'top_cut')])
+def test_g3_cut_fraction_keeps_the_correct_edge(monkeypatch, base, wrong_edge):
+    from types import SimpleNamespace
+    from greekocr.glyphs.components import Band
+    import greekocr.glyphs.lines_api as A
+    h, w, xh = 30, 10, 10.
+    g = SimpleNamespace(gray=np.full((h, w), 235.), paper=235., band=Band(np.full(w, base - xh), np.full(w, base), xh, 0),
+                        width=w, height=h, components=[])
+    monkeypatch.setattr(A, 'column_segments', lambda *a, **k: [SimpleNamespace(x0=0, x1=w, glyphs=g)])
+    l = A.separate_lines(Image.new('L', (w, h), 235))[0]
+    assert np.all(getattr(l, wrong_edge) == 0)
+
+
+def test_g3_flattened_entries_are_in_crop_coordinates():
+    r = line_record(Path(__file__).parents[1] / 'fixtures' / 'o4d_sample400' / 'crops' / 's2-49598b2e848ab1f0ee1e-p00001-l00043.png')
+    left, right = r['segments']
+    i = len(left['letters'])
+    assert r['letters'][i]['x0'] == right['x_offset'] + right['letters'][0]['x0'] and r['letters'][i]['segment'] == 1
+    assert r['support_x'][0] == r['segments'][r['main_segment']]['support_x'][0] + r['main_x_offset']
+
+
+def test_g3_none_prior_does_not_trust_a_clipped_xheight():
+    from greekocr.glyphs.columns import column_segments
+    im = Image.open(Path(__file__).parents[1] / 'fixtures' / 'o4d_sample400' / 'crops' / 's2-60f24a3d8a2d714767f2-p00003-l00024.png')
+    assert len(column_segments(im, xh_prior=None)) == len(column_segments(im)) == 1
+
+
+def test_g3_true_rule_is_not_its_own_letter_height_reference():
+    from greekocr.glyphs.columns import column_rules
+    a = np.full((100, 800), 235.)
+    for x in (40, 450):
+        a[45:65, x:x + 18] = 20; a[49:61, x + 5:x + 13] = 235
+    a[:, 400:403] = 20
+    assert column_rules(a) == [(400, 403)]
+
+
+def test_g3_over_inked_capitals_are_kept_as_letters():
+    from scipy import ndimage as ndi
+    canvas = Image.new('L', (200, 120), 0)
+    ImageDraw.Draw(canvas).text((40, 20), 'ΜΘ', font=ImageFont.truetype(str(DIDOT), 60), fill=255)
+    ink = ndi.binary_dilation(np.asarray(canvas) > 127, iterations=8)
+    gray = np.where(ink, 20, 235).astype(np.uint8)
+    g = line_glyphs(Image.fromarray(gray), xh_prior=28)
+    assert len(letter_boxes(g)) >= 1

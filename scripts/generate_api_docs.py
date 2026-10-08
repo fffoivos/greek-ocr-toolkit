@@ -197,6 +197,7 @@ CALLS={
 'LineImage':'line = separate_lines(Image.open("crop.png"))[0]',
 'separate_lines':'lines = separate_lines(Image.open("crop.png"), min_visible=.5)',
 'straighten':'flat, missing, baseline_row = straighten(glyphs.gray, glyphs.band.bottom, glyphs.band.xh, paper=glyphs.paper)',
+'straighten_edges':'above_top, below_bottom = straighten_edges(glyphs.band.bottom, glyphs.band.xh, glyphs.height)',
 }
 
 

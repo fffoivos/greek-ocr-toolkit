@@ -38,7 +38,12 @@ def column_rules(crop: Image.Image | NDArray[Any]) -> list[tuple[int, int]]:
     ink = binarise(gray)
     lab, n = ndi.label(ink, structure=EIGHT)
     boxes = [sl for sl in ndi.find_objects(lab) if sl is not None]
-    heights = np.array([sl[0].stop - sl[0].start for sl in boxes if (sl[0].stop - sl[0].start) * (sl[1].stop - sl[1].start) >= 12])
+    def candidate(sl) -> bool:
+        hh, ww = sl[0].stop - sl[0].start, sl[1].stop - sl[1].start
+        return hh >= RULE_HEIGHT * h and ww <= RULE_ASPECT * hh
+    # the letter-height reference excludes the rule candidates themselves (CP-G3 F6: with sparse text a rule vetoed itself)
+    heights = np.array([sl[0].stop - sl[0].start for sl in boxes
+                        if not candidate(sl) and (sl[0].stop - sl[0].start) * (sl[1].stop - sl[1].start) >= 12])
     # a rule is clearly taller than the letters around it (in a short crop, letters cut by both edges span it too)
     tall_letter = float(np.percentile(heights, 90)) if heights.size else 0.0
     out = []
@@ -71,7 +76,9 @@ def column_segments(crop: Image.Image | NDArray[Any], **kw: Any) -> list[Segment
     xh = probe.band.xh
     boxes = letter_boxes(probe)
     clipped = sum(b.y0 == 0 or b.y1 == h for b in boxes) / max(1, len(boxes))
-    trusted = 'xh_prior' in kw or (probe.band.n_support >= 8 and clipped < .35)
+    prior = kw.get('xh_prior')
+    has_prior = prior is not None and np.isfinite(prior) and prior > 0      # by value (CP-G3 F5: None counted as a prior)
+    trusted = has_prior or (probe.band.n_support >= 8 and clipped < .35)
     cols = np.zeros(w, bool)
     for c in probe.components:
         if c.role in ('letter', 'fragment', 'punct', 'mark', 'large'):
@@ -123,7 +130,7 @@ def column_segments(crop: Image.Image | NDArray[Any], **kw: Any) -> list[Segment
     # columns of one crop share one type size: a segment whose x-height disagrees by > 25 % with the best-supported
     # segment (e.g. a speaker name in capitals) is refitted with that x-height as its prior
     fitted = [s for s in segs if s.glyphs is not None]
-    if len(fitted) > 1 and 'xh_prior' not in kw:
+    if len(fitted) > 1 and not has_prior:
         ref = max(fitted, key=lambda s: s.glyphs.band.n_support).glyphs.band.xh
         for s in fitted:
             if abs(s.glyphs.band.xh / ref - 1) > .25:

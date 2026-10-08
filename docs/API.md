@@ -627,6 +627,17 @@ from greekocr.glyphs.lines_api import straighten
 flat, missing, baseline_row = straighten(glyphs.gray, glyphs.band.bottom, glyphs.band.xh, paper=glyphs.paper)
 ```
 
+### `greekocr.glyphs.lines_api.straighten_edges`
+
+`def straighten_edges(base: NDArray[np.float64], xh: float, height: int, *, above: float=ABOVE, below: float=BELOW) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]`
+
+Directional masks of the straightened grid: source above the crop top / below the crop bottom (CP-G3 F2).
+
+```python
+from greekocr.glyphs.lines_api import straighten_edges
+above_top, below_bottom = straighten_edges(glyphs.band.bottom, glyphs.band.xh, glyphs.height)
+```
+
 ### `greekocr.glyphs.lines_api.separate_lines`
 
 `def separate_lines(crop: Image.Image | NDArray[Any], *, min_visible: float=0.5, **kw: Any) -> list[LineImage]`

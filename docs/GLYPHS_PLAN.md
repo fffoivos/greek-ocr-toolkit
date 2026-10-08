@@ -104,10 +104,10 @@ detector-dependent evaluator and are superseded.
 - **P6**: Luna cross-check; commercial OCR bake-off (credentials = owner).
 
 ## Capitals (owner 8 Oct 16:45: be careful with them) — measured, scripts/glyphs/eval/capitals_eval.py, seed 81
-Rendered lines opening with a speaker-style name in capitals ('ΠΕΤΡΙΔΗΣ. …') and all-capitals lines (120 lines,
-2,057 capitals; current code): baselines unaffected (median error 0.05 / 0.04 x-heights); capitals called intact
+Rendered lines opening with a speaker-style name in capitals ('ΠΕΤΡΙΔΗΣ. …') and all-capitals lines (120 attempts,
+118 scored lines — 79 speaker, 39 all-capitals — 2,057 capitals; capitals carry no accents in this cohort; current code): baselines unaffected (median error 0.05 / 0.04 x-heights); capitals called intact
 74 %, merged 18 % — of which 318 of 367 visibly touch a neighbour in the scan (serifs), so ≈ 2.4 % of capitals are
-wrongly merged — split in two 4.8 %, broken 3 %. A capital-sized width reference was tried and reverted: it moved capitals < 1 % and
+wrongly merged — in more than one box 4.8 % (95 in two, 3 in three), broken 3 %. A capital-sized width reference was tried and reverted: it moved capitals < 1 % and
 cost one-box letters on lowercase lines (tall lowercase δ, λ, θ share the capital shape test).
 
 ## Known open problems
