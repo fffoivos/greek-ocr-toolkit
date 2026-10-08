@@ -16,20 +16,17 @@ Written 8 Oct 2026 14:30 Athens. Owner = the project owner; requirements quoted 
 6. **Validation instruments**: rendered truth lines (`glyphs.synthetic`, `glyphs.evaluate`), known-defect injector
    (planned), owner blind review sheets, Luna as an independent second check.
 
-State 15:15 (after CP-G1 HOLD fixes and the owner's 14:55–15:10 changes; 25 offline tests; numbers from
-scripts/glyphs/eval/*, raw outputs in review_scratch/CP-G1c2-evidence/):
-- marks (truth-enumerated): separate accents found 97.95 %, detected 99.97 %, fused into their letter 25.4 % of all
-  accents in these renders, mark component precision 96.1 %; neighbour ink pixels 97.3 %; letters one box 92.8 %,
-  lost 1.0 %. The earlier 99.07 % counted only retained components (CP-G1 F1) and is retracted.
-- skew (100 straight rendered lines): median 0.009°, high-confidence fits (95) max 0.515°; 2 medium/low-confidence
-  misses (3.8°, 10.4°) on short lines between full-width neighbours. Bent lines: lines with any column > 0.25 xh off
-  45 % (84 % before tracking), straight unchanged.
-- ink state = letter completeness (owner rule): broken recall 82 %, precision 78 % (injected defects, seed 2); merged
-  precision 99.5 %, recall 74 %; faint letters now detected (faint channel) and flagged.
-- double lines: real fixtures 7/7 double, 0/20 single with my provisional labels (in-sample threshold 0.25); rendered
-  crops recall 95 %, precision 74 %.
-Artifact v2 (same URL): https://claude.ai/artifact/FrYMi9ra4boVf6auGm3arm — owner's cases, then interesting cases
-selected from 452 measured crops, with inspection notes.
+State 16:05 (after CP-G1c2 HOLD fixes; 30 glyph tests; raw outputs review_scratch/CP-G1c3-evidence/):
+- skew (100 straight rendered lines): high-confidence fits (95) max 0.217°; all fits p99 0.98°, max 4.55° (low-confidence
+  short line). Bent lines: lines with any column > 0.25 x-heights off 34 %.
+- marks: separate accents found 98.7 %, all accents found 75.4 % (23.6 % fused into their letter in these renders),
+  mark precision 95.2 %; neighbour ink: 97.1 % of visible truth pixels called neighbour.
+- letter states, two truths reported (no tuning to either): PRINT (physical ink) — merged precision 3.6 % undamaged /
+  27 % with defects; VISIBLE (noise-free scan, ≥ ¼ of paper→ink) — merged precision 87 % / 85 %, recall 64 % / 80 %;
+  broken recall 53 % / 63 %, under precision 41 % / 65 %. 'Merged' = visibly touching in the scan; 'broken' moderate.
+- double lines: real fixtures 7/7 double, 0/20 single, 2/17 partial flagged (docs/glyphs_fixture_labels.json; threshold
+  in-sample); rendered crops recall 93 %, precision 76 %.
+Artifact (v2, to be rebuilt): https://claude.ai/artifact/FrYMi9ra4boVf6auGm3arm
 
 ## Owner requirements
 
@@ -91,4 +88,5 @@ selected from 452 measured crops, with inspection notes.
   edge-cut slivers did not fix it and cost 1.8 % lost letters on the rendered set, so it was reverted (P2: end curl).
 - The document prior for that crop is the median of the document's complete crops (26 px); the same line's re-cut crop
   measures 21 px. The fitted angle moves from 2.4° (prior 26) to 2.0° (21): the prior's precision matters for clipped crops.
-- Validation lines are straight (rotation only); curl, warping and real broken type are not yet in the rendered set.
+- Rendered validation covers rotation, end bends and injected defects; page warping and real broken type are not in it.
+- Letters faded below visibility vanish without a per-letter warning (717 of 7,595 truth letters in the defect set).

@@ -496,7 +496,9 @@ total.add(score_rendered(rendered))
 
 ### `greekocr.glyphs.evaluate.score_rendered`
 
-`def score_rendered(sample: Rendered, glyphs: LineGlyphs | None=None, boxes: list[LetterBox] | None=None) -> GlyphScore`
+`def score_rendered(sample: Rendered, glyphs: LineGlyphs | None=None, boxes: list[LetterBox] | None=None, *, state_truth: str='print') -> GlyphScore`
+
+state_truth: 'print' = the physical print (clean ink after defects); 'visible' = ink at least a quarter of the
 
 ```python
 from greekocr.glyphs.evaluate import score_rendered
@@ -540,6 +542,15 @@ profile = ink_profile(line_glyphs(Image.open("crop.png")))
 ```python
 from greekocr.glyphs.letters import LetterBox
 box = letter_boxes(glyphs)[0]
+```
+
+### `greekocr.glyphs.letters.middle_mask`
+
+`def middle_mask(glyphs: LineGlyphs) -> np.ndarray`
+
+```python
+from greekocr.glyphs.letters import middle_mask
+mid = middle_mask(line_glyphs(Image.open("crop.png")))
 ```
 
 ### `greekocr.glyphs.letters.letter_boxes`
@@ -612,6 +623,17 @@ glyph = render_truth_line("ἀνδρώας", "GFSDidot-Regular.ttf").glyphs[0]
 ```python
 from greekocr.glyphs.synthetic import Rendered
 rendered = render_truth_line("ἀνδρώας", "GFSDidot-Regular.ttf", degrade=False)
+```
+
+### `greekocr.glyphs.synthetic.Rendered.visible`
+
+`def visible(self, fraction: float=0.25) -> NDArray[np.bool_]`
+
+Pixels at least `fraction` of the way from paper tone to ink tone in the noise-free scan.
+
+```python
+from greekocr.glyphs.synthetic import Rendered
+seen = rendered.visible(.25)
 ```
 
 ### `greekocr.glyphs.synthetic.font_covers`
@@ -807,6 +829,121 @@ reference = load_r03(r03_spec)
 ```python
 from greekocr.readers.services import load_service
 reader = load_service("mistral", {"factory":"my_service:factory"}, enabled=True)
+```
+
+### `greekocr.readers.services.docai_driver.summarize_run`
+
+`def summarize_run(manifest: list[dict], predictions: list[dict], ledger: list[dict], repeat: int) -> dict`
+
+```python
+from greekocr.readers.services.docai_driver import summarize_run
+summary = summarize_run(frozen_manifest_rows, prediction_rows, ledger_rows, repeat=2)
+```
+
+### `greekocr.readers.services.docai_driver.run_manifest`
+
+`def run_manifest(manifest: str | Path, out: str | Path, *, reader: DocAIReader | None=None, fresh: bool=False, repeat: int=1, concurrency: int=4, max_cost_usd: float=10.0, **reader_options: object) -> dict`
+
+```python
+from greekocr.readers.services.docai_driver import run_manifest
+summary = run_manifest("docai_manifest.jsonl", "docai_run", project="project", location="eu", processor_id="processor")
+```
+
+### `greekocr.readers.services.docai_manifest.build_polytondb_manifest`
+
+`def build_polytondb_manifest(root: str | Path) -> list[dict]`
+
+```python
+from greekocr.readers.services.docai_manifest import build_polytondb_manifest
+rows = build_polytondb_manifest("tests/fixtures/polytondb_gold300")
+```
+
+### `greekocr.readers.services.docai_manifest.build_o4d_manifest`
+
+`def build_o4d_manifest(root: str | Path, *, sample: bool=False) -> list[dict]`
+
+```python
+from greekocr.readers.services.docai_manifest import build_o4d_manifest
+rows = build_o4d_manifest("tests/fixtures/o4d_lines")
+```
+
+### `greekocr.readers.services.docai_manifest.build_borndigital_manifest`
+
+`def build_borndigital_manifest(root: str | Path) -> list[dict]`
+
+```python
+from greekocr.readers.services.docai_manifest import build_borndigital_manifest
+rows = build_borndigital_manifest("tests/fixtures/borndigital100")
+```
+
+### `greekocr.readers.services.docai_manifest.build_manifest`
+
+`def build_manifest(fixtures_root: str | Path, out: str | Path, *, cohorts: Sequence[str]=DEFAULT_COHORTS) -> dict`
+
+```python
+from greekocr.readers.services.docai_manifest import build_manifest
+receipt = build_manifest("tests/fixtures", "docai_manifest.jsonl")
+```
+
+### `greekocr.readers.services.docai_manifest.load_manifest`
+
+`def load_manifest(path: str | Path) -> list[dict]`
+
+```python
+from greekocr.readers.services.docai_manifest import load_manifest
+rows = load_manifest("docai_manifest.jsonl")
+```
+
+### `greekocr.readers.services.google_docai.Reading`
+
+```python
+from greekocr.readers.services.google_docai import Reading
+reading = Reading(**recorded_reading_values)
+```
+
+### `greekocr.readers.services.google_docai.DocAIError`
+
+A service failure, with its response retained when available.
+
+```python
+from greekocr.readers.services.google_docai import DocAIError
+error = DocAIError("recorded service failure")
+```
+
+### `greekocr.readers.services.google_docai.DocAIReader`
+
+```python
+from greekocr.readers.services.google_docai import DocAIReader
+reader = DocAIReader("project", "eu", "processor", version="pretrained-ocr-v2.1-2024-08-07")
+```
+
+### `greekocr.readers.services.google_docai.DocAIReader.binding`
+
+`def binding(self) -> dict`
+
+Return a new deterministic JSON object; None version means unpinned default.
+
+```python
+from greekocr.readers.services.google_docai import DocAIReader
+provenance = reader.binding()
+```
+
+### `greekocr.readers.services.google_docai.DocAIReader.read`
+
+`def read(self, path: str | Path, *, fresh: bool | None=None, expected_sha256: str | None=None) -> Reading`
+
+```python
+from greekocr.readers.services.google_docai import DocAIReader
+reading = reader.read("crop.png")
+```
+
+### `greekocr.readers.services.google_docai.DocAIReader.read_batch`
+
+`def read_batch(self, paths: Iterable[str | Path], concurrency: int=4, *, fresh: bool | None=None) -> list[Reading]`
+
+```python
+from greekocr.readers.services.google_docai import DocAIReader
+readings = reader.read_batch(["crop.png"], concurrency=4)
 ```
 
 ### `greekocr.real.adjudicate.adjudicate_lines`
@@ -1602,119 +1739,3 @@ checkpoint = verify_init("converted/donor_init.pt")
 from greekocr.warmstart import qualify_parity
 receipt = qualify_parity(donor_spec, "converted/native_before_swap.pt", "100_crops.jsonl", "parity")
 ```
-
-### `greekocr.readers.services.docai_driver.summarize_run`
-
-`def summarize_run(manifest: list[dict], predictions: list[dict], ledger: list[dict], repeat: int) -> dict`
-
-```python
-from greekocr.readers.services.docai_driver import summarize_run
-summary = summarize_run(frozen_manifest_rows, prediction_rows, ledger_rows, repeat=2)
-```
-
-### `greekocr.readers.services.docai_driver.run_manifest`
-
-`def run_manifest(manifest: str | Path, out: str | Path, *, reader: DocAIReader | None=None, fresh: bool=False, repeat: int=1, concurrency: int=4, max_cost_usd: float=10.0, **reader_options: object) -> dict`
-
-```python
-from greekocr.readers.services.docai_driver import run_manifest
-summary = run_manifest("docai_manifest.jsonl", "docai_run", project="project", location="eu", processor_id="processor")
-```
-
-### `greekocr.readers.services.docai_manifest.build_polytondb_manifest`
-
-`def build_polytondb_manifest(root: str | Path) -> list[dict]`
-
-```python
-from greekocr.readers.services.docai_manifest import build_polytondb_manifest
-rows = build_polytondb_manifest("tests/fixtures/polytondb_gold300")
-```
-
-### `greekocr.readers.services.docai_manifest.build_o4d_manifest`
-
-`def build_o4d_manifest(root: str | Path, *, sample: bool=False) -> list[dict]`
-
-```python
-from greekocr.readers.services.docai_manifest import build_o4d_manifest
-rows = build_o4d_manifest("tests/fixtures/o4d_lines")
-```
-
-### `greekocr.readers.services.docai_manifest.build_borndigital_manifest`
-
-`def build_borndigital_manifest(root: str | Path) -> list[dict]`
-
-```python
-from greekocr.readers.services.docai_manifest import build_borndigital_manifest
-rows = build_borndigital_manifest("tests/fixtures/borndigital100")
-```
-
-### `greekocr.readers.services.docai_manifest.build_manifest`
-
-`def build_manifest(fixtures_root: str | Path, out: str | Path, *, cohorts: Sequence[str]=DEFAULT_COHORTS) -> dict`
-
-```python
-from greekocr.readers.services.docai_manifest import build_manifest
-receipt = build_manifest("tests/fixtures", "docai_manifest.jsonl")
-```
-
-### `greekocr.readers.services.docai_manifest.load_manifest`
-
-`def load_manifest(path: str | Path) -> list[dict]`
-
-```python
-from greekocr.readers.services.docai_manifest import load_manifest
-rows = load_manifest("docai_manifest.jsonl")
-```
-
-### `greekocr.readers.services.google_docai.Reading`
-
-```python
-from greekocr.readers.services.google_docai import Reading
-reading = Reading(**recorded_reading_values)
-```
-
-### `greekocr.readers.services.google_docai.DocAIError`
-
-A service failure, with its response retained when available.
-
-```python
-from greekocr.readers.services.google_docai import DocAIError
-error = DocAIError("recorded service failure")
-```
-
-### `greekocr.readers.services.google_docai.DocAIReader`
-
-```python
-from greekocr.readers.services.google_docai import DocAIReader
-reader = DocAIReader("project", "eu", "processor", version="pretrained-ocr-v2.1-2024-08-07")
-```
-
-### `greekocr.readers.services.google_docai.DocAIReader.binding`
-
-`def binding(self) -> dict`
-
-Return a new deterministic JSON object; None version means unpinned default.
-
-```python
-from greekocr.readers.services.google_docai import DocAIReader
-provenance = reader.binding()
-```
-
-### `greekocr.readers.services.google_docai.DocAIReader.read`
-
-`def read(self, path: str | Path, *, fresh: bool | None=None, expected_sha256: str | None=None) -> Reading`
-
-```python
-from greekocr.readers.services.google_docai import DocAIReader
-reading = reader.read("crop.png")
-```
-
-### `greekocr.readers.services.google_docai.DocAIReader.read_batch`
-
-`def read_batch(self, paths: Iterable[str | Path], concurrency: int=4, *, fresh: bool | None=None) -> list[Reading]`
-
-```python
-from greekocr.readers.services.google_docai import DocAIReader
-readings = reader.read_batch(["crop.png"], concurrency=4)
-```
-

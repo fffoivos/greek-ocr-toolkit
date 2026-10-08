@@ -69,6 +69,10 @@ def binarise(gray: NDArray[np.float64], *, window: int | None = None, k: float =
     floor = gray < paper - max(12.0, .12 * (paper - dark))
     ink = local & floor
     faint = gray < paper - max(4 * _noise_sigma(gray, paper), .15 * (paper - dark), 10.0)
+    # faint ink is added where it stands apart from strong ink: whole faint components with no strong ink, and faint
+    # regions more than 2 px from strong ink (a faint letter body attached to one dark stroke; CP-G1c2 F4). The 2 px
+    # margin keeps the blur halo of dark strokes out, so dark letters do not thicken or merge.
+    far = faint & ~ndi.binary_dilation(ink, iterations=2)
     lab, n = ndi.label(faint, structure=EIGHT)
     if n:
         has_ink = np.zeros(n + 1, bool)
@@ -77,6 +81,12 @@ def binarise(gray: NDArray[np.float64], *, window: int | None = None, k: float =
         add = ~has_ink & (sizes >= 12)
         add[0] = False
         ink |= add[lab]
+    flab, fn = ndi.label(far & ~ink, structure=EIGHT)
+    if fn:
+        sizes = np.bincount(flab.ravel(), minlength=fn + 1)
+        keep = sizes >= 24
+        keep[0] = False
+        ink |= keep[flab]
     return ink
 
 
@@ -305,6 +315,10 @@ def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int = 0, xh_prior: fl
                         hole_area=int(sizes[sizes >= 2].sum()), stroke=float(2 * np.median(rid)) if rid.size else 1.0,
                         darkness=float(np.median(gray[sl][sub])), fill=area / float((y1 - y0) * (x1 - x0)),
                         touches=touches))
+    # faint-only blobs (smudges, bleed-through, faint letters) never drive the letter height or the band: those come
+    # from clearly inked letters; faint ink inside the band is still read as letters later
+    faint_cut = paper - .45 * (paper - (float(np.median(gray[ink])) if ink.any() else paper))
+    raw_all, raw = raw, [r for r in raw if r['darkness'] <= faint_cut]
     free = [r for r in raw if not ({'top', 'bottom'} & set(r['touches'])) and r['area'] >= 12]
     xh = _xheight(np.array([r['y1'] - r['y0'] for r in free], float))
     xh_source = 'free_letters'
@@ -370,6 +384,7 @@ def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int = 0, xh_prior: fl
         return float(top[i]), float(bottom[i])
 
     roles: dict[int, str] = {}
+    raw = raw_all   # every component gets a role, faint ones included
     # pass 1: big / letter-like components
     for r in raw:
         rh, rw = (r['y1'] - r['y0']) / xh, (r['x1'] - r['x0']) / xh

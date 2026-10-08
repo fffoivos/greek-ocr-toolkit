@@ -101,6 +101,30 @@ def test_f1_lost_accents_count_as_misses():
     assert s['marks_found'] == pytest.approx(len(range(1, n + 1)[1::2]) / s['marks_total'], abs=.01)
 
 
+def test_f1c2_neighbour_recall_counts_erased_neighbour_ink():
+    r = render_truth_line(TEXTS[0], DIDOT, size=36, rng=random.Random(3), neighbours=(TEXTS[1], TEXTS[2]))
+    full = summarise(score_rendered(r))
+    lab, n = ndi.label((r.truth == NEIGHBOUR) & r.oracle_ink, structure=np.ones((3, 3)))
+    arr = np.asarray(r.image).copy()
+    for i in range(1, n + 1, 2):
+        arr[ndi.binary_dilation(lab == i, iterations=2)] = 255
+    r.image = Image.fromarray(arr)
+    half = summarise(score_rendered(r))
+    assert half['neighbour_recall'] < .8 * full['neighbour_recall']
+    assert half['neighbour_classified_of_detected'] > .9      # the conditional rate stays high: reported separately
+
+
+def test_f1c2_letter_truth_does_not_depend_on_the_detector():
+    r = render_truth_line(TEXTS[1], DIDOT, size=36, rng=random.Random(4), ink_defects=[(.2, .6, 'break', 1.0)])
+    g = line_glyphs(r.image)
+    a = summarise(score_rendered(r, g))
+    g.band = type(g.band)(g.band.top + 3 * g.band.xh, g.band.bottom + 3 * g.band.xh, g.band.xh, g.band.n_support)
+    b = summarise(score_rendered(r, g, letter_boxes(line_glyphs(r.image))))
+    true_states = lambda S: {k.split('->')[0]: 0 for k in S['state_confusion']} | {}
+    count = lambda S: {t: sum(v for k, v in S['state_confusion'].items() if k.split('->')[0] == t) for t in true_states(S)}
+    assert count(a) == count(b) and a['letters_true'] == b['letters_true']
+
+
 @pytest.mark.parametrize('neighbours', [False, True])
 def test_marks_letters_and_neighbours_on_rendered_lines(neighbours):
     rng, total = random.Random(7), GlyphScore()
@@ -113,7 +137,7 @@ def test_marks_letters_and_neighbours_on_rendered_lines(neighbours):
     assert s['marks_detected'] >= .99 and s['marks_found_of_separate'] >= .93 and s['mark_component_precision'] >= .93
     assert s['letter_detection']['one'] >= .75     # measured 0.78 / 0.85 on these Didot lines (all fonts: 0.93)
     if neighbours:
-        assert s['neighbour_pixels_called_neighbour'] >= .95
+        assert s['neighbour_classified_of_detected'] >= .95 and s['neighbour_recall'] >= .5
 
 
 # ---------- letters as pieces; ink state (F4, F5) ----------
@@ -142,6 +166,34 @@ def test_broken_letter_pieces_are_grouped_into_one_letter():
     assert prof.letters[3].pieces == 2 and prof.letters[6].pieces == 2
 
 
+def test_f3c2_pieces_are_counted_inside_the_middle_region_only():
+    img = np.asarray(_bodies([20] * 10)).copy()
+    x0 = 10 + 40 * 6
+    img[20:44, x0 + 10:x0 + 13] = 235      # vertical gap through letter 7's body
+    img[8:20, x0 + 4:x0 + 18] = 20         # the two arcs joined above the band only
+    prof = ink_profile(line_glyphs(Image.fromarray(img)))
+    assert prof.letters[6].state == 'broken' and prof.letters[6].pieces == 2
+
+
+def test_f4c2_faint_body_attached_to_a_dark_stroke_is_kept_and_flagged():
+    img = np.asarray(_bodies([20] * 10)).astype(float)
+    x0 = 10 + 40 * 3
+    img[20:44, x0:x0 + 22] = 195; img[25:39, x0 + 6:x0 + 16] = 235; img[20:44, x0:x0 + 4] = 20
+    g = line_glyphs(Image.fromarray(img.astype(np.uint8)))
+    assert g.ink[20:44, x0:x0 + 22].sum() > .75 * 388
+    assert ink_profile(g).letters[3].state in ('broken', 'faint')
+
+
+def test_f5c2_fully_fused_letters_are_flagged_merged():
+    img = np.full((60, 420), 235, np.uint8)
+    for i in range(10):
+        img[20:44, 10 + 40 * i:32 + 40 * i] = 20
+    img[20:44, 10 + 40 * 3 + 22:10 + 40 * 4] = 20
+    prof = ink_profile(line_glyphs(Image.fromarray(img)))
+    assert len(prof.letters) == 9
+    assert [l.state for l in prof.letters].count('merged') == 1 and [l.state for l in prof.letters].count('intact') == 8
+
+
 def test_f4_ink_state_ignores_ink_outside_the_middle_region():
     plain = ink_profile(line_glyphs(_bodies([20] * 10)))
     tailed = ink_profile(line_glyphs(_bodies([20] * 10, tail=True)))
@@ -154,22 +206,23 @@ def test_f5_faint_letters_are_detected_and_flagged():
     assert [l.state for l in prof.letters] == ['faint'] * 5 + ['intact'] * 5
 
 
-@pytest.mark.parametrize('kind,state,factor', [('break', 'broken', 3), ('thick', 'merged', 1.3)])
-def test_injected_defects_change_letter_state_inside_their_region(kind, state, factor):
-    """Heavy ink fully fuses letters (no thin bridge to cut), so 'thick' raises the merged rate less than 'break'
-    raises the broken rate; measured 4/23 inside vs 12/112 outside on these lines."""
+@pytest.mark.parametrize('kind,state,floor', [('break', 'broken', .4), ('thick', 'merged', .4)])
+def test_injected_defects_change_letter_state_inside_their_region(kind, state, floor):
+    """Votes use only each box's own pixels inside its bounds (CP-G1c2 F6)."""
     inside = outside = hit_in = hit_out = 0
     for i in range(4):
         r = render_truth_line(TEXTS[i], DIDOT, size=36, rng=random.Random(300 + i), ink_defects=[(.3, .7, kind, 1.0)])
         g = line_glyphs(r.image)
         for b, l in zip(letter_boxes(g), ink_profile(g).letters):
-            own = np.isin(g.labels, b.components) & (r.truth == LETTER)
+            own = np.zeros(g.labels.shape, bool)
+            own[b.y0:b.y1, b.x0:b.x1] = np.isin(g.labels[b.y0:b.y1, b.x0:b.x1], b.components)
+            own &= r.truth == LETTER
             d = (r.defect_kind[own] > 0).mean() if own.any() else 0
             if d > .5:
                 inside += 1; hit_in += l.state == state
             elif d == 0:
                 outside += 1; hit_out += l.state == state
-    assert hit_in / inside > factor * max(hit_out / outside, .02)
+    assert hit_in / inside >= floor and hit_in / inside > 3 * hit_out / outside
 
 
 # ---------- skew, bend, cut-offs, double lines ----------

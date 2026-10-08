@@ -187,6 +187,8 @@ CALLS={
 'document_of':'document = document_of("s2-60f24a3d8a2d714767f2-p00003-l00024.png")',
 'document_priors':'priors = document_priors(["crops/a.png", "crops/b.png"])',
 'line_record':'record = line_record("crop.png", priors=priors)',
+'middle_mask':'mid = middle_mask(line_glyphs(Image.open("crop.png")))',
+'visible':'seen = rendered.visible(.25)',
 }
 
 

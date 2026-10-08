@@ -1,17 +1,20 @@
-# Glyph-model evaluation scripts (8 Oct 2026)
+# Glyph-model evaluation scripts
 
 All take `DIR` = a directory holding `poly_lines.jsonl` (made by `extract_poly_lines.sh DIR`) and read fonts from
-`~/Projects/greek-page-ocr/assets/fonts` (only fonts passing `font_supports_polytonic`; italics and mono excluded).
-Run from the repo root with `.venv/bin/python scripts/glyphs/eval/<script> DIR ...`.
+`~/Projects/greek-page-ocr/assets/fonts` (fonts passing `font_supports_polytonic`; italics and mono excluded; every
+rendered text is checked with `font_covers`). Run from the repo root: `.venv/bin/python scripts/glyphs/eval/<script> DIR …`.
+Truth comes from the renderer alone (letter-id map, true baseline and x-height, noise-free oracle ink); see
+`greekocr/glyphs/evaluate.py`.
 
-| script | arguments | produces |
-|---|---|---|
-| common.py | — | fonts (gate + italics/mono excluded), text, renders restricted to covered text |
-| eval_glyphs.py | DIR N SEED P_NEIGHBOURS | truth-enumerated marks, neighbour pixels, letter boxes (`summarise`) |
-| mark_stats.py | DIR | gap distributions (accent vs neighbour ink) used to set NEIGHBOUR_GAP_ABOVE/BELOW (seed 5) |
-| xh_est.py | DIR | x-height estimator comparison against render truth + three real crops |
-| skew_eval.py | DIR | skew angle error vs the known render rotation (200 lines, seed 31) |
-| ink_eval.py | DIR | ink-score fit on seed 1 (150 lines) and test on seed 2 (150 lines): AUCs per defect kind |
+| script | arguments | seed | produces |
+|---|---|---|---|
+| common.py | — | — | font/text setup; renders restricted to covered text |
+| mark_stats.py | DIR [N=250] | 5 | uncensored gap distributions + threshold sweep for NEIGHBOUR_GAP_ABOVE/BELOW |
+| eval_glyphs.py | DIR N SEED P_NEIGHBOURS | as given (300 11 1 quoted) | marks, neighbour recall, letter boxes, letter states |
+| broken_eval.py | DIR [N=150] | 2 | letter states under injected defects (fade/thin/break/thick), per-defect breakdown |
+| double_eval.py | DIR [N=200] | 61 | double-line flag on crops with a full second line vs single crops with neighbour tips |
+| skew_eval.py | DIR [N=200] | 31 | skew error on straight lines (all / high-confidence) and baseline error on bent lines |
 
-Numbers quoted in docs/GLYPHS_PLAN.md and the review page come from: `eval_glyphs.py DIR 300 11 1`, `skew_eval.py DIR`,
-`ink_eval.py DIR`. Thresholds were set on other seeds (mark_stats seed 5; ink weights seed 1).
+Removed in the CP-G1 fixes: `ink_eval.py` (fitted weights of the old ink score, replaced by letter states) and
+`xh_est.py` (one-off comparison behind the `substantial_letters` x-height switch; its result is quoted in
+components.py). Historical numbers from before 8 Oct 15:00 are not reproducible with the current scripts.

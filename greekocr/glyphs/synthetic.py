@@ -56,6 +56,19 @@ class Rendered:
     font: str
     defect_kind: NDArray[np.uint8]              # per pixel: DEFECTS code of the injected defect (0 none)
     defect_intensity: NDArray[np.float32]       # per pixel: its intensity 0..1
+    oracle_ink: NDArray[np.bool_] | None = None # noise-free degraded image below the paper/ink midpoint: what is
+                                                # visibly inked, independent of any detector
+    print_ink: NDArray[np.bool_] | None = None  # the physical print: clean ink after injected defects, before the
+                                                # scan model (blur, gain, noise); truth for broken / merged letters
+    clean_gray: NDArray[np.float64] | None = None  # the scan without noise; with paper / ink_tone gives visibility
+    paper: float = 255.0
+    ink_tone: float = 0.0
+
+    def visible(self, fraction: float = .25) -> NDArray[np.bool_]:
+        """Pixels at least `fraction` of the way from paper tone to ink tone in the noise-free scan."""
+        if self.clean_gray is None:
+            return self.truth > 0
+        return self.clean_gray < self.paper - fraction * (self.paper - self.ink_tone)
     second_line: bool = False                   # a full second text line was rendered inside the crop
 
     @property
@@ -96,8 +109,10 @@ def _grapheme_ok(path: str, grapheme: str) -> str:
     full = _mask(font, grapheme)
     if not full.any():
         return f'{grapheme!r} renders empty'
-    for ch in grapheme:
-        if not ud.combining(ch) and np.array_equal(_mask(font, ch), notdef):
+    # every code point of both normal forms, combining marks included, must have its own glyph (CP-G1c2 F2: an
+    # unsupported combining macron hid behind a supported breathing)
+    for ch in dict.fromkeys(ud.normalize('NFC', grapheme) + ud.normalize('NFD', grapheme)):
+        if not ch.isspace() and np.array_equal(_mask(font, ch), notdef):
             return f'{ch!r} (U+{ord(ch):04X}) is .notdef'
     if np.array_equal(full, notdef):
         return f'{grapheme!r} is .notdef'
@@ -252,6 +267,7 @@ def render_truth_line(text: str, font_path: PathLike, *, size: int = 40, rng: ra
             dint[:, a:b][region] = inten
     skew = rng.uniform(-2.0, 2.0) if degrade else 0.0
     ink_im = Image.fromarray(ink8).rotate(skew, resample=Image.BICUBIC, fillcolor=0)
+    printed = _rotate((ink8 > 0).astype(np.int32), skew, 'I') > 0
     truth, gid = _rotate(truth, skew, 'I'), _rotate(gid, skew, 'I')
     dkind, dint = _rotate(dkind, skew, 'I'), _rotate(dint, skew, 'F')
     a = np.deg2rad(skew)
@@ -263,9 +279,13 @@ def render_truth_line(text: str, font_path: PathLike, *, size: int = 40, rng: ra
         arr = np.clip(np.asarray(ink_im, np.float64) * rng.uniform(.75, 1.4), 0, 255)   # gain < 1 faint, > 1 heavy
         paper, inkgray = rng.uniform(200, 245), rng.uniform(10, 70)
         gray = paper - (paper - inkgray) * arr / 255
+        oracle = gray < (paper + inkgray) / 2
+        clean_gray = gray.copy()
         gray += np.random.default_rng(rng.randrange(1 << 30)).normal(0, rng.uniform(2, 9), gray.shape)
     else:
         gray = 255 - np.asarray(ink_im, np.float64)
+        oracle = gray < 128
+        clean_gray, paper, inkgray = gray.copy(), 255.0, 0.0
     if bend:
         side, amp, frac = bend
         cols = np.nonzero(np.isin(truth, (LETTER, MARK, PUNCT, IGNORE)).any(axis=0))[0]
@@ -275,6 +295,9 @@ def render_truth_line(text: str, font_path: PathLike, *, size: int = 40, rng: ra
         d = np.clip((lo + L - xs) if side == 'left' else (xs - (hi - L)), 0, None) / L
         dy = np.round(amp * xh * d ** 2).astype(np.int64)
         gray = _shift_columns(gray, dy, float(np.median(gray)))
+        oracle = _shift_columns(oracle, dy, False)
+        clean_gray = _shift_columns(clean_gray, dy, float(paper))
+        printed = _shift_columns(printed, dy, False)
         truth, gid = _shift_columns(truth, dy, 0), _shift_columns(gid, dy, 0)
         dkind, dint = _shift_columns(dkind, dy, 0), _shift_columns(dint, dy, 0)
         base_truth = base_truth + dy
@@ -287,7 +310,8 @@ def render_truth_line(text: str, font_path: PathLike, *, size: int = 40, rng: ra
         if second_line:
             last = max(last, int(np.nonzero((truth == NEIGHBOUR).any(axis=1))[0].max()))
         r1 = min(height, int(last + 1 + rng.uniform(.1, .6) * xh))
-        gray, truth, gid = gray[r0:r1], truth[r0:r1], gid[r0:r1]
+        gray, truth, gid, oracle, printed = gray[r0:r1], truth[r0:r1], gid[r0:r1], oracle[r0:r1], printed[r0:r1]
+        clean_gray = clean_gray[r0:r1]
         dkind, dint = dkind[r0:r1], dint[r0:r1]
         base_truth = base_truth - r0
     glyphs = []
@@ -298,7 +322,8 @@ def render_truth_line(text: str, font_path: PathLike, *, size: int = 40, rng: ra
     image = Image.fromarray(np.clip(gray, 0, 255).astype(np.uint8), 'L')
     return Rendered(image=image, truth=truth, glyphs=glyphs, glyph_ids=gid, xh=xh, base_truth=base_truth,
                     skew_deg=skew, font=Path(font_path).name, defect_kind=dkind, defect_intensity=dint,
-                    second_line=bool(second_line))
+                    oracle_ink=oracle, print_ink=printed, clean_gray=clean_gray, paper=float(paper),
+                    ink_tone=float(inkgray), second_line=bool(second_line))
 
 
 def usable_fonts(paths: Sequence[PathLike]) -> tuple[list[Path], dict[str, str]]:
