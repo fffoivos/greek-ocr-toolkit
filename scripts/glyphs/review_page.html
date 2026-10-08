@@ -277,14 +277,15 @@ function reviewBlock(id) {
   const ta = document.createElement('textarea');
   ta.placeholder = 'What is right or wrong on this line?';
   ta.value = DRAFT[id] ?? ((REV[id] || {}).note || '');
-  ta.addEventListener('input', () => { DRAFT[id] = ta.value; status.textContent = 'not saved yet'; });
+  ta.addEventListener('input', () => { DRAFT[id] = ta.value; status.textContent = 'typing…'; schedule(id, status, 900); });
+  ta.addEventListener('blur', () => schedule(id, status, 0));
   const status = document.createElement('span'); status.className = 'status';
   const btn = (v, text) => {
     const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.className = v; b.dataset.v = v;
     b.addEventListener('click', () => save(id, v, ta.value, status));
     return b;
   };
-  row.append(lab, btn('ok', 'Looks right'), btn('problem', 'Problem'), btn('note', 'Save note'), status);
+  row.append(lab, btn('ok', 'Looks right'), btn('problem', 'Problem'), status);
   box.append(row, ta);
   paintReview(box);
   return box;
@@ -296,12 +297,29 @@ function paintReview(box) {
   if (DB_STATE !== 'ready') st.textContent = DB_STATE === 'connecting' ? 'connecting…' : 'reviews cannot be saved in this view';
   else if (!(box.dataset.review in DRAFT)) st.textContent = r.at ? `saved ${r.at.slice(0, 16).replace('T', ' ')}` : '';
 }
+const TIMER = {}, BUSY = {};
+function schedule(id, status, ms) {                         // every comment saves itself: a pause in typing, or leaving the box
+  clearTimeout(TIMER[id]);
+  TIMER[id] = setTimeout(() => autosave(id, status), ms);
+}
+async function autosave(id, status) {
+  if (!(id in DRAFT)) return;
+  if (BUSY[id]) { schedule(id, status, 400); return; }       // one write at a time per line
+  const text = DRAFT[id];
+  BUSY[id] = true;
+  try { await save(id, 'note', text, status); }
+  finally { BUSY[id] = false; }
+  if (DRAFT[id] === text) delete DRAFT[id]; else schedule(id, status, 400);   // typed more meanwhile: save again
+}
+function flushAll() { for (const id of Object.keys(DRAFT)) { clearTimeout(TIMER[id]); autosave(id, { set textContent(v) {} }); } }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushAll(); });
+window.addEventListener('pagehide', flushAll);
 async function save(id, verdict, note, status) {
   if (!DB) { status.textContent = 'reviews cannot be saved in this view'; return; }
   const prev = REV[id] || {};
   const body = { line_id: id, verdict: verdict === 'note' ? (prev.verdict || '') : verdict, note, at: new Date().toISOString() };
   status.textContent = 'saving…';
-  try { await DB.doc('reviews/' + id).set(body); delete DRAFT[id]; status.textContent = 'saved'; }
+  try { await DB.doc('reviews/' + id).set(body); status.textContent = 'saved'; }
   catch (e) { status.textContent = 'not saved: ' + (e && e.code || 'error'); }
 }
 function countReviews() {
