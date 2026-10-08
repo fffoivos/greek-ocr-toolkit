@@ -321,13 +321,24 @@ def render_pages(urls: Iterable[PathLike | Mapping[str, object]], out_dir: PathL
                                     raw_html = local.read_bytes()
                         state.update(final_url=final_url, http_status=status, bytes=len(raw_html))
                         with measure('fonts'):
-                            await page.add_style_tag(content=_FREEZE)
-                            await page.evaluate("""(blocked) => {
+                            # Best effort with hard caps: on some sites (Wikipedia with this user agent) the injected
+                            # style's load event never fires and add_style_tag waits the full default timeout (8 Oct 2026).
+                            freeze_timed_out = False
+                            for label, coro in (('freeze', page.add_style_tag(content=_FREEZE)),
+                                                ('settle', page.evaluate("""(blocked) => {
                                 document.querySelectorAll('video,audio').forEach(e=>e.pause());
                                 if(!blocked)document.querySelectorAll('img').forEach(e=>e.loading='eager');
                                 window.scrollTo(0,0);
-                            }""", block_media)
-                            await _await_fonts(page, timeout)
+                            }""", block_media))):
+                                try:
+                                    await asyncio.wait_for(coro, timeout=min(timeout, 10.0))
+                                except (asyncio.TimeoutError, Error):
+                                    freeze_timed_out = True
+                            state['freeze_timed_out'] = freeze_timed_out
+                            try:
+                                await _await_fonts(page, timeout)
+                            except asyncio.TimeoutError:
+                                state['fonts_timed_out'] = True
                             if not block_media:
                                 await asyncio.wait_for(page.evaluate('''() => Promise.all(
                                     Array.from(document.images).map(i=>i.decode().catch(()=>{})))'''), timeout=timeout)
