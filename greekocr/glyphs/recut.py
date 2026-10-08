@@ -41,6 +41,8 @@ K_LOCAL = 6           # letters in the local baseline fit while walking
 SEAM_BIAS = .02       # seam cost per pixel of distance from the mid-gap row (ink costs 1 per pixel crossed)
 WINDOW = 4.2          # x-heights above / below the baseline in the straightened working window
 SAME_LINE = .5        # a split line within this many x-heights of another box's line is that box's line
+THIN_BOX = .8         # a box lower than this × the page's median box height is too thin to fit its line in ...
+FIT_WINDOW = 1.5      # ... so its line is fitted in a window this many median box heights tall, centred on it
 NEAR_BOXES = 3.5      # with `only`: boxes within this many median box heights (and overlapping in x) are fitted too
 LOST_MIN = .15        # a side is cut off when the line's own ink beyond it exceeds this × x-height² pixels
 
@@ -243,30 +245,56 @@ def _guide_offsets(L: Any) -> tuple[float, float, float]:
             float(np.median((L.descender - L.base)[s])))
 
 
+def _body_in_box(L: Any, rise: float, y0: int, y1: int, x0: int, x1: int) -> float:
+    """Mean fraction of a line's letter body (baseline − rise → baseline) inside rows y0..y1, over columns x0..x1."""
+    if x1 <= x0 or rise <= 0:
+        return 0.0
+    b = np.asarray(L.base[x0:x1], np.float64)
+    top = b - rise
+    ov = np.clip(np.minimum(b, y1) - np.maximum(top, y0), 0, None)
+    return float((ov / rise).mean())
+
+
 def fit_box(gray: NDArray[np.float64], box: tuple[int, int, int, int], xh_prior: float | None = None, *,
-            box_index: int = -1, splits: bool = True) -> list[LineFit]:
+            box_index: int = -1, splits: bool = True, fit_rows: tuple[int, int] | None = None) -> list[LineFit]:
     """Step 1–2 for one box: the box's own line per column segment ('main'), and — when `splits` — every other full
-    line found inside the box ('split': letter bodies at least half inside, as report.n_full_lines counts them)."""
+    line found inside the box ('split': letter bodies at least half inside, as report.n_full_lines counts them).
+    fit_rows: fit in these page rows instead of the box's own (a box too thin to fit its line in: the line is then
+    the one whose letter bodies overlap the box most, and only lines with ≥ half their bodies inside the box split)."""
     bx0, by0, bx1, by1 = box
-    crop = Image.fromarray(np.clip(gray[by0:by1, bx0:bx1], 0, 255).astype(np.uint8), 'L')
+    wy0, wy1 = fit_rows if fit_rows else (by0, by1)
+    crop = Image.fromarray(np.clip(gray[wy0:wy1, bx0:bx1], 0, 255).astype(np.uint8), 'L')
     segs = column_segments(crop, **({'xh_prior': xh_prior} if xh_prior else {}))
     out = []
     for k, seg in enumerate(segs):
         g = seg.glyphs
         if g is None:
             continue
-        for L in text_lines(g):
-            if L.side != 'main' and (not splits or L.visible < .5 or L.x1 - L.x0 < 2 * g.band.xh):
+        lines = text_lines(g)
+        if fit_rows:
+            scored = []
+            for L in lines:
+                rise, _, _ = _guide_offsets(L)
+                ex0, ex1 = (0, g.width) if L.side == 'main' else (L.x0, L.x1)
+                scored.append((_body_in_box(L, rise, by0 - wy0, by1 - wy0, ex0, ex1), L))
+            own = max(scored, key=lambda t: t[0])
+            chosen = [(own[1], 'main')] + [(L, 'split') for f, L in scored
+                                            if L is not own[1] and f >= .5 and L.x1 - L.x0 >= 2 * g.band.xh]
+        else:
+            chosen = [(L, 'main' if L.side == 'main' else 'split') for L in lines
+                      if L.side == 'main' or (splits and L.visible >= .5 and L.x1 - L.x0 >= 2 * g.band.xh)]
+        for L, kind in chosen:
+            if kind == 'split' and not splits:
                 continue
             rise, up, down = _guide_offsets(L)
-            if L.side == 'main':
+            if kind == 'main':
                 lx0, lx1, base = seg.x0, seg.x1, L.base
             else:                                              # its evidence range only
                 lx0, lx1, base = seg.x0 + L.x0, seg.x0 + L.x1, L.base[L.x0:L.x1]
-            out.append(LineFit(bx0 + lx0, bx0 + lx1, np.asarray(base, np.float64) + by0, g.band.xh, rise, up, down,
-                               box, box_index, 'main' if L.side == 'main' else 'split', k, len(segs),
-                               open_left=(lx0 <= int(g.band.xh)) if L.side != 'main' else seg.x0 == 0,
-                               open_right=(lx1 >= (bx1 - bx0) - int(g.band.xh)) if L.side != 'main'
+            out.append(LineFit(bx0 + lx0, bx0 + lx1, np.asarray(base, np.float64) + wy0, g.band.xh, rise, up, down,
+                               box, box_index, kind, k, len(segs),
+                               open_left=(lx0 <= int(g.band.xh)) if kind != 'main' else seg.x0 == 0,
+                               open_right=(lx1 >= (bx1 - bx0) - int(g.band.xh)) if kind != 'main'
                                else bx0 + seg.x1 >= bx1))
     return out
 
@@ -444,8 +472,16 @@ def _page_fits(gray: NDArray[np.float64], boxes: list[tuple[int, int, int, int]]
                splits: bool = True, use: set[int] | None = None) -> tuple[list[LineFit], float | None, float | None, list[str]]:
     """Steps 1–2 for the page: fit every box (or the boxes in `use`), keep split lines no other box owns, page letter
     size and pitch."""
+    hs = [b[3] - b[1] for b in boxes]
+    mh = float(np.median(hs)) if hs else 0.0
+
+    def rows_for(b: tuple[int, int, int, int]) -> tuple[int, int] | None:
+        if not mh or b[3] - b[1] >= THIN_BOX * mh:
+            return None
+        c = (b[1] + b[3]) / 2                                # a box too thin to fit its line in: fit in a window
+        return max(0, int(c - FIT_WINDOW * mh / 2)), min(gray.shape[0], int(c + FIT_WINDOW * mh / 2))
     fits = [f for i, b in enumerate(boxes) if use is None or i in use
-            for f in fit_box(gray, b, xh_prior, box_index=i, splits=splits)]
+            for f in fit_box(gray, b, xh_prior, box_index=i, splits=splits, fit_rows=rows_for(b))]
     mains = [f for f in fits if f.kind == 'main']
     log = []
     kept = list(mains)

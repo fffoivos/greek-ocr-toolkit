@@ -705,7 +705,7 @@ lines = fix_page(page, boxes)  # list[PageLine]
 
 ### `greekocr.glyphs.recut.fit_box`
 
-`def fit_box(gray: NDArray[np.float64], box: tuple[int, int, int, int], xh_prior: float | None=None, *, box_index: int=-1, splits: bool=True) -> list[LineFit]`
+`def fit_box(gray: NDArray[np.float64], box: tuple[int, int, int, int], xh_prior: float | None=None, *, box_index: int=-1, splits: bool=True, fit_rows: tuple[int, int] | None=None) -> list[LineFit]`
 
 Step 1–2 for one box: the box's own line per column segment ('main'), and — when `splits` — every other full
 
