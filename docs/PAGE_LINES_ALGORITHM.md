@@ -30,6 +30,26 @@ each with its own region that overlaps no other line's region, and an image of i
    text. Stop at the page boundary. Cut back only at a graphical boundary (a column rule, page-edge shading, a frame)
    or a very large gap.
 
+## The procedure (owner, 8 October 19:40)
+
+1. Get the line segments (the recogniser's boxes) as an input.
+2. Draw the curves / skew lines and the four font lines for each line in the segment; give each line its coordinates
+   (its segment and its position in it), which separate the lines' identities.
+3. Once there are curves and the four font lines for each text line, **forget the initial line segments completely**.
+4. Draw a new segment simply by finding the middle between the bottom and top font lines of neighbouring lines, and by
+   extending left and right along the curve until a boundary is found.
+
+**Use of shared geometry.** Lines on a page generally share the same skew or curve (the page's geometry: its tilt and
+its warp). Neighbouring lines' curves are therefore one shared curve shifted vertically per line, and their letters
+are fitted together.
+
+**Acceptance (owner, 8 October 19:40), first on three consecutive lines of each column of one page:**
+- the line segments tessellate their space: no overlap and no gap between neighbouring segments;
+- each line's characters are centred between its segment's top and bottom boundary in their true alignment (along the
+  curve or skew).
+
+Iterate on the mathematics on those six lines until both hold; then widen to the page.
+
 ## Where the code stands (commit `a5750e2`)
 
 | Step | Code | Status |
