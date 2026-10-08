@@ -7,7 +7,8 @@ fix_page(page, boxes) — one whole-page operation, four steps:
   3. find where each line is cut off by its box: its own ink continuing past the box's top, bottom, left or right
      edge on the page (measured, not guessed from the crop);
   4. follow the direction of the cut-off: the boundary follows the line's own curve / skew (top and bottom guide lines
-     ± margin, bounded by the neighbouring lines' fitted lines — the boxes are used collaboratively), and extends
+     ± margin, bounded by the neighbouring lines' fitted lines — the boxes are used collaboratively: Voronoi of the
+     lines' letter-body centre curves, ink assigned per component by its centroid; see _voronoi_keep), and extends
      left / right letter by letter until the page edge, a gap wider than GAP_STOP x-heights, or a column rule.
 Lines that are not cut off and share their box with nothing keep their box unchanged.
 
@@ -197,6 +198,44 @@ def _seam(ink: NDArray[np.bool_], lo: NDArray[np.int64] | int, hi: NDArray[np.in
     return path
 
 
+def _voronoi_keep(ink: NDArray[np.bool_], miss: NDArray[np.bool_], c0: float, c_up: NDArray[np.float64],
+                  c_dn: NDArray[np.float64], rise: float) -> NDArray[np.bool_]:
+    """Pixels of this line in a window straightened along it (owner 8 Oct 18:58: "the curve and the distance from the
+    centroid of the letters should define the region"). Voronoi of the lines' letter-body centre curves: the region is
+    everything nearer this line's centre (row c0) than the neighbours' (c_up / c_dn per column) — between two lines,
+    the midline of their centre curves. Ink is assigned per connected component: a component goes whole to the line
+    whose centre is nearest its centroid (accents and tall tops across the midline stay with their line; tails belong
+    to their letter). Only a component touching two lines' letter bodies is cut at the midline."""
+    h, w = ink.shape
+    rows = np.arange(h)[:, None]
+    m_up, m_dn = (c0 + c_up) / 2, (c0 + c_dn) / 2
+    band = (rows > m_up[None, :]) & (rows < m_dn[None, :]) & ~miss
+    keep = band.copy()
+    lab, n = ndi.label(ink, structure=EIGHT)
+    if n == 0:
+        return keep
+    half = rise / 2
+    for i, sl in enumerate(ndi.find_objects(lab), start=1):
+        if sl is None:
+            continue
+        m = lab[sl] == i
+        rr, cc = np.nonzero(m)
+        rr = rr + sl[0].start; cc = cc + sl[1].start
+        cy = rr.mean()
+        d_own = abs(cy - c0)
+        d_up = abs(cy - c_up[cc].mean())
+        d_dn = abs(cy - c_dn[cc].mean())
+        in_own = ((rr >= c0 - half) & (rr <= c0 + half)).any()
+        if d_own <= min(d_up, d_dn):                        # ours: keep whole, unless it touches a neighbour's body
+            touch = ((rr <= c_up[cc] + half) | (rr >= c_dn[cc] - half)).any()
+            if not touch:
+                keep[rr, cc] = True
+        else:                                               # a neighbour's: drop, unless it touches our body
+            if not in_own:
+                keep[rr, cc] = False
+    return keep
+
+
 def _guide_offsets(L: Any) -> tuple[float, float, float]:
     """(rise, up, down) in pixels from a GuideLines' curves over its evidence range."""
     s = slice(L.x0, max(L.x0 + 1, L.x1))
@@ -290,7 +329,7 @@ def _sides_at(ink: NDArray[np.bool_], base_row: int, xh: float, rise: float, P: 
 
 def _recut_fit(gray: NDArray[np.float64], f: LineFit, *, neighbours: list[LineFit] | None = None,
                pitch_xh: float | None = None, page_xh: float | None = None, mode: str = 'curve',
-               margin: float = .25, extend: bool = True, isolate: bool = True) -> Recut:
+               margin: float = .25, extend: bool = True, isolate: bool = True, separator: str = 'voronoi') -> Recut:
     """Step 4 for one fitted line: follow its geometry on the page (walk left / right; top and bottom guide lines ±
     margin, bounded by the neighbours' fitted lines by minimum-ink seams)."""
     H, W = gray.shape
@@ -339,6 +378,7 @@ def _recut_fit(gray: NDArray[np.float64], f: LineFit, *, neighbours: list[LineFi
     S, miss, br = straighten(gray[:, new_x0:new_x1], base, xh, paper=paper, above=WINDOW, below=WINDOW)
     sink = binarise(S) & ~miss
     seams = {}
+    centre: dict[int, NDArray[np.float64]] = {}           # neighbour letter-body centre rows per column, per side
     P0, has_up, has_dn = (None, False, False)
     for side in (-1, 1):
         nb = _neighbour(neighbours, xs, base, xh, side) if (isolate and neighbours) else None
@@ -351,6 +391,7 @@ def _recut_fit(gray: NDArray[np.float64], f: LineFit, *, neighbours: list[LineFi
                 lo = np.full(len(off), int(br + .05 * xh))
                 hi = np.round(br + off - g.rise - .05 * g.xh).astype(np.int64)
             seams[side] = _seam(sink, lo, hi, (lo + hi) / 2)
+            centre[side] = br + off - g.rise / 2
             notes.append(f"{'above' if side < 0 else 'below'}: neighbour line at {np.median(off) / xh:+.2f} x-heights")
             continue
         if isolate and P0 is None:
@@ -360,17 +401,23 @@ def _recut_fit(gray: NDArray[np.float64], f: LineFit, *, neighbours: list[LineFi
             else:
                 P0, has_up, has_dn = _line_pitch(sink, br, xh, rise)
         P = P0 if (has_up if side < 0 else has_dn) else None
-        if P is None:             # nothing there: the guide band
-            seams[side] = np.full(S.shape[1], br - int(round(up)) - a if side < 0 else br + int(round(down)) + a)
+        if P is None:             # nothing there: the guide band (a virtual neighbour whose midline is the band edge)
+            lim = br - int(round(up)) - a if side < 0 else br + int(round(down)) + a
+            seams[side] = np.full(S.shape[1], lim)
+            centre[side] = np.full(S.shape[1], 2.0 * lim - (br - rise / 2))
             continue
         if side < 0:
             lo, hi = int(br - P + .05 * xh), int(br - rise - .05 * xh)
         else:
             lo, hi = int(br + .05 * xh), int(br + P - rise - .05 * xh)
         seams[side] = _seam(sink, lo, hi, (lo + hi) / 2)
+        centre[side] = np.full(S.shape[1], br + side * P - rise / 2)
         notes.append(f"{'above' if side < 0 else 'below'}: page pitch {P / xh:.2f} x-heights")
     rows = np.arange(S.shape[0])[:, None]
-    keep = (rows > seams[-1][None, :]) & (rows < seams[1][None, :]) & ~miss
+    if separator == 'voronoi':
+        keep = _voronoi_keep(sink, miss, br - rise / 2, centre[-1], centre[1], rise)
+    else:
+        keep = (rows > seams[-1][None, :]) & (rows < seams[1][None, :]) & ~miss
     S2 = np.where(keep, S, paper)
     rr = np.nonzero((binarise(S2) & keep).any(axis=1))[0]
     t0 = max(0, int(rr[0] - a)) if rr.size else 0
@@ -407,9 +454,7 @@ def _page_fits(gray: NDArray[np.float64], boxes: list[tuple[int, int, int, int]]
             continue
         xs = np.arange(f.x0, f.x1, dtype=np.float64)
         owned = False
-        for g in mains:
-            if g.box_index == f.box_index:
-                continue
+        for g in kept:                     # any main line (its own box's included: pieces of a curved line) or split
             lo, hi = max(f.x0, g.x0), min(f.x1, g.x1)
             if hi - lo >= 2 * f.xh and np.median(np.abs(g.base_at(xs[(xs >= lo) & (xs < hi)])
                                                         - f.base[(xs >= lo) & (xs < hi)])) < SAME_LINE * f.xh:
@@ -435,7 +480,7 @@ def _page_fits(gray: NDArray[np.float64], boxes: list[tuple[int, int, int, int]]
 
 def fix_page(page: Image.Image | NDArray[Any], boxes: list[tuple[int, int, int, int]], *,
              only: set[int] | None = None, xh_prior: float | None = None, margin: float = .25,
-             mode: str = 'curve') -> list[PageLine]:
+             mode: str = 'curve', separator: str = 'voronoi') -> list[PageLine]:
     """The whole-page operation (module docstring): every text-layer box of a page in, every text line out.
     `only`: indices of the boxes whose lines to return (all boxes are still fitted and bound their neighbours)."""
     gray = to_gray(page) if isinstance(page, Image.Image) else np.asarray(page, np.float64)
@@ -458,7 +503,7 @@ def fix_page(page: Image.Image | NDArray[Any], boxes: list[tuple[int, int, int, 
         if only is not None and f.box_index not in only:
             continue
         rc = _recut_fit(gray, f, neighbours=[g for g in fits if g is not f], pitch_xh=pitch, page_xh=page_xh,
-                        mode=mode, margin=margin)
+                        mode=mode, margin=margin, separator=separator)
         bx0, by0, bx1, by1 = f.box
         own = binarise(gray[rc.y0:rc.y1, rc.x0:rc.x1]) & rc.region[rc.y0:rc.y1, rc.x0:rc.x1]
         ys, xs = np.nonzero(own)
@@ -494,7 +539,7 @@ def recut_lines(page: Image.Image | NDArray[Any], box: tuple[int, int, int, int]
 def recut_page(page: Image.Image | NDArray[Any], boxes: list[tuple[int, int, int, int]], *,
                only: set[int] | None = None, **kw: Any) -> list[list[Recut]]:
     """Per box, the Recuts of its lines from fix_page (main lines first, then split lines)."""
-    lines = fix_page(page, boxes, only=only, **{k: v for k, v in kw.items() if k in ('xh_prior', 'margin', 'mode')})
+    lines = fix_page(page, boxes, only=only, **{k: v for k, v in kw.items() if k in ('xh_prior', 'margin', 'mode', 'separator')})
     out: list[list[Recut]] = [[] for _ in boxes]
     for pl in sorted(lines, key=lambda p: (p.kind != 'main', p.segment)):
         out[pl.box_index].append(pl.recut)

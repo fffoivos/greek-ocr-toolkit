@@ -97,7 +97,7 @@ if __name__ == '__main__':
         res_all = {}
         for mode in ('curve', 'box'):
             try:
-                res_all[mode] = recut_page(page, [b for _, b in items], mode=mode)
+                res_all[mode] = recut_page(page, [b for _, b in items], mode=mode, separator=os.environ.get('SEP', 'voronoi'))
             except Exception as e:                           # noqa: BLE001
                 res_all[mode] = [repr(e)[:120]] * len(items)
         for j, (li, box) in enumerate(items):

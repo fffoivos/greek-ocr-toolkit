@@ -716,7 +716,7 @@ fits = fit_box(gray_page, (x0, y0, x1, y1), xh_prior=None)
 
 ### `greekocr.glyphs.recut.fix_page`
 
-`def fix_page(page: Image.Image | NDArray[Any], boxes: list[tuple[int, int, int, int]], *, only: set[int] | None=None, xh_prior: float | None=None, margin: float=0.25, mode: str='curve') -> list[PageLine]`
+`def fix_page(page: Image.Image | NDArray[Any], boxes: list[tuple[int, int, int, int]], *, only: set[int] | None=None, xh_prior: float | None=None, margin: float=0.25, mode: str='curve', separator: str='voronoi') -> list[PageLine]`
 
 The whole-page operation (module docstring): every text-layer box of a page in, every text line out.
 
