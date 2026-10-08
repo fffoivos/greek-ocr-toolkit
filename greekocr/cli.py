@@ -26,6 +26,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     refine.add_argument('--out', type=Path, required=True, help='new output directory; rejected crops are retained')
     refine.add_argument('--pad', type=int, default=16)
     refine.add_argument('--profile', choices=('scan', 'born_digital'), default='scan')
+    measure = geometry_commands.add_parser('measure', help='compare original/refined crops using an explicit reader')
+    measure.add_argument('--lines', type=Path, required=True, help='JSONL with original crop, page, box and text')
+    measure.add_argument('--reader', required=True, help='importable module:callable accepting a crop Path')
+    measure.add_argument('--out', type=Path, required=True, help='new directory for measurement receipt and crops')
+    measure.add_argument('--pad', type=int, default=16)
     args = parser.parse_args(argv)
     try:
         if args.command == 'recipes':
@@ -44,13 +49,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             from greekocr.synth import validate_mix
             result = validate_mix(args.manifest, repo=args.repo, role=args.role)
         elif args.command == 'geometry':
-            result = _geometry_refine(args.image, args.boxes, args.out, args.pad, args.profile)
+            if args.geometry_command == 'measure':
+                result = _geometry_measure(args.lines, args.reader, args.out, args.pad)
+            else:
+                result = _geometry_refine(args.image, args.boxes, args.out, args.pad, args.profile)
         else:
             from greekocr.deploy.node_envs import environment_plan
             result = environment_plan(args.name,args.venv,wheelhouse=args.wheelhouse,paddle_requirements=args.paddle_requirements)
         print(json.dumps(result,ensure_ascii=False,indent=2))
         return 0
-    except (ValueError, OSError, KeyError, TypeError) as error:
+    except (ValueError, OSError, KeyError, TypeError, ImportError, AttributeError) as error:
         print(str(error),file=__import__('sys').stderr)
         return 3
 
@@ -58,7 +66,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _geometry_refine(image_path: Path, boxes_path: Path, out: Path, pad: int, profile: str) -> dict:
     import hashlib
     from PIL import Image
-    from greekocr.real.geometry import refine_page_lines, scan_admission
+    from greekocr.real.geometry import GEOMETRY_POLICY, refine_page_lines, scan_admission
     from greekocr.ops.receipts import file_sha256
     boxes = json.loads(boxes_path.read_text())
     if isinstance(boxes, dict):
@@ -79,7 +87,7 @@ def _geometry_refine(image_path: Path, boxes_path: Path, out: Path, pad: int, pr
                                       'crop_sha256': file_sha256(out/name),
                                       'raster_sha256': hashlib.sha256(line.image.tobytes()).hexdigest(),
                                       'admission': admission.receipt()})
-    receipt = dict(schema='o4d-local-line-geometry-v1', image_sha256=file_sha256(image_path),
+    receipt = dict(schema=GEOMETRY_POLICY, image_sha256=file_sha256(image_path),
                    boxes_sha256=file_sha256(boxes_path), coordinate_system='top-origin half-open page pixels',
                    pad=pad, profile=profile, input_boxes=len(boxes), output_lines=len(lines),
                    admitted=sum(d.admitted for d in decisions), lines=rows,
@@ -87,3 +95,13 @@ def _geometry_refine(image_path: Path, boxes_path: Path, out: Path, pad: int, pr
                    label_assignment='caller assigns split-line text')
     (out/'receipt.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2)+'\n')
     return receipt
+
+
+def _geometry_measure(lines_path: Path, reader_spec: str, out: Path, pad: int) -> dict:
+    from importlib import import_module
+    from greekocr.real.geometry_measure import measure_geometry
+    module, separator, attribute = reader_spec.partition(':')
+    if not module or not separator or not attribute:
+        raise ValueError('--reader must be module:callable accepting a crop Path')
+    reader = getattr(import_module(module), attribute)
+    return measure_geometry(lines_path, reader, out=out, pad=pad, reader_name=reader_spec)

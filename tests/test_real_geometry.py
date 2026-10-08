@@ -11,6 +11,7 @@ from scipy import ndimage
 
 from greekocr.cli import main
 from greekocr.real.geometry import (
+    GEOMETRY_POLICY, BASELINE_CLUSTER_TOLERANCE,
     DEFAULT_PAD, SCAN_MAX_CURL_PX, SCAN_MIN_INK_COVERAGE, SCAN_MAX_INK_COVERAGE,
     Admission, BaselineCurve, GeometryDiagnostics, TextLayerBox, hyphen_at_line_end,
     ink_components, refine_line, refine_page_lines, scan_admission, split_multiline,
@@ -21,6 +22,7 @@ FIXTURES = ROOT/'tests/fixtures/o4d_lines'
 INDEX = json.loads((FIXTURES/'index.json').read_text())
 ROWS = INDEX['lines']
 LEGACY = json.loads((ROOT/'tests/data/o4d_legacy_admission.json').read_text())
+REGRESSIONS = sorted((FIXTURES/'regressions').glob('*_old.png'))
 
 
 def open_strip(row):
@@ -95,8 +97,18 @@ def profile_center(profile):
 def test_curled_fixture_end_profiles_preserve_ink_and_flatten(row):
     image = open_strip(row)
     result = refine_line(image, (0, 0, *image.size), pad=DEFAULT_PAD)
-    before_mask = selected_scan_mask(image, result.kept_components)
-    after_mask = np.asarray(result.image) < 220
+    # Measure the chosen track, independently of neighbouring components now
+    # deliberately protected by the wide v2 band. The raster also retains paper
+    # and light stroke edges, so its dark-pixel total need not equal component area.
+    target = result.diagnostics.baseline_clusters[result.diagnostics.selected_cluster_index]
+    body = [c for c in result.kept_components if c.id in target['component_ids']]
+    before_mask = selected_scan_mask(image, body)
+    ys, xs = np.nonzero(before_mask)
+    out_ys = np.array([y-round(result.curve.evaluate(x))+result.ascent for y, x in zip(ys, xs)])
+    out_xs = xs-result.refined_box[0]
+    assert np.all(np.asarray(result.image)[out_ys, out_xs] == np.asarray(image)[ys, xs])
+    after_mask = np.zeros((result.image.height, image.width), dtype=bool)
+    after_mask[out_ys, xs] = True
     before, after = row_profiles(before_mask), row_profiles(after_mask)
     # Both terminal 15% regions retain every selected pixel, with white row margins.
     assert [int(p.sum()) for p in before] == [int(p.sum()) for p in after]
@@ -105,8 +117,148 @@ def test_curled_fixture_end_profiles_preserve_ink_and_flatten(row):
     after_gap = abs(profile_center(after[0])-profile_center(after[1]))
     assert before_gap > 20 and after_gap < .40*before_gap
     assert result.diagnostics.retained_ink_fraction == 1.0
-    assert after_mask.sum() == sum(c.area for c in result.kept_components)
+    assert after_mask.sum() == sum(c.area for c in body)
     assert result.dropped_components and result.diagnostics.source_n_baselines == 2
+
+
+def preservation_census(image, result):
+    """Independent page-to-strip mapping and dark-pixel count, no component mask."""
+    x0, y0, x1, y1 = result.source_box
+    columns = np.arange(x0, x1)
+    baseline = np.array([result.curve.evaluate(int(x)) for x in columns])[None, :]
+    rows = np.arange(y0, y1)[:, None]
+    height = result.diagnostics.x_height_px
+    band = (rows >= baseline-1.9*height) & (rows <= baseline+.6*height)
+    marks = band & (rows < baseline-height)
+    source = np.asarray(image.crop(result.source_box))
+    output_rows = rows-np.round(baseline).astype(int)+result.ascent
+    output_columns = (columns-result.refined_box[0])[None, :]
+    valid = (output_rows >= 0) & (output_rows < result.image.height)
+    output = np.asarray(result.image)[np.clip(output_rows, 0, result.image.height-1), output_columns]
+    before = source < 220
+    after = (output < 220) & valid
+    return source, output, band, valid, [
+        (int((before & zone).sum()), int((after & zone).sum())) for zone in (band, marks)]
+
+
+@pytest.mark.parametrize('path', [*[FIXTURES/r['file'] for r in ROWS], *REGRESSIONS], ids=lambda p: p.name)
+def test_v2_band_and_diacritic_ink_preservation_on_every_original(path):
+    with Image.open(path) as im:
+        image = im.convert('L')
+    result = refine_line(image, (0, 0, *image.size))
+    source, output, band, valid, counts = preservation_census(image, result)
+    (band_old, band_new), (marks_old, marks_new) = counts
+    assert band_old > 0
+    assert band_new >= .97*band_old
+    assert marks_new >= .95*marks_old
+    # Stronger than an ink count: every in-band source intensity is unchanged.
+    assert np.all(valid[band])
+    assert np.array_equal(source[band], output[band])
+    diag = result.diagnostics
+    assert diag.policy == GEOMETRY_POLICY == 'o4d-local-line-geometry-v2'
+    assert (diag.band_ink_original, diag.band_ink_refined) == (band_old, band_new)
+    assert (diag.diacritic_ink_original, diag.diacritic_ink_refined) == (marks_old, marks_new)
+    assert diag.band_ink_retained_fraction == diag.diacritic_ink_retained_fraction == 1.0
+    distances = [c['distance_to_box_center_px'] for c in diag.baseline_clusters]
+    assert diag.selected_cluster_index == distances.index(min(distances))
+    assert sum(c['selected'] for c in diag.baseline_clusters) == 1
+    if path in REGRESSIONS:
+        # Each supplied old/new pair remains evidence; v1 is never used as a page.
+        companion = path.with_name(path.name.replace('_old.png', '_new.png'))
+        assert companion.is_file()
+
+
+def test_v2_selects_nearest_baseline_even_with_stronger_neighbour_and_keeps_stacked_marks():
+    image = Image.new('L', (420, 160), 245)
+    draw = ImageDraw.Draw(image)
+    for x in range(35, 390, 35):
+        draw.rectangle((x, 48, x+10, 67), fill=45)
+        # Detached stacked marks, including above the nominal 1.9-height band.
+        draw.rectangle((x+2, 38, x+5, 40), fill=20)
+        draw.rectangle((x+2, 19, x+5, 21), fill=35)
+    for x in range(10, 410, 18):
+        draw.rectangle((x, 103, x+12, 122), fill=0)
+    # Both tracks have body centres inside this tall layer box. Ink support
+    # favours the neighbour, but its baseline is farther from the box centre.
+    box = (0, 30, 420, 116)
+    result = refine_line(image, box, pad=30)
+    clusters = result.diagnostics.baseline_clusters
+    assert len(clusters) == 2
+    target = clusters[result.diagnostics.selected_cluster_index]
+    other = next(c for c in clusters if not c['selected'])
+    assert target['support_ink_pixels'] < other['support_ink_pixels']
+    assert target['distance_to_box_center_px'] < other['distance_to_box_center_px']
+    assert abs(result.curve.evaluate(200)-67) < 1
+    assert result.dropped_components and all(c.box[1] >= 103 for c in result.dropped_components)
+    marks = [c for c in ink_components(image) if c.box[1] in (19, 38)]
+    assert len(marks) == 22
+    assert all(c.id in {k.id for k in result.kept_components} for c in marks)
+    for c in marks:
+        x, y = int(c.center_x), int(c.center_y)
+        assert result.image.getpixel((x-result.refined_box[0], y-round(result.curve.evaluate(x))+result.ascent)) == image.getpixel((x, y))
+    # Copy paper and light antialias pixels, rather than recolouring them white.
+    assert 245 in np.unique(np.asarray(result.image))
+
+
+def test_v2_keeps_overlapping_neighbour_components_but_masks_only_outside_cluster():
+    image = Image.new('L', (420, 170), 255)
+    draw = ImageDraw.Draw(image)
+    for x in range(25, 390, 30):
+        draw.rectangle((x, 40, x+10, 59), fill=0)
+        # Other body track is above the target. Its tall bodies overlap the band
+        # even though their centres are assigned to that upper baseline.
+        draw.rectangle((x, 12, x+10, 31), fill=20)
+        draw.rectangle((x, 112, x+10, 131), fill=30)
+    result = refine_line(image, (0, 35, 420, 80), pad=80)
+    height = result.diagnostics.x_height_px
+    kept = {c.id for c in result.kept_components}
+    for c in ink_components(image):
+        xs = range(c.box[0], c.box[2])
+        overlaps = any(c.box[1] <= result.curve.evaluate(x)+.6*height and
+                       c.box[3] > result.curve.evaluate(x)-1.9*height for x in xs)
+        if overlaps:
+            assert c.id in kept
+    assert any(c.box[1] == 12 for c in result.kept_components)
+    assert any(c.box[1] == 112 for c in result.dropped_components)
+
+
+def test_tightened_cluster_tolerance_and_repeat_split_are_deterministic():
+    assert BASELINE_CLUSTER_TOLERANCE < .55
+    image = open_strip(ROWS[0])
+    components = ink_components(image)
+    first = split_multiline((0, 0, *image.size), components)
+    assert len(first) == 2
+    assert first == split_multiline((0, 0, *image.size), components)
+    # With 0.55-height tolerance, an intermediate track absorbed these two
+    # complete 20-pixel bodies. The stricter tolerance must distinguish them.
+    close = Image.new('L', (420, 100), 255)
+    draw = ImageDraw.Draw(close)
+    for x in range(25, 390, 30):
+        draw.rectangle((x, 30, x+10, 49), fill=0)
+        draw.rectangle((x, 51, x+10, 70), fill=0)
+    boxes = split_multiline((0, 0, *close.size), ink_components(close))
+    assert len(boxes) == 2
+    assert boxes[0][1:4:2] == (30, 50)
+    assert boxes[1][1:4:2] == (51, 71)
+
+
+def test_diacritic_assigned_to_another_cluster_is_kept_even_outside_the_band():
+    image = Image.new('L', (420, 130), 255)
+    draw = ImageDraw.Draw(image)
+    for x in range(30, 380, 35):
+        draw.rectangle((x, 40, x+10, 59), fill=45)
+        draw.rectangle((x+17, 0, x+27, 19), fill=30)
+        # This tiny mark is nearest the upper body cluster but horizontally
+        # over the target body. Its entire bbox lies above the protected band.
+        draw.rectangle((x+2, 9, x+5, 11), fill=20)
+    result = refine_line(image, (0, 35, 420, 80), pad=40)
+    assert len(result.diagnostics.baseline_clusters) == 2
+    assert abs(result.curve.evaluate(200)-59) < 1
+    marks = [c for c in result.kept_components if c.box[1] == 9]
+    assert len(marks) == 10
+    assert all(c.id in result.diagnostics.diacritic_component_ids for c in marks)
+    assert all(c.box[3] < result.curve.evaluate(c.center_x)-1.9*result.diagnostics.x_height_px for c in marks)
+    assert any(c.box[1] == 0 for c in result.dropped_components)
 
 
 def test_available_terminal_sigma_extends_inboard_text_box():

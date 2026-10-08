@@ -13,7 +13,7 @@ from scipy import ndimage
 Box: TypeAlias = tuple[float, float, float, float]
 PixelBox: TypeAlias = tuple[int, int, int, int]
 Profile: TypeAlias = Literal['scan', 'born_digital']
-GEOMETRY_POLICY = 'o4d-local-line-geometry-v1'
+GEOMETRY_POLICY = 'o4d-local-line-geometry-v2'
 
 # Pixel thresholds are for the staged ~200 dpi parliament strips, not DPI invariant.
 SCAN_MAX_CURL_PX = 48.0  # More than a typical line height needs G3/page review.
@@ -22,7 +22,10 @@ SCAN_MAX_INK_COVERAGE = 0.55  # Reject solid rules, inverted/filled crops.
 MIN_COMPONENT_AREA = 3  # Same noise floor as the preserved character-ink check.
 DEFAULT_PAD = 16  # Bounded search for clipped terminal glyphs and accents.
 STRIP_MARGIN_PX = 2  # Rounding room above accents and below descenders.
-BASELINE_CLUSTER_TOLERANCE = 0.55  # In units of estimated body height.
+BASELINE_CLUSTER_TOLERANCE = 0.35  # Separate nearby body tracks before assigning marks.
+BAND_ASCENT_RATIO = 1.9  # Capitals and stacked breathing/accent marks.
+BAND_DESCENT_RATIO = 0.6
+INK_MASS_MAX_GRAY = 220  # Dark-pixel census, independent of component membership.
 INK_DARK_FLOOR = 80  # Retain dense strokes even where local averaging is dark.
 INK_MAX_GRAY = 220  # Exclude near-white scan background.
 INK_MIN_LOCAL_CONTRAST = 12  # Retain faded ink above paper texture contrast.
@@ -82,6 +85,19 @@ class GeometryDiagnostics:
     legacy: Mapping[str, Any] = field(default_factory=dict)
     policy: str = GEOMETRY_POLICY
     search_boundary_ink: tuple[str, ...] = ()
+    selected_cluster_index: int | None = None
+    baseline_clusters: tuple[Mapping[str, Any], ...] = ()
+    cluster_selection: str = 'baseline mean y nearest original box vertical centre'
+    band_ascent_px: float = 0.0
+    band_descent_px: float = 0.0
+    diacritic_component_ids: tuple[int, ...] = ()
+    band_ink_original: int = 0
+    band_ink_refined: int = 0
+    diacritic_ink_original: int = 0
+    diacritic_ink_refined: int = 0
+    band_ink_retained_fraction: float = 1.0
+    diacritic_ink_retained_fraction: float = 1.0
+    resampling: str = 'integer per-column row shift (nearest-neighbour)'
 
 
 @dataclass(frozen=True)
@@ -314,6 +330,33 @@ def _legacy(image: Image.Image, box: PixelBox) -> dict[str, Any]:
     return row
 
 
+def _baseline(group: Sequence[Component], height: float) -> BaselineCurve:
+    """Fit body bottoms only; detached marks must not move the target baseline."""
+    body = [c for c in group if c.box[3]-c.box[1] >= .60*height
+            and c.area >= .06*height**2]
+    if not body:
+        body = list(group)
+    return _fit(np.array([c.center_x for c in body]),
+                np.array([float(c.box[3]-1) for c in body]))
+
+
+def _overlaps_band(component: Component, curve: BaselineCurve, height: float) -> bool:
+    xs = np.arange(component.box[0], component.box[2], dtype=float)
+    baseline = _values(curve, xs)
+    return bool(np.any((component.box[1] <= baseline+BAND_DESCENT_RATIO*height)
+                       & (component.box[3] > baseline-BAND_ASCENT_RATIO*height)))
+
+
+def _diacritics(components: Sequence[Component], body: Sequence[Component],
+                curve: BaselineCurve, height: float) -> set[int]:
+    """Protect detached small marks above and horizontally over kept body ink."""
+    return {c.id for c in components
+            if c.box[3]-c.box[1] < .60*height and c.box[2]-c.box[0] <= 1.25*height
+            and c.area < .60*height**2
+            and c.box[3] <= curve.evaluate(c.center_x)-height+STRIP_MARGIN_PX
+            and any(c.box[0] < b.box[2] and c.box[2] > b.box[0] for b in body)}
+
+
 def refine_line(page_image: Image.Image, box: Box, *, pad: int = DEFAULT_PAD) -> LineCrop:
     """Select one baseline, fit glyph bottoms robustly and sample a curved ink strip."""
     if isinstance(pad, bool) or not isinstance(pad, int) or pad < 0:
@@ -328,30 +371,41 @@ def refine_line(page_image: Image.Image, box: Box, *, pad: int = DEFAULT_PAD) ->
     legacy = _legacy(gray, source)
     if not clusters:
         curve = BaselineCurve(0, 0, float(y1-1), float(x0), max(1.0, x1-x0))
-        diag = GeometryDiagnostics(0, 0, 0.0, height, 0.0, True, 0, 0.0,
+        original = gray.crop(source)
+        ink = _ink(original)
+        diag = GeometryDiagnostics(0, 0, 0.0, height, float(ink.mean()), not bool(ink.any()),
+                                   int(ink.sum()), 1.0,
                                    (0, 0), (), legacy=legacy)
-        return LineCrop(Image.new('L', (x1-x0, y1-y0), 255), source, search, source,
-                        curve, (), components, diag, y1-y0-1, 0)
-    # Prefer body ink actually inside the requested box, then proximity to its centre.
-    def score(cluster: tuple[BaselineCurve, tuple[Component, ...]]) -> tuple[float, float]:
-        center_curve, group = cluster
-        inside = sum(c.area for c in group if x0 <= c.center_x < x1 and y0 <= c.center_y < y1)
-        return float(inside), -abs(center_curve.evaluate((x0+x1)/2)-(y0+y1)/2)
-    _, kept = max(clusters, key=score)
-    kept_ids = {c.id for c in kept}
-    dropped = tuple(c for c in components if c.id not in kept_ids)
-    body = [c for c in kept if c.box[3]-c.box[1] >= .60*height and c.area >= .06*height**2]
-    if not body:
-        body = list(kept)
-    curve = _fit(np.array([c.center_x for c in body]),
-                 np.array([float(c.box[3]-1) for c in body]))
-    selected = np.isin(labels, list(kept_ids))
+        return LineCrop(original, source, search, source, curve,
+                        components, (), diag, y1-y0-1, 0)
+    columns_in_box = np.arange(x0, x1, dtype=float)
+    baselines = [_baseline(group, height) for _, group in clusters]
+    means = [float(_values(c, columns_in_box).mean()) for c in baselines]
+    center = (y0+y1)/2
+    target = min(range(len(clusters)), key=lambda i: (abs(means[i]-center), i))
+    curve = baselines[target]
+    cluster_diagnostics = tuple(dict(index=i, curve=asdict(baselines[i]), mean_y=means[i],
+                                    distance_to_box_center_px=abs(means[i]-center),
+                                    component_ids=[c.id for c in group],
+                                    support_ink_pixels=sum(c.area for c in group), selected=i == target)
+                                for i, (_, group) in enumerate(clusters))
+    other_ids = {c.id for i, (_, group) in enumerate(clusters) if i != target for c in group}
+    overlapping = tuple(c for c in components if _overlaps_band(c, curve, height))
+    body = [c for c in overlapping if c.box[3]-c.box[1] >= .60*height
+            and c.area >= .06*height**2 and c.box[2]-c.box[0] < 5*height]
+    diacritic_ids = _diacritics(components, body, curve, height)
+    protected_ids = {c.id for c in overlapping} | diacritic_ids
+    dropped = tuple(c for c in components if c.id in other_ids and c.id not in protected_ids)
+    dropped_ids = {c.id for c in dropped}
+    kept = tuple(c for c in components if c.id not in dropped_ids)
+    dropped_mask = np.isin(labels, list(dropped_ids))
+    selected = _ink(local) & ~dropped_mask
     yy, xx = np.nonzero(selected)
     page_x = xx.astype(float)+search[0]
     page_y = yy+search[1]
     baselines = np.rint(_values(curve, page_x)).astype(int)
-    ascent = max(0, int(np.max(baselines-page_y)))+STRIP_MARGIN_PX
-    descent = max(0, int(np.max(page_y-baselines)))+STRIP_MARGIN_PX
+    ascent = max(math.ceil(BAND_ASCENT_RATIO*height), int(np.max(baselines-page_y)), 0)+STRIP_MARGIN_PX
+    descent = max(math.ceil(BAND_DESCENT_RATIO*height), int(np.max(page_y-baselines)), 0)+STRIP_MARGIN_PX
     left = max(0, min(x0, min(c.box[0] for c in kept)-STRIP_MARGIN_PX))
     right = min(gray.width, max(x1, max(c.box[2] for c in kept)+STRIP_MARGIN_PX))
     columns = np.arange(left, right, dtype=float)
@@ -363,11 +417,29 @@ def refine_line(page_image: Image.Image, box: Box, *, pad: int = DEFAULT_PAD) ->
              & (local_columns[None, :] >= 0) & (local_columns[None, :] < local.width))
     safe_rows = np.clip(local_rows, 0, local.height-1)
     safe_columns = np.clip(local_columns, 0, local.width-1)[None, :]
-    # Mask dropped components while retaining grayscale intensity of selected ink.
+    # Copy source intensities (including light edges and paper), with integer shifts.
+    # Only explicitly assigned outside-band neighbour components may become white.
+    copy_mask = ~dropped_mask[safe_rows, safe_columns] & valid
     mask = selected[safe_rows, safe_columns] & valid
     pixels = np.full(rows.shape, 255, dtype=np.uint8)
-    pixels[mask] = np.asarray(local)[safe_rows, safe_columns][mask]
+    pixels[copy_mask] = np.asarray(local)[safe_rows, safe_columns][copy_mask]
     strip = Image.fromarray(pixels)
+    # Compare the original box in page coordinates to exactly those same pixels
+    # in rectified coordinates, using the unrounded curve to define both zones.
+    source_columns = np.arange(x0, x1, dtype=float)
+    source_baseline = _values(curve, source_columns)[None, :]
+    source_rows = np.arange(y0, y1)[:, None]
+    band = ((source_rows >= source_baseline-BAND_ASCENT_RATIO*height)
+            & (source_rows <= source_baseline+BAND_DESCENT_RATIO*height))
+    marks = band & (source_rows < source_baseline-height)
+    original_dark = np.asarray(gray.crop(source)) < INK_MASS_MAX_GRAY
+    output_rows = source_rows-np.rint(source_baseline).astype(int)+ascent
+    output_columns = np.arange(x0-left, x1-left)[None, :]
+    in_strip = (output_rows >= 0) & (output_rows < pixels.shape[0])
+    refined_dark = (pixels[np.clip(output_rows, 0, pixels.shape[0]-1), output_columns]
+                    < INK_MASS_MAX_GRAY) & in_strip
+    band_old, band_new = int((original_dark & band).sum()), int((refined_dark & band).sum())
+    marks_old, marks_new = int((original_dark & marks).sum()), int((refined_dark & marks).sum())
     boundary = []
     for name, condition in [('left', np.any(page_x == 0)), ('right', np.any(page_x == gray.width-1)),
                             ('top', np.any(page_y == 0)), ('bottom', np.any(page_y == gray.height-1))]:
@@ -380,7 +452,15 @@ def refine_line(page_image: Image.Image, box: Box, *, pad: int = DEFAULT_PAD) ->
     diag = GeometryDiagnostics(1, len(clusters), float(np.ptp(_values(curve, columns))),
                                height, coverage, not bool(mask.any()), int(mask.sum()),
                                float(mask.sum()/len(xx)), (x0-left, right-x1),
-                               tuple(boundary), legacy=legacy, search_boundary_ink=search_boundary)
+                               tuple(boundary), legacy=legacy, search_boundary_ink=search_boundary,
+                               selected_cluster_index=target, baseline_clusters=cluster_diagnostics,
+                               band_ascent_px=BAND_ASCENT_RATIO*height,
+                               band_descent_px=BAND_DESCENT_RATIO*height,
+                               diacritic_component_ids=tuple(sorted(diacritic_ids)),
+                               band_ink_original=band_old, band_ink_refined=band_new,
+                               diacritic_ink_original=marks_old, diacritic_ink_refined=marks_new,
+                               band_ink_retained_fraction=band_new/band_old if band_old else 1.0,
+                               diacritic_ink_retained_fraction=marks_new/marks_old if marks_old else 1.0)
     refined = (left, max(0, int(rows.min())), right, min(gray.height, int(rows.max())+1))
     return LineCrop(strip, source, search, refined, curve, kept, dropped, diag, ascent, descent)
 

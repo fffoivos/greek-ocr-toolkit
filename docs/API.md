@@ -530,6 +530,39 @@ from greekocr.real.geometry import refine_page_lines
 crops = refine_page_lines(image, text_layer_boxes, pad=16)
 ```
 
+### `greekocr.real.geometry_measure.comparison_scores`
+
+`def comparison_scores(text: str, old: str, new: str) -> dict[str, Any]`
+
+Match the O4d coordinator's NFD SequenceMatcher score and trimmed exacts.
+
+```python
+from greekocr.real.geometry_measure import comparison_scores
+scores = comparison_scores("ἅ", "α", "α\u0314\u0301")
+```
+
+### `greekocr.real.geometry_measure.summarize_measurements`
+
+`def summarize_measurements(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]`
+
+Aggregate successfully scored pairs; errors never count as improvements.
+
+```python
+from greekocr.real.geometry_measure import summarize_measurements
+summary = summarize_measurements(scored_geometry_rows)
+```
+
+### `greekocr.real.geometry_measure.measure_geometry`
+
+`def measure_geometry(lines: PathLike | Sequence[Mapping[str, Any]], reader: CropReader, *, out: PathLike | None=None, pad: int=DEFAULT_PAD, reader_name: str | None=None) -> dict[str, Any]`
+
+Read each original path and its refined PNG with a caller-supplied reader.
+
+```python
+from greekocr.real.geometry_measure import measure_geometry
+receipt = measure_geometry("lines.jsonl", cllg.read, out="geometry-measure", pad=16)
+```
+
 ### `greekocr.real.importers.native_rows`
 
 `def native_rows(spec: Record, root: PathLike) -> Iterator[Record]`
