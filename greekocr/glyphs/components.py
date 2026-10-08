@@ -335,13 +335,19 @@ def _smooth_curve(xs: NDArray[np.float64], ys: NDArray[np.float64], width: int, 
     return curve, (2 if np.abs(curve - lin)[sup].max() > 1.5 else 1)
 
 
-def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int = 0, xh_prior: float | None = None) -> LineGlyphs:
+def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int = 0, xh_prior: float | None = None,
+                focus: tuple[float, float] | None = None) -> LineGlyphs:
     """Components with descriptors and roles plus the letter band they define. CPU, a few ms for a 1500×80 strip.
 
     Roles: letter (body letter or a letter's main part), mark (accent / breathing / diaeresis above a letter, iota
     subscript below one), punct (small ink not attached to a letter: comma, full stop, ano teleia, apostrophe),
     fragment (small piece inside the band, typically a broken letter), neighbour (ink of the adjacent text lines),
     rule (long thin stroke), large (blob far bigger than a letter: stain, ornament, merged block).
+
+    focus: (row0, row1) of the crop where the wanted line's baseline lies (e.g. the original text-layer box inside a
+    taller window): the first straight fit uses only baseline evidence there, so the line above or below cannot take
+    over; growing and tracking then follow the line's own letters outside those rows (a curl leaving the box).
+
     """
     gray = to_gray(crop)
     h, w = gray.shape
@@ -406,7 +412,13 @@ def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int = 0, xh_prior: fl
             px.append(cx); py.append(float(r['y0']) + xh); pk.append('top')
     bx, by = np.array(px, float), np.array(py, float)
     rng = np.random.default_rng(seed)
-    inl = _ransac_line(bx, by, .15 * xh + 1, rng) if len(bx) else np.zeros(0, bool)
+    if focus is not None and len(bx):                  # first fit only on evidence inside the focus rows
+        fsel = (by >= focus[0]) & (by <= focus[1])
+        inl = np.zeros(len(bx), bool)
+        if fsel.sum() >= 2:
+            inl[np.nonzero(fsel)[0][_ransac_line(bx[fsel], by[fsel], .15 * xh + 1, rng)]] = True
+    else:
+        inl = _ransac_line(bx, by, .15 * xh + 1, rng) if len(bx) else np.zeros(0, bool)
     bottom, deg = _fit_curve(bx[inl], by[inl], w) if inl.any() else (np.full(w, min(h - 1.0, h * .7)), 0)
     # grow: evidence close to the current curve joins it, so the fit can follow a gradual trail or end curl
     for _ in range(4):
