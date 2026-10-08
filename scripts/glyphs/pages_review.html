@@ -78,7 +78,9 @@ svg text { font-family: var(--font-data); font-size: 11px; fill: var(--muted); }
 .overview { margin: 0; display: grid; gap: 6px; }
 .overview img { display: block; max-width: 100%; height: auto; border: 1px solid var(--rule); }
 .overview figcaption { font-size: .8rem; color: var(--muted); }
-.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tags { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.taggroup { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tagcap { font-size: .68rem; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-right: 2px; }
 .tags button.tag { --c: var(--muted); font: inherit; font-size: .8rem; padding: 3px 11px; border-radius: 999px; border: 1.5px solid var(--c); background: var(--surface); color: var(--c); cursor: pointer; transition: background .12s, box-shadow .12s; }
 .tags button.tag:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 16%, transparent); }
 .tags button.tag[aria-pressed="true"] { background: color-mix(in srgb, var(--c) 18%, var(--surface)); font-weight: 650; box-shadow: inset 0 0 0 1px var(--c); }
@@ -318,19 +320,23 @@ function reviewBlock(id) {
     b.addEventListener('click', () => save(id, 'rating:' + v, ta.value, status)); rate.appendChild(b);
   }
   row.append(lab, rate, status);
-  const tagrow = document.createElement('div'); tagrow.className = 'tags'; tagrow.setAttribute('role', 'group'); tagrow.setAttribute('aria-label', 'issues');
-  for (const [k, text] of TAGS) {
-    const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.dataset.tag = k;
-    b.className = k === 'ok' ? 'tag good' : 'tag';
-    b.addEventListener('click', () => {
-      let cur = new Set((REV[id] || {}).tags || []);
-      if (cur.has(k)) cur.delete(k);                       // toggle off
-      else if (k === 'ok') cur = new Set(['ok']);          // "Looks right" clears every issue
-      else { cur.add(k); cur.delete('ok'); }               // an issue clears "Looks right"
-      REV[id] = Object.assign({}, REV[id] || {}, { tags: [...cur] }); paintReview(box);
-      save(id, 'tags', ta.value, status, [...cur]);
-    });
-    tagrow.appendChild(b);
+  const tagrow = document.createElement('div'); tagrow.className = 'tags';
+  for (const [group, tags] of TAG_GROUPS) {
+    const g = document.createElement('span'); g.className = 'taggroup'; g.setAttribute('role', 'group'); g.setAttribute('aria-label', group);
+    const cap = document.createElement('span'); cap.className = 'tagcap'; cap.textContent = group;
+    g.appendChild(cap);
+    for (const [k, text, hint] of tags) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.title = hint; b.dataset.tag = k; b.className = 'tag';
+      b.addEventListener('click', () => {
+        const cur = new Set((REV[id] || {}).tags || []);
+        if (cur.has(k)) cur.delete(k); else cur.add(k);
+        cur.delete('ok');
+        REV[id] = Object.assign({}, REV[id] || {}, { tags: [...cur] }); paintReview(box);
+        save(id, 'tags', ta.value, status, [...cur]);
+      });
+      g.appendChild(b);
+    }
+    tagrow.appendChild(g);
   }
   box.append(row, tagrow, ta);
   paintReview(box);
@@ -361,10 +367,17 @@ async function autosave(id, status) {
 function flushAll() { for (const id of Object.keys(DRAFT)) { clearTimeout(TIMER[id]); autosave(id, { set textContent(v) {} }); } }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushAll(); });
 window.addEventListener('pagehide', flushAll);
-const TAGS = [['ok', 'All correct'], ['curve', 'Text curves, underline stays straight'], ['bottoms', 'Underline not on the letter bottoms'],
-  ['jagged', 'Underline is jagged'], ['ends', 'Underline too short at start or end'], ['rule', 'Underline crosses into the other column'],
-  ['break', 'One line split in two inside a column'], ['missed', 'A text line has no underline'],
-  ['wrongline', 'Underline sits on a different text line'], ['capitals', 'Capitals not underlined properly']];   // owner's comments, 8 Oct
+const TAG_GROUPS = [
+  ['Shape', [['curve', 'Doesn’t bend with the text', 'The text curves (e.g. at the binding) but the underline stays straight'],
+             ['bottoms', 'Floats off the letters', 'The underline runs above or below the bottoms of the letters'],
+             ['jagged', 'Wavy or jagged', 'The underline wobbles or zig-zags where the text is straight']]],
+  ['Length', [['ends', 'Too short', 'The underline stops before the first or last word of the line'],
+              ['rule', 'Runs into the next column', 'The underline crosses the column rule or gap into the other column']]],
+  ['Line', [['wrongline', 'On the wrong line', 'The underline belongs to the line above or below'],
+            ['missed', 'Line not underlined', 'A printed line in this segment has no underline at all'],
+            ['break', 'One line, two pieces', 'A single printed line is cut into two separate underlines inside its column']]],
+  ['Letters', [['capitals', 'Capitals left out', 'Capital letters (e.g. a speaker’s name) are not on the underline']]]];
+const TAGS = TAG_GROUPS.flatMap(([, tags]) => tags);   // from the owner's comments, 8 Oct
 async function save(id, verdict, note, status, tags) {
   if (!DB) { status.textContent = 'reviews cannot be saved in this view'; return; }
   const prev = REV[id] || {};
