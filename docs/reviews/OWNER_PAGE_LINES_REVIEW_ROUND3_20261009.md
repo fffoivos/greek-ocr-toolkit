@@ -89,23 +89,45 @@ Requirement:
 
 **Owner:** "s2-9de6cda8f03f0fc60a58-p00005 still has connections among the columns."
 
-The page (Vouli, page 485) has two columns separated by a thin printed vertical rule at x ≈ 1683. The text of both
-columns comes close to the rule.
+The page (Vouli, page 485) has two columns separated by a solid printed vertical rule. **The rule is slanted with
+the page.** Its x position, traced every 400 px down the page, runs from x 1676 at y 300 to x 1729 at y 3900: 53 px
+over 3,600 px, about 0.8°. It is dark in every row of every 200-row window.
 
 Measured on the round-3 output:
 - **Lines across the rule.** Of the 96 active lines, **37 run across the rule** (more than 30 px either side), from
   the top of the page (baseline y 116) to the bottom (y 4284). Most active lines are 2,900–2,930 px wide on a 3,323 px
   page, so each spans both columns.
 - **Segments across the rule.** 8 of the 38 pixel segments span the rule.
-- **The rule is faint and thin.** Along x 1683 the mean grey is 172, against paper at 252. It is darker than 140 in
-  only 48% of the rows between y 300 and 4300.
-- **The rule is barely marked.** The rule mask marks only 7% of those rows as barrier.
-- **No gutter is found.** The gap beside the rule is too narrow for a full-height gutter, so nothing stops the joins.
+- **The rule is only partly marked.** The rule mask marks it in some stretches and not others: 0–81% of rows per
+  200-row window, and none at all in four of the ten windows.
+- **No gutter is found.** No full-height gutter is found beside it, so nothing stops the joins.
 - **The checks report 0 rule or gutter crossings.**
 
-Requirement: the same as case 26 and round-2 section 5, on a different kind of page.
-- A faint, thin, broken rule running the full height between two text blocks is a column boundary. Find it from the
-  whole column structure: two blocks with their own left and right margins, and a straight line of ink between them,
-  even where it is light.
-- It must hold before any line is joined.
-- The crossing check must use the same boundary.
+(An earlier version of this note called the rule faint and broken. That was wrong: it was measured at one fixed x,
+and a slanted rule leaves any fixed x.)
+
+Requirement:
+- A rule is found along its own direction, not along a pixel column. A page scanned a little askew has slanted rules
+  and slanted gutters, and both must be found as straight lines at that slant. The page's skew is the same skew the
+  text lines show.
+- The rule is a column boundary over its full length and must hold before any line is joined.
+- The crossing check must use the same slanted boundary.
+
+## 30. s2-d1ed1c2db37f431f4acb-p00001: lines joined across the columns
+
+**Owner:** "also this one has connections across the columns s2-d1ed1c2db37f431f4acb-p00001."
+
+This page is also round-2 case 10 (show-through in the bottom-left corner). It has two columns separated by a solid
+printed vertical rule, again slanted with the page: from x 1578 at y 300 to x 1605 at y 3900, 27 px over 3,600 px
+(about 0.4°). The rule is dark in every row of every 200-row window.
+
+Measured on the round-3 output:
+- **Lines across the rule.** Of the 82 active lines, **43 run across the rule**, from baseline y 303 down to y 3318.
+- **Segments across the rule.** 10 of the 17 pixel segments span the rule.
+- **The rule is almost never marked.** The rule mask marks it in only two of the ten 200-row windows (58% and 100%
+  of rows there), and not at all elsewhere.
+- **No gutter is found** beside it.
+- **The checks report 0 rule or gutter crossings.**
+
+Requirement: as for case 29. Cases 26, 29 and 30 together show that the column boundary is still not found from the
+page's column structure. A straight full-height rule, slanted with the page, is the clearest boundary there is.
