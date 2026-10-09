@@ -182,3 +182,67 @@ Requirement (round 2, section 6 and the guide-line design in section 1):
 | 30 | s2-d1ed1c2db37f431f4acb-p00001 | whole page | lines joined across the columns (slanted rule) | 10 (show-through, same page) |
 | 31 | s2-3229200bf47ca465a42d-p00004 | bottom, lines 32–46 | first characters still missed | 14 |
 
+
+## Tables: first find out what Docling needs
+
+**Owner:** "Also we have trouble with tables, but we need to determine first what specs docling requires from us to
+compile proper tables." And: "make sure to record an independent search we should do to make sure we offer docling
+what it needs to compile tables."
+
+**To do:** an independent search, done before any further table work and before any table requirement goes to the
+implementer. It should establish what Docling's table pipeline consumes from an OCR plugin:
+- whether it needs word-level, cell-level or line-level text cells;
+- how text cells are matched to the predicted table cells;
+- what happens when one text cell spans two table cells or crosses a rule;
+- what coordinates and confidence it expects;
+- whether it re-runs anything on the table region itself.
+
+Sources: Docling's code (table structure stage, cell matching, the OCR model interface) and its documentation,
+checked against our plugin contract (`docs/` and `tests/test_docling_contract.py`). The text layer is not a
+reference for this.
+
+The search should be done independently of the page-lines implementer, and its answer recorded as the table
+requirement. Until then, cases 28 and the round-2 table pages stay recorded but are not specified further. Earlier
+note (not verified for tables): Docling runs OCR before layout, and the plugin receives the page image and bitmap
+rectangles and returns text cells.
+
+## Findings on the 50 new pages
+
+The round-3 code was run, unchanged (commit 0c08015, pixel-only), on 50 pages it had never seen: 25 Anemi and 25
+Vouli, each from a different book or PDF, none among the 72 pages used before. All 50 ran without failure, in 633 s
+of compute on the MacBook. Review page: https://claude.ai/artifact/QkjS6GT3Bxyr5wqgd5BTVz.
+
+### 32. an-1436ae03653f-p000163-s00039: a line on an ornamental border, passed to OCR
+
+**Owner:** "we should be able to avoid passing to OCR non-text containing lines. Maybe there is some feature we can
+detect."
+
+The segment (x 373–2003, y 3512–3556) is a printed ornamental border: a band of repeated black fleurons along the
+foot of the page. The detector keeps one active line on it (line 36, x 705–2003). It is not discounted, so it would
+be passed to OCR.
+
+Features already in the output that set it apart from a text line:
+- **Almost no letter bodies.** Its ink classes are 31 of 36 components "punctuation", 1 body on the baseline,
+  3 with descenders, no capitals or ascenders, no accents.
+- **Little support for its geometry.** Its geometry is borrowed (support 3), and only 1–4 points fit each guide line.
+
+Features not yet measured that would also separate it:
+- the same shape repeated at a regular spacing along the band;
+- ink density far above text (solid black fleurons);
+- no word gaps.
+
+Requirement: a candidate line whose ink is not letters (mostly one repeated non-letter shape, or almost no letter
+bodies) is discounted as non-text and never passed to OCR. The ink-class counts the detector already computes are the
+first test; repetition and density are the second.
+
+## Principle: discounted lines are not rendered
+
+**Owner:** "as a matter of principle you should stop rendering the discounted lines."
+
+From now on, discounted candidates are not drawn on the review pages or in the overview images:
+- no band;
+- no guide lines;
+- no straightened image.
+
+They stay in `lines.json` with their reason, so they can still be counted and audited. The review pages show only what
+would be passed to OCR.
