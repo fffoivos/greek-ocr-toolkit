@@ -78,6 +78,9 @@ svg text { font-family: var(--font-data); font-size: 11px; fill: var(--muted); }
 .overview { margin: 0; display: grid; gap: 6px; }
 .overview img { display: block; max-width: 100%; height: auto; border: 1px solid var(--rule); }
 .overview figcaption { font-size: .8rem; color: var(--muted); }
+.unrolled { display: grid; gap: 4px; overflow-x: auto; }
+.urow { display: flex; gap: 8px; align-items: center; font-size: .75rem; }
+.urow img { max-width: none; height: 80px; width: auto; border: 1px solid var(--rule); background: #fff; }
 .figlabel { margin: 6px 0 2px; font-size: .75rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 .tags { display: grid; grid-template-columns: repeat(2, max-content); justify-content: start; justify-items: start; gap: 6px 12px; }
 .tags button.tag { width: fit-content; max-width: 100%; }
@@ -243,6 +246,21 @@ function figure(r, scale, showMarks) {
   return svg;
 }
 
+function appendUnrolled(art, r) {
+  if (r.unrolled && r.unrolled.length) {                // the detector's lines from this segment, as the recogniser reads them
+    const lu = document.createElement('p'); lu.className = 'figlabel';
+    lu.textContent = `What the OCR reads — ${r.unrolled.length} line${r.unrolled.length === 1 ? '' : 's'} from this segment, straightened`;
+    const su = document.createElement('div'); su.className = 'unrolled';
+    for (const u of r.unrolled) {
+      const row = document.createElement('div'); row.className = 'urow';
+      const n = document.createElement('span'); n.className = 'muted'; n.textContent = String(u.i);
+      const im = new Image(); im.src = 'data:image/jpeg;base64,' + u.png; im.width = u.w; im.height = u.h; im.loading = 'lazy';
+      im.alt = `unrolled line ${u.i}`; row.append(n, im); su.appendChild(row);
+    }
+    art.append(lu, su);
+  }
+}
+
 function card(r, scale, showMarks) {
   const featured = r.section === 'fixes' && (r.label || '').startsWith('Owner example, original');
   const art = document.createElement('article');
@@ -252,6 +270,19 @@ function card(r, scale, showMarks) {
   head.innerHTML = `<h2 class="id"></h2><span class="label"></span>`;
   head.querySelector('.id').textContent = r.id;
   head.querySelector('.label').textContent = r.label;
+  if (r.plain) {                                        // a plain card: the drawn segment, its straightened lines, the review
+    const ch = document.createElement('div'); ch.className = 'chips';
+    const c1 = document.createElement('span'); c1.className = 'chip' + (r.n_lines ? (r.n_lines > 1 ? ' second' : '') : ' warn');
+    c1.textContent = r.n_lines ? `${r.n_lines} line${r.n_lines === 1 ? '' : 's'}` : 'no line'; ch.appendChild(c1);
+    art.append(head, ch);
+    const sc = document.createElement('div'); sc.className = 'scroll';
+    const im = new Image(); im.src = 'data:image/jpeg;base64,' + r.plain; im.alt = `segment ${r.id} with its lines`;
+    im.width = Math.round(r.width * scale); im.height = Math.round(r.height * scale); im.style.maxWidth = 'none';
+    sc.appendChild(im); art.appendChild(sc);
+    appendUnrolled(art, r);
+    art.appendChild(reviewBlock(r.id));
+    return art;
+  }
   const chips = document.createElement('div'); chips.className = 'chips';
   const add = (text, cls, title) => { const c = document.createElement('span'); c.className = 'chip ' + (cls || ''); c.textContent = text; if (title) c.title = title; chips.appendChild(c); };
   add(`skew ${fmt(r.angle_deg, 2)}°`, Math.abs(r.angle_deg) > 1 ? 'warn' : '', 'positive = rises to the right');
@@ -291,14 +322,15 @@ function card(r, scale, showMarks) {
     art.appendChild(ev);
   }
   if (r.prev) {                                          // a before / after card: the reviewed record first
-    const lb = document.createElement('p'); lb.className = 'figlabel'; lb.textContent = 'Before — the crop tools (what you reviewed)';
-    const sb = document.createElement('div'); sb.className = 'scroll'; sb.appendChild(figure(r.prev, scale, showMarks));
-    const la = document.createElement('p'); la.className = 'figlabel'; la.textContent = "After — Astra's page detector";
+    const lb = document.createElement('p'); lb.className = 'figlabel'; lb.textContent = 'Before — the crop tools on this segment';
+    const sb = document.createElement('div'); sb.className = 'scroll'; sb.appendChild(figure(Object.assign({ png: r.png, img_type: r.img_type }, r.prev), scale, showMarks));
+    const la = document.createElement('p'); la.className = 'figlabel'; la.textContent = "After — the page detector";
     art.append(lb, sb, la);
   }
   const sc = document.createElement('div'); sc.className = 'scroll';
   sc.appendChild(figure(r, scale, showMarks));
   art.appendChild(sc);
+  appendUnrolled(art, r);
   art.appendChild(reviewBlock(r.id));
   return art;
 }
@@ -434,6 +466,7 @@ function render() {
     left: ['Left column', 'Every text-layer segment whose box starts in the left column, top to bottom. Boxes that span both columns are here too (the tools split them at the rule).'],
     right: ['Right column', 'Every text-layer segment of the right column, top to bottom.'],
     heading: ['Headings and page furniture', 'Title, session heading, date, page numbers.'],
+    pixel: ['Segments', 'Every segment the pixel segmenter found on the page, in reading order.'],
     body: ['Segments', 'Every text-layer segment of the page, top to bottom (no column rule on this page).'],
     page_lede: DATA.lede || '' };
   document.getElementById('lede').textContent = heads[DATA.mode + '_lede'];
@@ -446,7 +479,7 @@ function render() {
       const d = document.createElement('p'); d.className = 'muted'; d.textContent = heads[r.section][1];
       h.append(t, d); main.appendChild(h);
     }
-    const fit = Math.min(1, (width - 34) / (LEFT + r.width + 12));
+    const fit = Math.min(1, (width - 34) / ((r.plain ? 0 : LEFT) + r.width + 12));
     main.appendChild(card(r, zoom ? 2 : fit, marks));
   }
 }
