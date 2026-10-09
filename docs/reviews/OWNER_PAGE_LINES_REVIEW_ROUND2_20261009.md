@@ -29,6 +29,12 @@ ids (`<key>-sNNNNN`), which are also indices into `<key>.segments.json`. Two ter
 5. **A line crosses into the other column**, and the crossing check did not notice.
 6. **Text is missed where the rule detector takes it for a rule:** a darker grey corner of the page, and the curled
    starts of lines next to the binding.
+7. **Illustrations and ornaments get lines.** The owner calls this a main issue: "ideally we would avoid those that
+   are not letters".
+8. **A letter-spaced heading is broken:** its first letter is split off at a wide letter gap.
+
+**Open problem, not for this round:** a large first capital (drop cap) spanning several lines. See the end of the
+document.
 
 ## 1. The four font lines
 
@@ -138,6 +144,24 @@ Measured:
   or font lines. Ideally the unrolled image shows the stamp faintly or not at all.
 - Ring lettering is rotated and follows a circle. It fails the "same orientation as its neighbours" test as well as
   the faintness test below.
+
+### an-3352d912f2e9-p000104-s00019: text printed over the stamp is not detected
+
+**Owner:** "it also has a watermark which the letters are not detected on top of it."
+
+This is the opposite failure to p000047: here the text over the stamp is lost. The "watermark" is the same round
+library stamp, at the bottom right of the page.
+
+Measured:
+- Where the stamp lies (x ≳ 950, y 1600–1900), the pixel segmenter cuts the text into narrow slivers (segments
+  s00020–s00029, 6–67 px wide).
+- Line 27 («ἀγροικίας, ἧκεν ὡς αὐτὸν εἰς ἄστυ. ὁμοιωθεὶς ἀν-») stops at x 989, and line 28 («θρώπῳ, καὶ παρ' αὐτῷ
+  κατήχθη. Τῆς δὲ τῶν βοῶν») stops at x 947. The printed text runs on to about x 1290.
+- Over the stamp there are only fragments: lines 29–33, each 5–60 px long, with 1–4 components.
+- «Τῆς δὲ τῶν βοῶν» and the catchword «ἀπω-» get no line.
+
+**Requirement:** this is the case covered above, "the text line keeps its full extent". Text printed over a stamp or
+watermark is text. The stamp must neither carry lines of its own nor cut the text lines that cross it.
 
 ### Show-through, ghosts and faint pages
 
@@ -252,6 +276,76 @@ Measured:
 - A curl at the start of a line is the same problem as the curl at the end, which the end-bend scorer (a4a1421)
   already handles on crops.
 
+## 7. Illustrations and ornaments
+
+### an-1f8e7d022643-p000003: the ornaments of a title page
+
+**Owner:** "The main issue are illustrations in an-1f8e7d022643-p000003 seems to cause a lot of issues; ideally we
+would avoid those that are not letters."
+
+The page is the opening of «ΑΚΟΛΟΥΘΙΑ ΤΟΥ ΑΓΙΟΥ ΕΝΔΟΞΟΥ ΝΕΟΜΑΡΤΥΡΟΣ ΚΩΝΣΤΑΝΤΙΝΟΥ». It carries:
+- a printed headpiece at the top: two vine borders and a floral band;
+- a dotted rule under the title;
+- a picture initial «Τ» (a building inside a frame);
+- a decorated initial «Μ»;
+- the library stamp at the bottom right.
+
+Measured:
+- The headpiece (y 123–394) carries **10 lines** (lines 1–10): x-heights 27–44 px against the page's 28, support 0–9
+  components, mostly borrowed geometry. They come from the pixel segmenter's segments s00000–s00007.
+- Line 0 sits on the scan edge (x 6–10).
+- The decorated «Μ» gets a fragment line (line 26, x 161–185).
+- The dotted rule (segment s00013) correctly gets no line.
+
+The brief already put these out of scope as text ("Illustrations, ornaments, stamps and scan borders are not text and
+get no lines"). The detector does not yet tell them apart.
+
+**Requirement:**
+- Tell letter-like ink from ornament before lines are formed, at the component level. Ornament components are:
+  - larger and denser than letters of the surrounding size;
+  - repeated in regular bands (vines, fleurons);
+  - without the letter spacing, x-height band or shared baseline of a text line.
+- Ornaments, pictures and the frames of decorated initials get no lines and no segments.
+- They must not move the geometry of the text lines next to them (the shared page geometry must not pool them).
+- Where an initial is a real letter inside a picture («Τ» here), the letter belongs to its line. If that cannot be
+  done yet, it falls under the drop-capital open problem below; it must not produce a fragment line.
+
+## 8. A letter-spaced heading
+
+### an-1f8e7d022643-p000003: «Α Κ Ο Λ Ο Υ Θ Ι Α»
+
+**Owner:** "and also the unusual spacing between letters at ΑΚΟΛΟΥΘΙΑ."
+
+Measured:
+- The heading is set in capitals about 81 px tall, with wide letter spacing.
+- Its first letter «Α» (x 101–178) became a segment of its own (s00009) and a line of its own (line 12). That line has
+  1 component and borrowed geometry with a 28 px x-height, the page's body size, not the heading's.
+- The rest, «ΚΟΛΟΥΘΙΑ», is line 11 (segment s00010, x 258–1426, x-height 81).
+- The gap between «Α» and «Κ» is 80 px: about one letter of the heading, but almost three x-heights of the page's
+  body text.
+
+**Requirement:**
+- Gaps are judged against **the line's own letter size and its own letter spacing**, not the page's body x-height.
+  A gap no wider than the heading's own spacing between letters is not a word or column break.
+- A column gap must run down the column, not only across one or two lines.
+- A heading stays one line from its first letter to its last.
+
+## Open problem, not for this round: large first capitals (drop caps)
+
+### an-3352d912f2e9-p000104-s00019
+
+**Owner:** "is very special it has a large first capital letter, we should leave this as an open problem for now, but
+we might need to consider it later."
+
+What happens now:
+- The paragraph «Ἑρμῆς βουλόμενος τὴν Τειρεσίου μαντικὴν …» opens with a drop capital «Ε» two lines tall.
+- No line includes it: line 25 starts at x 288 and line 26 at x 254, to the right of the capital.
+- The same page has a second drop capital «Ε», at «Ἑρμῆς γνῶναι βουλόμενος …». The picture initial on
+  an-1f8e7d022643-p000003 (section 7) is of the same kind.
+
+Not required this round. To be decided later: whether the capital is read as the first letter of the first line,
+handled as a separate one-letter item, or left to the layout stage.
+
 ## Checks for the next round
 
 Report per page, on all 48 development pages, then on the held-out pages:
@@ -274,8 +368,11 @@ Report per page, on all 48 development pages, then on the held-out pages:
 6. **Column crossings:** the count, measured against the full-height column boundaries (must be 0).
 7. **Missed text:** ink of text size left without a line, and the share of the page marked as rule. Report both per
    page.
-8. **The checks already in the brief:** foreign ink, boundary overlaps (0) and broken lines (~0).
-9. **Every case in the table below, by name:** what the new output does there, with its image.
+8. **Non-text ink:** lines and segments on ornaments, pictures, stamps and scan edges (should be 0), and text lines
+   cut short where a stamp or watermark crosses them (should be 0).
+9. **Headings:** printed lines broken into more than one line at a letter gap (should be 0).
+10. **The checks already in the brief:** foreign ink, boundary overlaps (0) and broken lines (~0).
+11. **Every case in the table below, by name:** what the new output does there, with its image.
 
 ## Every case the owner named
 
@@ -295,3 +392,7 @@ Report per page, on all 48 development pages, then on the held-out pages:
 | 12 | s2-49598b2e848ab1f0ee1e-p00001 | s00019 | a line from the opposite column wrongly connected | 5 |
 | 13 | s2-74cdb23a34ca4a6cd01e-p00002 | bottom left corner | not detected at all | 6 |
 | 14 | s2-3229200bf47ca465a42d-p00004 | start of every line | first characters missed where the line curves | 6 |
+| 15 | an-1f8e7d022643-p000003 | headpiece, decorated initials | illustrations cause many issues; avoid what is not letters (a main issue) | 7 |
+| 16 | an-1f8e7d022643-p000003 | «ΑΚΟΛΟΥΘΙΑ» | unusual spacing between the letters | 8 |
+| 17 | an-3352d912f2e9-p000104 | s00019, text over the stamp | letters on top of the watermark not detected | 3 |
+| 18 | an-3352d912f2e9-p000104 | s00019, first letter | large first capital: open problem, later | open |
