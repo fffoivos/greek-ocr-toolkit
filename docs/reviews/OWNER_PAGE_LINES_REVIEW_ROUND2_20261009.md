@@ -28,8 +28,10 @@ ids (`<key>-sNNNNN`), which are also indices into `<key>.segments.json`. Two ter
    page is smooth, and so must the regions be.
 5. **Lines cross into the other column, and across the fold of a two-page spread**, and the crossing check did not
    notice.
-6. **Text is missed where the rule detector takes it for a rule:** a darker grey corner of the page, and the curled
-   starts of lines next to the binding.
+6. **Text is missed:**
+   - mostly where the rule detector takes text for a rule: a darker grey corner of the page, the curled starts of lines
+     next to the binding, text printed over a stamp;
+   - also an all-capital running head.
 7. **Illustrations and ornaments get lines.** The owner calls this a main issue: "ideally we would avoid those that
    are not letters".
 8. **A letter-spaced heading is broken:** its first letter is split off at a wide letter gap.
@@ -182,6 +184,18 @@ Measured:
   or font lines. Ideally the unrolled image shows the stamp faintly or not at all.
 - Ring lettering is rotated and follows a circle. It fails the "same orientation as its neighbours" test as well as
   the faintness test below.
+
+### an-d6fd2cf2f618-p000047: the text under the stamp is lost
+
+**Owner:** "header and text over watermark is not detected an-d6fd2cf2f618-p000047." (The header is in section 6.)
+
+Measured:
+- Six text lines cross the stamp: lines 30 and 32–36. Each stops where the stamp begins, at x 754–907, while the printed
+  text runs on to x ≈ 1095.
+- What is lost: «… τὸν φίλον ἀνα-», «… ἀπολογησάμενος συγ-», «… δικαίως ὀργίζοιο.», «… φίλον ἔρις ἐμπέ-», «…
+  ἀκαιρίμαν, τοῦτο», «… ἀναιδῶς πρόφερε,» and the catchword «ἀμνη-».
+- The rule mask covers 30% of the stamp area (x 780–1178, y 1450–1850), and with it the letters printed there.
+- Over the stamp there are only fragment lines on the stamp's lettering (lines 29, 31 and 37–42; see above).
 
 ### an-3352d912f2e9-p000104-s00019: text printed over the stamp is not detected
 
@@ -357,7 +371,11 @@ On both spreads the scanned edge of the book block on the left (the stacked page
 many lines: 20 of the 77 lines on an-5c093c79d6bb-p000199 and 37 of the 96 on an-9ea1564fcf4f-p000013 end left of
 x 480 and 400. These are scan borders (section 7: not text, no lines).
 
-## 6. Text missed because the rule detector takes it for a rule
+## 6. Text missed
+
+Most of these cases come from the rule mask (`pixel_segments._rule_mask`) taking text for a rule. The two stamp cases
+in section 3 are the same; on p000047 the mask covers 30% of the stamp area. The last case here has a different
+cause.
 
 ### s2-74cdb23a34ca4a6cd01e-p00002: the bottom-left corner of the page
 
@@ -392,6 +410,23 @@ Measured:
 - A curl at the start of a line is the same problem as the curl at the end, which the end-bend scorer (a4a1421)
   already handles on crops.
 
+### an-d6fd2cf2f618-p000047: the running head «ΧΡΗΣΤΟΗΘΕΙΑ. 43»
+
+**Owner:** "header … is not detected."
+
+Measured:
+- The running head lies at y ≈ 63–139: 47 components, capitals about 34 px tall against a body x-height of 21.
+- Its ink is intact and not masked as rule. It falls inside pixel segment s00002 (y 73–284).
+- No line is made for it: the first line of the segment is the first text line (line 2, baseline y 166).
+- It is an all-capital line with no small letters from which to measure an x-height. That is the likely reason, not
+  yet traced in the code.
+
+**Requirement:**
+- Headings and running heads in capitals are lines. Their geometry comes from their capitals: their x-height is
+  unknown, so their mean line is borrowed from same-size type or left undetermined and recorded as such. They must not
+  be dropped.
+- Page numbers beside them belong to the same line or form their own short line, as the column structure says.
+
 ## 7. Illustrations and ornaments
 
 ### an-1f8e7d022643-p000003: the ornaments of a title page
@@ -425,6 +460,40 @@ get no lines"). The detector does not yet tell them apart.
 - They must not move the geometry of the text lines next to them (the shared page geometry must not pool them).
 - Where an initial is a real letter inside a picture («Τ» here), the letter belongs to its line. If that cannot be
   done yet, it falls under the drop-capital open problem below; it must not produce a fragment line.
+
+### an-d6002cf45e4d-p000058: an engraving and a picture initial
+
+**Owner:** "the image causes problems at an-d6002cf45e4d-p000058."
+
+The page carries:
+- a large engraving (ruins, figures, instruments), x ≈ 340–2440, y ≈ 280–1880;
+- the Cyrillic caption «НОВАЯ АЛЕКСАНДРІЯ»;
+- a framed woodcut initial (the «Н» of «Новая») at the bottom left;
+- five lines of Cyrillic text, the first four set beside the woodcut.
+
+Measured:
+- **The engraving:**
+  - The rule mask marks 36% of it as rule.
+  - The pixel segmenter cuts it into about 30 narrow vertical segments (s00000–s00034, many only 5–60 px wide).
+  - The detector puts **16 lines** in the picture (lines 0–16), each with 0–2 components and borrowed geometry.
+- **Regions stretched into the picture and the empty space:**
+  - The caption's line (line 17) has a region reaching up to y 1372, inside the engraving, and down to y 2487.
+  - The last text line's region (line 18) reaches up to y 2027 at its left end, 940 px above its baseline, where it
+    has no neighbour above.
+- **The woodcut initial:**
+  - The rule mask marks 86% of it as rule. It gets no line, which is right.
+  - The last text line, «въ небольшомъ шокмо перешейкѣ, межъ двухъ гаваней; на мѣ-», starts at x 542, but the
+    printed line starts at x ≈ 294. Its first word and a half, «въ небо…», have no line, although that ink is not
+    masked. The cause is not traced; the woodcut is directly above it.
+- **A broken line:** the line beside the woodcut that ends «… стѣснены» is broken into two lines (lines 22 and 23, the
+  page's broken pair).
+
+**Requirement:** as for the ornaments above.
+- The engraving and the woodcut frame get no segments and no lines.
+- Regions never extend into a picture. A line with no neighbour above or below takes the ordinary margin for its size,
+  not the empty space up to the next ink.
+- The text beside or under a picture keeps its full extent.
+- The woodcut's letter «Н» is the drop-capital open problem below.
 
 ## 8. A letter-spaced heading
 
@@ -518,3 +587,6 @@ Report per page, on all 48 development pages, then on the held-out pages:
 | 20 | an-9ea1564fcf4f-p000013 | all lines of both pages | lines of the two facing pages joined | 5 |
 | 21 | all pages | — | proposal: a distinct accent region, 2–3 accent lines + the 4 font lines | 1 |
 | 22 | an-a73d22211479-p000301 | bottom half, both columns | many unions across the column boundary | 5 |
+| 23 | an-d6002cf45e4d-p000058 | engraving, woodcut initial | the image causes problems | 7 |
+| 24 | an-d6fd2cf2f618-p000047 | running head «ΧΡΗΣΤΟΗΘΕΙΑ. 43» | header not detected | 6 |
+| 25 | an-d6fd2cf2f618-p000047 | text under the stamp | text over the watermark not detected | 3 |
