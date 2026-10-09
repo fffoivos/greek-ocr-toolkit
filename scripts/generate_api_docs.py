@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 CALLS={
-'build_structure':'structure = build_structure(line_records, cell_records, image.size, gutters=detected_gutters, rules=detected_rules)',
+'build_structure':'structure = build_structure(line_records, cell_records, image.size, gutters=detected_gutters, rules=detected_rules, page=image)',
 'join_pieces':'row = join_pieces(addressed_row_pieces, structure=structure)',
 'delivery_records':'records = delivery_records(line_records, structure=structure, granularity="default")',
 'render_structure':'overlay = render_structure(image, line_records, structure)',

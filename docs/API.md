@@ -611,13 +611,13 @@ boxes = letter_boxes(line_glyphs(Image.open("crop.png")))
 
 ### `greekocr.glyphs.line_structure.build_structure`
 
-`def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[int], *, gutters: Sequence=(), rules: Sequence[dict]=(), boundaries: Sequence[dict]=(), fold: dict | bool | None=None) -> dict`
+`def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[int], *, gutters: Sequence=(), rules: Sequence[dict]=(), boundaries: Sequence[dict]=(), fold: dict | bool | None=None, page: Image.Image | np.ndarray | None=None) -> dict`
 
 Add addresses to line/cell records in place without changing geometry.
 
 ```python
 from greekocr.glyphs.line_structure import build_structure
-structure = build_structure(line_records, cell_records, image.size, gutters=detected_gutters, rules=detected_rules)
+structure = build_structure(line_records, cell_records, image.size, gutters=detected_gutters, rules=detected_rules, page=image)
 ```
 
 ### `greekocr.glyphs.line_structure.join_pieces`

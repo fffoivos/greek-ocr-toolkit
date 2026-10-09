@@ -117,7 +117,8 @@ def _attach_structure(result, pieces=(), *, boundaries=()):
     lines=[l.to_record() for l in result.lines]
     cells=[p.to_record(i,(width,height),(width,height)) for i,p in enumerate(pieces)]
     result.structure=build_structure(lines,cells,(width,height),gutters=result.pixels.gutters,
-                                    rules=result.pixels.column_boundaries,boundaries=boundaries)
+                                    rules=result.pixels.column_boundaries,boundaries=boundaries,
+                                    page=result.pixels.gray)
     for obj,record in zip(result.lines,lines):
         obj.address={k:record[k] for k in ADDRESS}
         obj.neighbours.update({k:record['neighbours'][k] for k in ('left','right')})
@@ -221,7 +222,11 @@ def _tracks(stops, lines):
                 if top>bottom:
                     continue
                 ys=np.array([top,(top+bottom)/2,bottom])
-                if np.max(abs(_x(q,ys)-_x(b,ys)))<=.65*xh:
+                distance=np.max(abs(_x(q,ys)-_x(b,ys)))
+                same_whitespace=(b['kind']==q['kind']=='gutter' and
+                    distance <= .5*(b.get('width',0)+q.get('width',0))-
+                    .25*min(b.get('width',0),q.get('width',0)))
+                if distance<=.65*xh or same_whitespace:
                     match=group;break
             if match is not None:break
         if match is None:
@@ -262,7 +267,8 @@ def _fold(lines, width, height, boundaries):
 
 def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[int], *,
                     gutters: Sequence = (), rules: Sequence[dict] = (),
-                    boundaries: Sequence[dict] = (), fold: dict | bool | None = None) -> dict:
+                    boundaries: Sequence[dict] = (), fold: dict | bool | None = None,
+                    page: Image.Image | np.ndarray | None = None) -> dict:
     """Add addresses to line/cell records in place without changing geometry.
 
     Gutters are x0,y0,x1,y1 rectangles; rules use centre+slope*(y-height/2).
@@ -270,15 +276,20 @@ def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[
     fold uses that same schema; False forces a single leaf. None infers a fold
     only for a wide scan with a persistent central separation. Table row_source
     is retained before splitting, but hard boundaries always override it.
+    With page pixels, proposals must pass line-local spacing or original rule
+    ink validation before grouping. Without pixels boundaries are caller-
+    supplied constraints, explicitly marked unverified (useful for geometry
+    consumers with external boundary annotations).
     """
     width, height = map(int, image_size)
-    stops = [deepcopy(b) for b in boundaries]
+    stops = [deepcopy(b) for b in boundaries if fold is not False or b['kind']!='fold']
     stops += [_boundary('gutter', (a+b)/2, t, (a+b)/2, bot, width=b-a,
                         extent=[a,t,b,bot], source='detector') for a,t,b,bot in gutters]
     stops += [_boundary('rule', r['centre']+r['slope']*(r['top']-height/2), r['top'],
                         r['centre']+r['slope']*(r['bottom']-height/2), r['bottom'],
                         radius=r['radius'], source=r['kind']) for r in rules]
-    leaf_fold = None if fold is False else deepcopy(fold) if fold else _fold(lines,width,height,stops)
+    supplied_fold = next((b for b in stops if b['kind']=='fold'), None)
+    leaf_fold = supplied_fold or (None if fold is False else deepcopy(fold) if fold else _fold(lines,width,height,stops))
     if leaf_fold:
         leaf_fold['kind'] = 'fold'
         stops.append(leaf_fold)
@@ -288,6 +299,16 @@ def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[
         if not any(b['kind'] == q['kind'] and b['path'] == q['path'] for q in unique):
             unique.append(b)
     stops = unique
+    validator = None
+    rejected = []
+    if page is not None:
+        from .boundary_evidence import BoundaryEvidence
+        validator = BoundaryEvidence(page, lines)
+        if validator.ink.shape != (height,width):
+            raise ValueError('page pixels must match image_size')
+        for i,b in enumerate(stops):
+            b['proposal_id'] = b.get('id', f'proposal-{i:04d}')
+        stops, rejected = validator.validate(stops)
     for i,b in enumerate(stops):
         b['id'] = f'boundary-{i:04d}'
     tracks=_tracks(stops,lines)
@@ -340,7 +361,7 @@ def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[
         # used only if no boundary exists on either side (indent preservation).
         signature = (side, left['track_id'] if left else 'image-left',
                      right['track_id'] if right else 'image-right')
-        if not left and not right:
+        if not left and not right and validator is None:
             signature += (l.get('column',0),)
         if signature not in columns:
             cid = f'{side}:column-{len(columns):04d}'
@@ -427,10 +448,14 @@ def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[
                 right=row['piece_indices'][pi+1] if pi+1<len(row['piece_indices']) else None)
     for c in col_list:
         c['reading_order']=col_order[c['id']]
+    crossings = [dict(validator.crossing(v['line_index'], b), discounted=v['discounted'])
+                 for v in violations for b in stops if b['id'] in v['boundary_ids']] if validator else []
     return dict(schema_version=1,image_size=[width,height],units='source pixels',coord_origin='TOPLEFT',
                 id_scope='one source image',neighbour_indices=dict(lines='lines.json',cells='cells.json'),
                 fold=leaf_fold,pages=pages,boundaries=stops,columns=col_list,
                 blocks=list(blocks.values()),rows=row_list,violations=violations,
+                boundary_validation='pixel-validated' if validator else 'caller-supplied-unverified',
+                rejected_boundaries=rejected,crossing_evidence=crossings,
                 boundary_tracks=[dict(id=g[0]['track_id'],boundary_ids=[b['id'] for b in g]) for g in tracks])
 
 
