@@ -7,6 +7,7 @@ crop fitter (including its end-bend scorer) remains the line evidence engine.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import copy
 from typing import Any, Sequence
 
 import numpy as np
@@ -557,6 +558,100 @@ def _line_contrast(p, lines):
             line.discounted = 'faint ink relative to page text and local paper'
 
 
+def _split_contrast_runs(p, lines):
+    """Separate a coherent faint tail from dark text before contrast scoring.
+
+    Use letter-sized components, not detached marks. A spatial change must
+    explain two internally consistent groups with a large photometric gap;
+    isolated light letters and uniformly faded lines are left intact.
+    """
+    rows=[]
+    for line in lines:
+        q=p.components[np.isin(p.components[:,5],line.component_ids)]
+        xh=line.xheight
+        body=q[(q[:,3]-q[:,1]>.55*xh)&(q[:,3]-q[:,1]<2.6*xh)
+               &(q[:,2]-q[:,0]<3*xh)&(q[:,4]>.07*xh*xh)]
+        if len(body)<6:
+            rows.append(line);continue
+        body=body[np.argsort(body[:,0])]
+        top=max(0,int(line.top.min()-xh));bottom=min(p.gray.shape[0],int(line.bottom.max()+xh))
+        paper=float(np.percentile(p.gray[top:bottom,line.x0:line.x1],90))
+        contrast=np.maximum(0,paper-body[:,6])
+        strong=float(np.percentile(contrast,85))
+        proposals=[]
+        for split in range(3,len(body)-2):
+            left,right=body[:split],body[split:]
+            if min(np.ptp(left[:,0]),np.ptp(right[:,0]))<2*xh:
+                continue
+            a,b=contrast[:split],contrast[split:]
+            dark,light=(a,b) if np.median(a)>np.median(b) else (b,a)
+            if (np.percentile(light,80)<.6*strong and np.percentile(dark,20)>.75*strong
+                    and np.median(light)<.5*np.median(dark)):
+                # Do not cut through a connected letter or ligature.
+                l,r=float(left[:,2].max()),float(right[:,0].min())
+                if l<=r:
+                    error=float(np.abs(a-np.median(a)).sum()+np.abs(b-np.median(b)).sum())
+                    proposals.append((error,(l+r)/2))
+        if not proposals:
+            rows.append(line);continue
+        cut=min(proposals)[1]
+        for own in (q[(q[:,0]+q[:,2])/2<cut],q[(q[:,0]+q[:,2])/2>=cut]):
+            if not len(own):continue
+            a,b=max(line.x0,int(own[:,0].min())),min(line.x1,int(own[:,2].max()))
+            if b<=a:continue
+            part=copy.copy(line);part.x0=a;part.x1=b
+            for name in CURVES:setattr(part,name,getattr(line,name)[a-line.x0:b-line.x0].copy())
+            part.component_ids=tuple(own[:,5].astype(int))
+            part.support=min(line.support,len(own))
+            rows.append(part)
+    return rows
+
+
+def _discount_nontext(p, lines):
+    """Reject unsupported punctuation bands and repeated solid non-letter ink.
+
+    Repetition alone is not a veto: rows of digits and letter-spaced headings
+    have both repeated shapes and regular spacing. Require either almost no
+    letter evidence or a dense, uniform run without typographic variation.
+    """
+    for line in lines:
+        counts = line.ink_classes
+        bodies = sum(counts.get(k, 0) for k in
+                     ('body_on_baseline', 'body_with_descender', 'tall_body'))
+        total = sum(counts.values())
+        reason = None
+        if not bodies:
+            reason = 'no letter bodies'
+        elif (total >= 12 and bodies < .2*total and line.support < .25*total
+              and not counts.get('mark_above', 0)):
+            reason = 'non-text: almost no letter bodies in component band'
+        elif line.support < 3 and line.x1-line.x0 > 5*line.xheight:
+            reason = 'non-text: incoherent component band'
+        q = p.components[np.isin(p.components[:,5], line.component_ids)]
+        if len(q) >= 10 and not counts.get('mark_above',0):
+            q = q[np.argsort(q[:,0])]
+            wh = q[:,2:4]-q[:,:2]
+            fill = q[:,4]/np.prod(wh,axis=1)
+            pitch = np.diff((q[:,0]+q[:,2])/2)
+            regular = all(np.std(v)/max(1.,np.mean(v)) < .12
+                          for v in (wh[:,0],wh[:,1],pitch))
+            if regular and np.median(fill) > .68 and np.median(wh[:,0]) > .6*line.xheight:
+                reason = 'non-text: repeated dense non-letter shapes'
+        if reason:
+            line.discounted = line.discounted or reason
+    bands = [l for l in lines if l.discounted and 'non-text' in l.discounted
+             and l.x1-l.x0 > 10*l.xheight]
+    for line in lines:
+        if line.discounted or sum(line.ink_classes.get(k,0) for k in
+                ('body_on_baseline','body_with_descender','tall_body')) > 2:
+            continue
+        for band in bands:
+            gap=max(line.x0-band.x1,band.x0-line.x1,0)
+            if gap < line.xheight and abs(np.median(line.baseline)-np.median(band.baseline)) < .5*line.xheight:
+                line.discounted='non-text: fragment of unsupported ornament band'
+                break
+
+
 def _extended(line, name, xs):
     values = getattr(line, name)
     grid = np.arange(line.x0, line.x1)
@@ -948,14 +1043,10 @@ def segment_page(page: Image.Image | NDArray[Any], hints: Sequence[Sequence[floa
     owners = _assign(p, models)
     lines = _make_lines(p, models, owners, boxes)
     lines = _coalesce_lines(p, lines)
+    lines = _split_contrast_runs(p, lines)
     _line_contrast(p, lines)
     fit_guides(p, lines)
-    for line in lines:
-        bodies = sum(line.ink_classes.get(k, 0) for k in ('body_on_baseline', 'body_with_descender', 'tall_body'))
-        if not bodies:
-            line.discounted = line.discounted or 'no letter bodies'
-        if line.support < 3 and line.x1-line.x0 > 5*line.xheight:
-            line.discounted = line.discounted or 'non-text: incoherent component band'
+    _discount_nontext(p, lines)
     _final_columns(lines)
     lines = _reading_order(lines)
     _boundaries(lines, *p.gray.shape, pixels=p)

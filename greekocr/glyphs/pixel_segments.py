@@ -100,7 +100,7 @@ def _rule_mask(ink, xh):
     return result[ys[:, None], xs]
 
 
-def _continue_rules(barriers, xh):
+def _continue_rules(barriers, xh, evidence=None, protected=None):
     """Fit collinear thin pieces in page coordinates, including tilted rules."""
     h,w=barriers.shape
     labels,_=ndi.label(barriers)
@@ -146,12 +146,96 @@ def _continue_rules(barriers, xh):
                 slope,centre=np.polyfit(yy+t-h/2,xx+a,1)
         path=centre+slope*(np.arange(h)-h/2)
         radius=max(1.,min(.25*xh,float(np.median(own[:,4]))/2))
+        top, bottom = 0, h
+        intrudes = protected is None
+        if protected is not None and len(protected):
+            mid = (protected[:,1]+protected[:,3])/2
+            px = centre+slope*(mid-h/2)
+            intrudes = np.count_nonzero((px > protected[:,0]) & (px < protected[:,2])) >= 3
+        if evidence is not None and intrudes:
+            # A fitted direction is a proposal, not permission to extend a
+            # binding edge through curled letters. Verify support in the
+            # original ink, including the spaces between detected fragments.
+            rows = np.arange(h)
+            support = np.zeros(h, bool)
+            for dx in range(-int(np.ceil(radius)), int(np.ceil(radius))+1):
+                xx = np.rint(path+dx).astype(int)
+                ok = (xx >= 0) & (xx < w)
+                support[ok] |= evidence[rows[ok], xx[ok]]
+            if support.mean() < .5:
+                continue
         for dy in range(-int(np.ceil(radius)),int(np.ceil(radius))+1):
             xx=np.rint(path+dy).astype(int); ok=(xx>=0)&(xx<w)
+            ok &= (np.arange(h)>=top)&(np.arange(h)<bottom)
             barriers[np.flatnonzero(ok),xx[ok]]=True
         result.append(dict(kind='continued_rule', centre=centre, slope=float(slope),
-                           radius=radius, top=0, bottom=h, support_rows=score))
+                           radius=radius, top=top, bottom=bottom, support_rows=score))
     return result
+
+
+def _direct_rules(ink, xh, existing):
+    """Find long oblique strokes without relying on axis-aligned openings.
+
+    The angular resolution is finer than one stroke width over the page.
+    Original-resolution row support rejects chance alignments of letter stems.
+    These are column stops only over the measured stroke, not page orientation.
+    """
+    import cv2
+    h,w = ink.shape
+    scale = min(1., 8/xh)
+    small = ndi.zoom(ndi.maximum_filter(ink, max(1, int(np.ceil(1/scale))))
+                     .astype(np.uint8), scale, order=0)
+    paths = cv2.HoughLinesP(small, 1, min(np.pi/1800, .2*xh/h),
+                           threshold=max(2, round(10*xh*scale)),
+                           minLineLength=max(12*xh, .1*h)*scale,
+                           maxLineGap=.8*xh*scale)
+    if paths is None:
+        return []
+    found=[]
+    for x0,y0,x1,y1 in sorted(paths.reshape(-1,4), key=lambda v:-abs(int(v[3])-int(v[1]))):
+        x0,y0,x1,y1 = np.array([x0,y0,x1,y1],float)/scale
+        if abs(y1-y0)<12*xh or abs(x1-x0)>.12*abs(y1-y0):
+            continue
+        slope=(x1-x0)/(y1-y0);centre=x0+slope*(h/2-y0)
+        if any(abs(centre-r['centre'])<xh and min(y0,y1)>=r['top']-2*xh
+               and max(y0,y1)<=r['bottom']+2*xh for r in existing+found):
+            continue
+        top,bottom=max(0,round(min(y0,y1))),min(h,round(max(y0,y1))+1)
+        yy=np.arange(h);path=centre+slope*(yy-h/2)
+        # Refine the Hough quantisation using original-resolution contacts.
+        offsets=np.arange(-round(.6*xh),round(.6*xh)+1)
+        xx=np.rint(path[:,None]+offsets).astype(int)
+        sample=ink[yy[:,None],np.clip(xx,0,w-1)] & (xx>=0) & (xx<w)
+        count=sample.sum(axis=1)
+        own=(count>0)&(count<.65*xh)&(yy>=top)&(yy<bottom)
+        if own.sum()<.75*(bottom-top):
+            continue
+        contacts=(sample*xx).sum(axis=1)/np.maximum(1,count)
+        slope,centre=np.polyfit(yy[own]-h/2,contacts[own],1)
+        # Extend the *evidence* search before fitting the whole stroke. A
+        # quantised partial Hough segment otherwise misses its far endpoint.
+        for _ in range(2):
+            xx=np.rint(centre+slope*(yy[:,None]-h/2)+offsets).astype(int)
+            sample=ink[yy[:,None],np.clip(xx,0,w-1)] & (xx>=0) & (xx<w)
+            count=sample.sum(axis=1)
+            own=(count>0)&(count<.65*xh)&(yy>=top-2*xh)&(yy<bottom+2*xh)
+            contacts=(sample*xx).sum(axis=1)/np.maximum(1,count)
+            slope,centre=np.polyfit(yy[own]-h/2,contacts[own],1)
+        path=centre+slope*(yy-h/2)
+        radius=max(1.,float(np.percentile(count[own],75))/2+.08*xh)
+        hits=np.zeros(len(yy),bool)
+        for dx in range(-int(np.ceil(radius)),int(np.ceil(radius))+1):
+            xx=np.rint(path+dx).astype(int);ok=(xx>=0)&(xx<w)
+            hits[ok] |= ink[yy[ok],xx[ok]]
+        if hits[top:bottom].mean()<.85:
+            continue
+        supported=ndi.uniform_filter1d(hits.astype(float),max(1,round(4*xh)))>.75
+        spans=[(a,b) for a,b in _runs(supported) if a<=.5*(top+bottom)<b]
+        if spans:
+            top,bottom=spans[0]
+        found.append(dict(kind='direct_rule',centre=float(centre),slope=float(slope),
+                          radius=radius,top=top,bottom=bottom,support_rows=int(hits.sum())))
+    return found
 
 
 def _structural_gutters(clean, barriers, xh):
@@ -179,12 +263,25 @@ def _structural_gutters(clean, barriers, xh):
     gutters = []
     for a, b in _runs(lanes | rules):
         is_rule = rules[a:b].any()
-        if a == 0 or b == w or (not is_rule and b-a < 1.5*xh):
+        # Persistence across the page, rather than a large local word gap,
+        # supplies the column evidence. A one-x-height lane can separate two
+        # densely set columns; requiring 1.5 erased such boundaries.
+        if a == 0 or b == w or (not is_rule and b-a < xh):
             continue
         left = clean[:, max(0, a-round(15*xh)):a]
         right = clean[:, b:min(w, b+round(15*xh))]
         if left.sum() < 8*xh*xh or right.sum() < 8*xh*xh:
             continue
+        if not is_rule and b-a < 1.5*xh:
+            # Narrow whitespace needs two substantial text blocks, not a
+            # repeated indent or a short prefix at the edge of a paragraph.
+            # Wider established gutters and printed rules need no such vote.
+            if min(clean[:,:a].sum(),clean[:,b:].sum()) < .2*clean.sum():
+                continue
+            inset=max(1,round(.15*xh))
+            a,b=a+inset,b-inset
+            if b<=a:
+                continue
         gutters.append((a, 0, b, h))
     return gutters
 
@@ -351,12 +448,24 @@ def prepare_pixels(page: Image.Image | NDArray[Any]) -> PixelPage:
                     clean[region[1]:region[3],left:right]=False
                     barriers[region[1]:region[3],left:right]=False
                     raw_rules[region[1]:region[3],left:right]=False
-    boundaries = _continue_rules(raw_rules, xh)
+    evidence = strong & rule_ids[labels]
+    # Binding shadows can have a straight edge, but not a thin stroke. Test
+    # the complete horizontal ink run before trusting its edge as a rule.
+    broad = ndi.binary_opening(evidence, structure=np.ones((1,max(2,round(.65*xh)))))
+    evidence &= ~broad
+    for a,t,b,bot in nontext:
+        evidence[t:bot,a:b] = False
+    protected=cc[letter_shape & (heights>.6*xh) & (cc[:,4]>.08*xh*xh)]
+    boundaries = _continue_rules(raw_rules, xh, evidence, protected)
+    established=_structural_gutters(clean,barriers,xh)
+    additions=_direct_rules(evidence, xh, boundaries)
+    boundaries += [r for r in additions if not any(a<=r['centre']<=b for a,_,b,_ in established)]
     for boundary in boundaries:
         yy=np.arange(h)
         path=boundary['centre']+boundary['slope']*(yy-h/2)
         for dx in range(-int(np.ceil(boundary['radius'])),int(np.ceil(boundary['radius']))+1):
             xx=np.rint(path+dx).astype(int);ok=(xx>=0)&(xx<w)
+            ok &= (yy>=boundary['top'])&(yy<boundary['bottom'])
             barriers[yy[ok],xx[ok]]=True
     clean &= ~barriers
     labels, _ = ndi.label(clean, structure=EIGHT)
