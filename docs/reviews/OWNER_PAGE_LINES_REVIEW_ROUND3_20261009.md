@@ -84,3 +84,28 @@ Requirement:
 - A gutter is declared only where there is no text, never over a column of row numbers and names.
 - Tables stay in scope as before: text pieces that never cross a rule or a wide gap. Table structure itself is
   Docling's job.
+
+## 29. s2-9de6cda8f03f0fc60a58-p00005: lines still joined across the columns
+
+**Owner:** "s2-9de6cda8f03f0fc60a58-p00005 still has connections among the columns."
+
+The page (Vouli, page 485) has two columns separated by a thin printed vertical rule at x ≈ 1683. The text of both
+columns comes close to the rule.
+
+Measured on the round-3 output:
+- **Lines across the rule.** Of the 96 active lines, **37 run across the rule** (more than 30 px either side), from
+  the top of the page (baseline y 116) to the bottom (y 4284). Most active lines are 2,900–2,930 px wide on a 3,323 px
+  page, so each spans both columns.
+- **Segments across the rule.** 8 of the 38 pixel segments span the rule.
+- **The rule is faint and thin.** Along x 1683 the mean grey is 172, against paper at 252. It is darker than 140 in
+  only 48% of the rows between y 300 and 4300.
+- **The rule is barely marked.** The rule mask marks only 7% of those rows as barrier.
+- **No gutter is found.** The gap beside the rule is too narrow for a full-height gutter, so nothing stops the joins.
+- **The checks report 0 rule or gutter crossings.**
+
+Requirement: the same as case 26 and round-2 section 5, on a different kind of page.
+- A faint, thin, broken rule running the full height between two text blocks is a column boundary. Find it from the
+  whole column structure: two blocks with their own left and right margins, and a straight line of ink between them,
+  even where it is light.
+- It must hold before any line is joined.
+- The crossing check must use the same boundary.
