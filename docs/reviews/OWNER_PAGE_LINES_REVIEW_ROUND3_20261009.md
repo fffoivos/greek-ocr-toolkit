@@ -182,6 +182,9 @@ Requirement (round 2, section 6 and the guide-line design in section 1):
 | 30 | s2-d1ed1c2db37f431f4acb-p00001 | whole page | lines joined across the columns (slanted rule) | 10 (show-through, same page) |
 | 31 | s2-3229200bf47ca465a42d-p00004 | bottom, lines 32–46 | first characters still missed | 14 |
 | 32 | an-1436ae03653f-p000163 (50-page set) | s00039, ornamental border | non-text line passed to OCR | 7 (ornaments) |
+| 33 | an-7a2b17a3fb0f-p000200 | the spread's tables | cells missed, fused, or with characters missed | tables |
+| 34 | an-a3c2bdf81256-p000112, s2-80513ae109b4f749ca58-p00003 (50-page set) | upper half | lower-half column boundary enforced in the upper half | — |
+| 35 | s2-6419488b7f8e69fd20da-p00001 (50-page set) | whole page | no check of writing orientation (sideways table) | — |
 
 
 ## Tables: first find out what Docling needs
@@ -247,3 +250,70 @@ From now on, discounted candidates are not drawn on the review pages or in the o
 
 They stay in `lines.json` with their reason, so they can still be counted and audited. The review pages show only what
 would be passed to OCR.
+
+## Tables: the owner's review of the table pages
+
+Review page: https://claude.ai/artifact/WNgiJyBPKUiULoEZBoQiwV. It shows 8 table pages run with the round-3 code, and
+only the lines passed to OCR: 3 development pages and 5 from the 50-page set. What Docling needs for tables is
+established in `docs/research/DOCLING_TABLES_20261009.md`:
+- **Layout:** Docling finds the table region from the image alone. Our text pieces count as table text only if more
+  than 80% of each lies inside it.
+- **Table structure:** TableFormer never splits a text piece. Every piece must lie inside one table cell, and all the
+  text must be found.
+
+### 33. an-7a2b17a3fb0f-p000200: no good cell recognition
+
+**Owner:** "there is no good cell recognition an-7a2b17a3fb0f-p000200, many cells are missed, some are fused, some
+are detected but individual chars are missed."
+
+The page is a two-page spread of navigation tables.
+
+Measured on the round-3 output:
+- **The left-hand table is almost entirely missed.** Of 414 active lines, 14 lie in the left half of the spread, 397
+  in the right half, and 3 cross the fold. Docling's layout model finds both tables at full size, so the left one would
+  reach the table model nearly empty.
+- **Fused cells:** owner's observation. Their exact count needs the cell annotations of the acceptance test.
+- **Characters missed inside detected cells:** owner's observation. In Sol's word-approximation experiment, the
+  detected lines of this page were split into 833 pieces, against 408 lines.
+
+What Docling needs here (research, section B): one piece per table cell, or several pieces within a cell, never across
+two cells. Every cell's text must be found, since Docling does not recover missed text from the image.
+
+### 34. an-a3c2bdf81256-p000112 and s2-80513ae109b4f749ca58-p00003: a column boundary from the lower half enforced in the upper half
+
+**Owner:** "for some like an-a3c2bdf81256-p000112 and s2-80513ae109b4f749ca58-p00003 it seems a boundary is detected
+in the second half of the page but it is also enforced where it shouldnt at the top half."
+
+Measured on the round-3 output:
+- **s2-80513ae109b4f749ca58-p00003.** The lower half is a two-column vote list with a gutter at x ≈ 1040–1057. The
+  upper half is ordinary text running the full width (x ≈ 325–1780). Every full-width line of the upper half is cut at
+  that same place, into a piece ending at x ≈ 1040 and a piece starting at x ≈ 1057 (e.g. baselines y 212, 281, 350,
+  417, 486). The lower half's column boundary was carried up through the prose.
+- **an-a3c2bdf81256-p000112.** Below, the page has grammar paradigms in columns. Every line of the upper half is also
+  cut at x ≈ 606–646 (e.g. baselines y 223, 285, 348), the same place as the paradigm columns' gap below.
+
+Requirement:
+- A column boundary holds only over the vertical extent where its gap or rule actually exists. It starts and ends
+  where the column structure starts and ends.
+- A full-width line that runs through that x position elsewhere on the page stays one line.
+- Columns are found per block of the page, not per page. This is the same column structure that cases 26, 29 and 30
+  require; here the error is the opposite one: a boundary where there is none.
+
+### 35. s2-6419488b7f8e69fd20da-p00001: no check of the writing's orientation
+
+**Owner:** "also we have no capacity to check for orientation of writting, which we generally should be doing
+s2-6419488b7f8e69fd20da-p00001."
+
+The page is a ruled table printed sideways: its text runs vertically on the scan.
+
+Measured on the round-3 output:
+- The detector still reads it as horizontal lines. It produced 368 candidates (327 active) with a median length of
+  45 px, against a median x-height of 26 px.
+- 69% of the active lines are shorter than three x-heights. They are slices across the vertical text, not lines.
+
+Requirement:
+- Detect the orientation of the writing (0°, 90°, 180°, 270°), per page and per block, before line detection. Rotate
+  the block so that its lines are horizontal, and map the results back to page coordinates.
+- A page or block whose orientation cannot be determined is reported as such, not read as horizontal.
+- Open question for research: how Docling handles rotated pages and rotated tables. Does its layout model or table
+  model expect the page already rotated? Which coordinate frame must our pieces then be in?
