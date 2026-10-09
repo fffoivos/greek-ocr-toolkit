@@ -5,6 +5,13 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 CALLS={
+'page_statistics':'result = page_statistics(image, q1_line_records, page_key="page-1", book_id="book-1", structure=q1_structure)',
+'book_statistics':'book = book_statistics(measured_pages, book_id="book-1")',
+'corpus_statistics':'corpus = corpus_statistics(measured_pages)',
+'write_statistics':'paths = write_statistics(result, "statistics-output")',
+'render_glyph_statistics':'overlay = render_glyph_statistics(image, result)',
+'render_book_statistics':'figure = render_book_statistics(book["stats"])',
+
 'build_structure':'structure = build_structure(line_records, cell_records, image.size, gutters=detected_gutters, rules=detected_rules, page=image)',
 'join_pieces':'row = join_pieces(addressed_row_pieces, structure=structure)',
 'delivery_records':'records = delivery_records(line_records, structure=structure, granularity="default")',

@@ -1101,6 +1101,72 @@ from greekocr.glyphs.report import line_record
 record = line_record("crop.png", priors=priors)
 ```
 
+### `greekocr.glyphs.statistics.page_statistics`
+
+`def page_statistics(image: Image.Image | np.ndarray, lines: Sequence[dict[str, Any]], *, page_key: str, book_id: str | None=None, structure: dict[str, Any] | None=None) -> dict[str, Any]`
+
+Measure a page using Q1 line records, returning `glyphs` and JSON-ready `stats`; inputs are never mutated.
+
+```python
+from greekocr.glyphs.statistics import page_statistics
+result = page_statistics(image, q1_line_records, page_key="page-1", book_id="book-1", structure=q1_structure)
+```
+
+### `greekocr.glyphs.statistics.book_statistics`
+
+`def book_statistics(pages: Sequence[dict[str, Any]], *, book_id: str) -> dict[str, Any]`
+
+Return book aggregates and copied page tables enriched with independent, leave-one-page-out references.
+
+```python
+from greekocr.glyphs.statistics import book_statistics
+book = book_statistics(measured_pages, book_id="book-1")
+```
+
+### `greekocr.glyphs.statistics.corpus_statistics`
+
+`def corpus_statistics(pages: Sequence[dict[str, Any]]) -> dict[str, Any]`
+
+Return the page summary table and explicitly page- and glyph-weighted descriptive readability scores.
+
+```python
+from greekocr.glyphs.statistics import corpus_statistics
+corpus = corpus_statistics(measured_pages)
+```
+
+### `greekocr.glyphs.statistics.write_statistics`
+
+`def write_statistics(result: dict[str, Any], directory: str | Path) -> dict[str, str]`
+
+Write a page's glyph Parquet (JSONL without pyarrow) and stats JSON; never write Q1 geometry.
+
+```python
+from greekocr.glyphs.statistics import write_statistics
+paths = write_statistics(result, "statistics-output")
+```
+
+### `greekocr.glyphs.statistics.render_glyph_statistics`
+
+`def render_glyph_statistics(image: Image.Image, result: dict[str, Any]) -> Image.Image`
+
+Return a source-size glyph overlay: green intact, orange under, red over, cyan show-through, violet stamp.
+
+```python
+from greekocr.glyphs.statistics import render_glyph_statistics
+overlay = render_glyph_statistics(image, result)
+```
+
+### `greekocr.glyphs.statistics.render_book_statistics`
+
+`def render_book_statistics(stats: dict[str, Any]) -> Image.Image`
+
+Draw per-page size, contrast, coverage, candidate ink and readability traces with explicit scales.
+
+```python
+from greekocr.glyphs.statistics import render_book_statistics
+figure = render_book_statistics(book["stats"])
+```
+
 ### `greekocr.glyphs.synthetic.UnsupportedText`
 
 The font cannot draw every character of the requested text.
