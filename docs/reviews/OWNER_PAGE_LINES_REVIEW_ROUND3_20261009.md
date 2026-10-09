@@ -58,3 +58,29 @@ Measured on the round-3 output:
 
 This is how case 26 should come out: the faint background letters are discounted, and every line stays within its
 column. Any change made for case 26 must keep this page as good as it is.
+
+## 28. s2-831443dc5e6f1ccfbaf5-p00020: the first two table columns not detected
+
+**Owner:** "s2-831443dc5e6f1ccfbaf5-p00020 the first 2 columns are not detected."
+
+The page is a printed table (ΝΟΜΟΣ ΑΙΤΩΛΙΑΣ καὶ ΑΚΑΡΝΑΝΙΑΣ). Its first two columns are the row numbers 1–34 and the
+names of the δήμοι (Μεσολογγίου … Ἐχίνου), with the heading «ΔΗΜΟΙ».
+
+Measured on the round-3 output:
+- **Nothing starts left of x 637.** No pixel segment and no active line starts there: every one of the 167 segments
+  starts at x ≥ 637, and the leftmost active line starts at x 637.
+- **The pixel segmenter removes the ink there before segmenting.** Left of x 637 the page has 128,544 dark pixels,
+  but only 4,826 (4%) survive into the segmenter's ink.
+  - It is not the rule mask, which covers 6–7% of that strip, about as much as elsewhere on the page.
+  - The ink is dropped by the earlier rejection of frames, large graphics and scan borders (`pixel_segments`, the
+    `keep` mask).
+  - It also declares a full-height gutter at x 551–637, so the strip is treated as outside the text.
+- **Text above the table loses its start too.** The same strip holds the beginnings of «Διαφορὰ ἀναλογισθέντων
+  ποσῶν» and «Ἀναλογία ἀποδοτέου πλεονάσματος …». Their lines start only at the strip's edge.
+
+Requirement:
+- The table's outer frame and its rules are graphics. The text inside the frame is text, and must survive the frame
+  rejection. Rejecting a frame means removing its strokes, not everything near it or connected to it.
+- A gutter is declared only where there is no text, never over a column of row numbers and names.
+- Tables stay in scope as before: text pieces that never cross a rule or a wide gap. Table structure itself is
+  Docling's job.
