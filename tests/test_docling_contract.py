@@ -54,13 +54,13 @@ def test_page_replacement_boundary(tmp_path, monkeypatch):
     assert replaced.textline_cells[0].text == "Αθήνα"
     assert replaced.textline_cells[0].from_ocr
     assert replaced.textline_cells[0].rect.model_dump() == original_rect
-    assert [c.text for c in replaced.word_cells] == ["OCR word"]
-    assert replaced.has_words and not replaced.char_cells and not replaced.has_chars
+    assert replaced.word_cells == []  # prior OCR words are stale too
+    assert not replaced.has_words and not replaced.char_cells and not replaced.has_chars
     assert out[1].parsed_page is clean and clean.textline_cells[0].text == "keep"
     assert not options.force_full_page_ocr
     assert [(r["page"],r["status"]) for r in model.call_log] == [(1,"replaced"),(3,"unsupported")]
     assert model.unsupported_counts == {"no_textlayer_lines": 1}
-    options.mode = "detector"
+    options.recognition_mode = "detector"
     assert list(model(SimpleNamespace(input=SimpleNamespace(file=Path("doc.pdf"))), [pages[0]])) == [pages[0]]
     assert model.call_log[-1]['status'] == 'replaced'
     assert model.call_log[-1]['output_line_count'] == 0  # blank raster has no lines
@@ -86,7 +86,7 @@ def test_detector_recovers_raster_lines_before_layout(tmp_path, monkeypatch):
     page = SimpleNamespace(page_no=1, parsed_page=parsed, size=SimpleNamespace(height=100),
                            get_image=lambda **kwargs: image)
     options = GlossapiOcrOptions(checkpoint=tmp_path/'unused.pt', codec=tmp_path/'unused.json',
-                                replace_policy='all', mode='detector')
+                                replace_policy='all', recognition_mode='detector')
     model = GlossapiOcrModel(enabled=True, artifacts_path=None, options=options,
                             accelerator_options=AcceleratorOptions(device='cpu'))
     seen = []

@@ -5,6 +5,11 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 CALLS={
+'TextPiece':'piece = TextPiece((10, 20, 80, 45), 0, detected_line, "table-0", "piece-0")',
+'TextPiece.to_record':'record = piece.to_record(0, image.size, (page_width, page_height))',
+'table_text_pieces':'pieces = table_text_pieces(image, (10, 20, 800, 900))',
+'recognition_pieces':'pieces, regions, prefix = recognition_pieces(image, detected_lines, image_layout_regions)',
+'prepare_delivery':'result, pieces, regions = prepare_delivery(image, segmentation, image_layout_regions)',
 'ImageChecks':'checks = ImageChecks(**measured_image_values)',
 'Profile':'profile = Profile(**measured_profile_values)',
 'TextChecks':'checks = TextChecks(**measured_text_values)',
@@ -262,7 +267,8 @@ def generate():
         description=ast.get_docstring(node)
         if description:lines += [description.splitlines()[0],'']
         imported=owner or name
-        lines+=['```python','from '+module+' import '+imported,CALLS[name],'```','']
+        example=CALLS.get((owner+'.' if owner else '')+name,CALLS[name])
+        lines+=['```python','from '+module+' import '+imported,example,'```','']
     (ROOT/'docs/API.md').write_text('\n'.join(lines))
     print('documented',sum(1 for _ in api_entries()),'public callable entries')
 

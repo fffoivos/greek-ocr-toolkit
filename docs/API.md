@@ -954,6 +954,59 @@ from greekocr.glyphs.synthetic import usable_fonts
 fonts, rejected = usable_fonts(["GFSDidot-Regular.ttf", "XCharter-Regular.otf"])
 ```
 
+### `greekocr.glyphs.table_lines.TextPiece`
+
+A recognition crop and its tight TOPLEFT envelope in original pixels.
+
+```python
+from greekocr.glyphs.table_lines import TextPiece
+piece = TextPiece((10, 20, 80, 45), 0, detected_line, "table-0", "piece-0")
+```
+
+### `greekocr.glyphs.table_lines.TextPiece.to_record`
+
+`def to_record(self, index: int, image_size: Sequence[int], page_size: Sequence[float]) -> dict`
+
+Serialize pixel and page-unit boxes using the actual image/page ratios.
+
+```python
+from greekocr.glyphs.table_lines import TextPiece
+record = piece.to_record(0, image.size, (page_width, page_height))
+```
+
+### `greekocr.glyphs.table_lines.table_text_pieces`
+
+`def table_text_pieces(page: Image.Image | NDArray[Any], region: Sequence[float], table_id: str='table-0', table_index: int=0) -> list[TextPiece]`
+
+Return pixel-derived within-row pieces for an image-layout table region.
+
+```python
+from greekocr.glyphs.table_lines import table_text_pieces
+pieces = table_text_pieces(image, (10, 20, 800, 900))
+```
+
+### `greekocr.glyphs.table_lines.recognition_pieces`
+
+`def recognition_pieces(page: Image.Image | NDArray[Any], lines: list[LineSegment], table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, supplement: bool=True) -> tuple[list[TextPiece], list, PageSegmentation | None]`
+
+Shared delivery path for the plugin and offline review harness.
+
+```python
+from greekocr.glyphs.table_lines import recognition_pieces
+pieces, regions, prefix = recognition_pieces(image, detected_lines, image_layout_regions)
+```
+
+### `greekocr.glyphs.table_lines.prepare_delivery`
+
+`def prepare_delivery(page: Image.Image | NDArray[Any], result: PageSegmentation, table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, supplement: bool=True) -> tuple[PageSegmentation, list[TextPiece], list]`
+
+Attach table recovery to a normal segmentation, retaining audit candidates.
+
+```python
+from greekocr.glyphs.table_lines import prepare_delivery
+result, pieces, regions = prepare_delivery(image, segmentation, image_layout_regions)
+```
+
 ### `greekocr.ops.rate_limit.rate_limited_client`
 
 `def rate_limited_client(source: str, root: PathLike, *, offline: bool=True, interval: float=2, budget: int=2000000000) -> DiscoveryHTTP`

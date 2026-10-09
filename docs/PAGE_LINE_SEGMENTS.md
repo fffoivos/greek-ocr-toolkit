@@ -89,11 +89,33 @@ fit or move a line, and their `text` is never consumed. The renderer reruns
 Vouli pages with hints and compares extents, column, provenance, four font
 curves and both region edges exactly.
 
-The restored opt-in Docling `mode='detector'` uses this API and these unrolled
-strips before layout. Docling receives rectangular envelopes; its call log
-keeps pixel-segment indices and separate hint indices. Invalid geometry
-preserves native cells. The default native-line mode keeps its existing
-behaviour. Tests mock the recognizer; no recognition-quality claim is made.
+The opt-in Docling `recognition_mode='detector'` uses this API and these unrolled
+strips. This selector is separate from the inherited Docling `mode` enum.
+In Docling 2.135, image layout inference precedes OCR; layout postprocessing
+follows OCR. The plugin uses image-layout TABLE/DOCUMENT_INDEX regions to
+recover text touching ruled frames and split entries at local rules and
+repeated whitespace lanes before recognition. Each resulting strip is
+recognized separately by the existing line recognizer. No recognized string
+is divided in proportion to its box width.
+
+`greekocr.glyphs.table_lines.recognition_pieces` is the shared delivery path;
+`prepare_delivery` additionally retains superseded review candidates with a
+discount reason. A conservative fallback finds repeated ruled blocks beneath
+full-width prose. Rules stop at their observed extent, and prose above a table
+is fitted independently. Pages without a proposed table keep their original
+segmentation. These heuristics are experimental; see the round-4 report for
+remaining omissions, crossings, and model structure failures.
+
+Docling receives positive TOPLEFT envelopes converted with the actual image
+width/page width and image height/page height ratios. The call log records
+piece boxes and provisional geometry-group IDs, which are not semantic grid
+IDs. Page replacement clears both native and prior-OCR word/character caches,
+including the backend's cached segmented page. TableFormer V1 must use
+`do_cell_matching=True`; Accurate remains the default, and both Accurate and
+Fast are measured by the offline acceptance harness. Invalid geometry
+preserves native cells. The default native-line recognition path remains
+available. Label-injection tests establish plumbing and geometry behavior,
+not character-recognition accuracy.
 
 ## Reproduction
 
@@ -149,3 +171,19 @@ The synthetic tests have independent per-pixel line ownership and known
 baselines. The real-page contacts are independent geometry references, not
 text or detection-recall references. High assigned-ink retention does not
 measure text recall and does not imply that each strip is suitable for OCR.
+
+For the round-4 table review, pass `--layout .astra/layout` to the renderer.
+It also writes `<key>.cells.json`: delivered pixel and page-unit boxes,
+line indices, and provisional table/piece IDs. The standalone raster review
+uses PNG pixels / 3 as its documented page-unit convention; the plugin uses
+the actual Docling page dimensions. Discounted lines are retained in JSON
+but never drawn in either review image.
+
+`scripts/glyphs/annotate_tables_round4.py` reproduces provisional pixel-based
+annotations, including header spans and empty cells. They are evaluation
+inputs only. `evaluate_tables_round4.py` reuses the owner's installed-stage
+research probes and records failure IDs, while
+`integrate_docling_tables_round4.py` exercises the full standard pipeline with
+only the recognizer replaced by unique labels. Run both with
+`HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`. The complete results and limitations
+are in `docs/reviews/PAGE_LINES_ROUND4_TABLES_20261009.md`.
