@@ -279,6 +279,30 @@ Measured:
   gutter, which runs down the full column height. Local evidence at one height is not enough.
 - The crossing check must use that same boundary, so it cannot report 0 when a line crosses.
 
+### an-a73d22211479-p000301: the two columns joined across a broken rule
+
+**Owner:** "there are many unions among the boundary for the bottom half of the page."
+
+The page has two columns separated by a printed vertical rule at x ≈ 883.
+
+Measured:
+- The rule is printed as separate pieces about 80 px (3.5 x-heights) long, with short breaks between them. It has ink
+  in 88–97% of rows from y 400 to y 2200.
+- The rule mask (`pixel_segments._rule_mask`) marks it as a barrier above y ≈ 1230 and below y ≈ 1655, but not between
+  them (0–15% of rows), although the pieces there are as thin and straight as the others.
+- The pixel segmenter then makes one segment across both columns there (s00007, x 79–1703, y 1176–1486).
+- Lines 27–33 (y 1319–1629) each run from x ≈ 80 across the rule to x ≈ 1680–1693, joining the two columns.
+- At the top, lines 4 and 5 (y 346, 398) are joined the same way, where the rule's ink is weaker.
+- Lines 6, 24 and 26 lie wholly in the right column but are labelled column 0.
+- The checks report 0 crossings, 80 of 82 lines with cut ink and 78 with foreign ink.
+
+**Requirement:**
+- A dashed or broken rule is a rule. Collinear thin pieces with short breaks are joined into one boundary over the
+  column's full height.
+- One missed piece must not open the boundary. This is the same full-height column structure the cases above
+  require.
+- Column labels follow that boundary.
+
 ### an-5c093c79d6bb-p000199: the first lines of the two facing pages joined
 
 **Owner:** "Bad connection of the first two lines of the two opposing pages here."
@@ -493,3 +517,4 @@ Report per page, on all 48 development pages, then on the held-out pages:
 | 19 | an-5c093c79d6bb-p000199 | first lines of both pages | lines of the two facing pages joined | 5 |
 | 20 | an-9ea1564fcf4f-p000013 | all lines of both pages | lines of the two facing pages joined | 5 |
 | 21 | all pages | — | proposal: a distinct accent region, 2–3 accent lines + the 4 font lines | 1 |
+| 22 | an-a73d22211479-p000301 | bottom half, both columns | many unions across the column boundary | 5 |
