@@ -128,7 +128,7 @@ Machine-readable file hashes and logic hashes: `greekocr/_vendor/origins.json`.
 | `greekocr/_vendor/train/train.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/train/train.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | Python import paths and hook strings relocated |
 | `greekocr/deploy/docling_plugin/__init__.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/__init__.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | byte-identical |
 | `greekocr/deploy/docling_plugin/docling_plugin.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/docling_plugin.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | byte-identical |
-| `greekocr/deploy/docling_plugin/model.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/model.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | ported + table-aware pixel detector, TOPLEFT delivery and stale-cache replacement (round 4) |
+| `greekocr/deploy/docling_plugin/model.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/model.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | ported + table-aware pixel detector, oriented OCR, TOPLEFT replacement and separate orientation timing (round 4 part 3c) |
 | `greekocr/deploy/docling_plugin/options.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/options.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | renamed recognition_mode; inherited Docling mode retained (round 4) |
 | `greekocr/deploy/docling_plugin/recognizer/VENDORED_FROM.json` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/recognizer/VENDORED_FROM.json` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | byte-identical |
 | `greekocr/deploy/docling_plugin/recognizer/__init__.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/recognizer/__init__.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | byte-identical |
@@ -1141,4 +1141,4 @@ The two CLLG implementation files above now support optional confidence records.
 
 Round 4 part 3 adds the opt-in oriented OCR mode without changing the compatibility detector.
 
-| `greekocr/deploy/docling_plugin/orientation.py` | new toolkit implementation | uncommitted at capture | new | coherent pre-layout and rotated-table adapters |
+| `greekocr/deploy/docling_plugin/orientation.py` | new toolkit implementation | 420b320 baseline | adapted | guide-tested pre-layout spatial uniformity and orientation timing; rotated-table adapter retained |

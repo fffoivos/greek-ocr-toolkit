@@ -713,13 +713,13 @@ record = decision.to_record()
 
 ### `greekocr.glyphs.orientation.measure_orientation`
 
-`def measure_orientation(image: Image.Image, *, use_osd: bool=False, unit: str='block') -> Orientation`
+`def measure_orientation(image: Image.Image, *, use_osd: bool=False, unit: str='block', axis_hint: str | None=None, content_kind: str='unknown', font_reference: dict | None=None) -> Orientation`
 
-Measure a region; short words require recognizer evidence for polarity.
+Compare fitted guides in both region readings; words never decide alone.
 
 ```python
 from greekocr.glyphs.orientation import measure_orientation
-decision = measure_orientation(image, use_osd=False, unit="word")
+decision = measure_orientation(image, use_osd=False, unit="block")
 ```
 
 ### `greekocr.glyphs.orientation.canonical_word_crop`
@@ -755,6 +755,39 @@ from greekocr.glyphs.orientation import discover_directions
 proposals = discover_directions(page_image)
 ```
 
+### `greekocr.glyphs.orientation_regions.axis_regions`
+
+`def axis_regions(proposals: Sequence[dict]) -> list[dict]`
+
+Join same-axis chains by typographic whitespace; reject crossing fragments.
+
+```python
+from greekocr.glyphs.orientation_regions import axis_regions
+regions = axis_regions(discover_directions(image))
+```
+
+### `greekocr.glyphs.orientation_regions.resolve_regions`
+
+`def resolve_regions(regions: Sequence[dict], *, main_id: str | None=None) -> list[dict]`
+
+Inherit within explicit groups, then retain at most two accepted angles.
+
+```python
+from greekocr.glyphs.orientation_regions import resolve_regions
+regions = resolve_regions(measured_regions, main_id="page")
+```
+
+### `greekocr.glyphs.orientation_regions.page_regions`
+
+`def page_regions(image: Image.Image, *, proposals: list[dict] | None=None, dominant: Orientation | None=None, use_osd: bool=False) -> tuple[Orientation, list[dict], list[dict]]`
+
+Discover before fitting; compare both readings of main and minority regions.
+
+```python
+from greekocr.glyphs.orientation_regions import page_regions
+dominant, regions, proposals = page_regions(image, use_osd=False)
+```
+
 ### `greekocr.glyphs.oriented_page.OrientedWord`
 
 A separately recognizable word and its local guides, in a reversible frame.
@@ -786,7 +819,7 @@ page = OrientedPage(**measured_oriented_page)
 
 ### `greekocr.glyphs.oriented_page.oriented_page`
 
-`def oriented_page(image: Image.Image, table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, recognizer: _Recognizer | None=None, use_osd: bool=True, segmentation: Any=None, pieces: list | None=None, dominant: Orientation | None=None, discover: bool=True) -> OrientedPage`
+`def oriented_page(image: Image.Image, table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, recognizer: _Recognizer | None=None, use_osd: bool=False, segmentation: Any=None, pieces: list | None=None, dominant: Orientation | None=None, discover: bool=True) -> OrientedPage`
 
 Discover directions, normalize groups, fit, split and inverse-map words.
 

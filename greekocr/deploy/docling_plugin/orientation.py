@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 from collections import Counter
 from types import SimpleNamespace
+from time import perf_counter
 
 import numpy as np
 from docling.datamodel.base_models import LayoutPrediction, TableStructurePrediction
@@ -92,7 +93,7 @@ class PageOrientationAdapter:
     """Normalize eligible uniform raster pages BEFORE preprocessing and layout."""
     def __init__(self, preprocessing, *, decide=None, eligible=None):
         self.preprocessing = preprocessing
-        self.decide = decide or (lambda im:measure_orientation(im,use_osd=True,unit='page'))
+        self.decide = decide or (lambda im:measure_orientation(im,use_osd=False,unit='page'))
         self.eligible = eligible or (lambda conv,page:True)
         self.records = []
 
@@ -104,11 +105,20 @@ class PageOrientationAdapter:
             if isinstance(backend,NormalizedPageBackend):
                 yield from self.preprocessing(conv_res,[page]); continue
             image = backend.get_page_image(scale=2.)
+            orientation_started = perf_counter()
             decision = self.decide(image)
             proposals = discover_directions(image)
-            count = sum(p['components'] for p in proposals)
-            minority = sum(p['components'] for p in proposals if p['axis'] != decision.axis)
-            mixed = minority/max(1,count) > .02
+            from greekocr.glyphs.orientation_regions import page_regions
+            _, regions, _ = page_regions(image, proposals=proposals, dominant=decision)
+            blocks = [{k:v for k,v in r.items() if k != 'decision'} | r['decision'].to_record() for r in regions[1:]]
+            # A cross-line neighbour vote is not a minority region. Also retain
+            # a real opposite reading on the same axis (e.g. an inverted label).
+            mixed = any(p['axis'] != decision.axis or p['orientation_cw'] not in (None, decision.orientation_cw)
+                        for p in blocks)
+            # Incomplete proposals supplied by an external adapter cannot
+            # certify uniformity; retain the conservative adapter contract.
+            if any('box' not in p for p in proposals):
+                mixed = any(p['axis'] != decision.axis for p in proposals)
             angle = decision.orientation_cw
             applied = angle in (90,180,270) and not mixed
             if applied:
@@ -117,7 +127,8 @@ class PageOrientationAdapter:
                 page._image_cache = {}
                 page.parsed_page = None
             frame = QuarterTurn(backend.get_size().width,backend.get_size().height,angle if applied else 0)
-            self.records.append(dict(page_no=page.page_no,applied=applied,mixed=mixed,
+            self.records.append(dict(page_no=page.page_no,applied=applied,mixed=mixed,regions=blocks,
+                                     orientation_seconds=perf_counter()-orientation_started,
                                      source_to_page=frame.matrix.tolist(),**decision.to_record()))
             yield from self.preprocessing(conv_res,[page])
 

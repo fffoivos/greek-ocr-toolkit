@@ -230,6 +230,7 @@ class GlossapiOcrModel(BaseOcrModel):
                                  image_to_page=[[1/sx,0,0],[0,1/sy,0],[0,0,1]],
                                  source_to_page=getattr(getattr(page._backend,'frame',None),'matrix',np.eye(3)).tolist()
                                  if getattr(page,'_backend',None) is not None else np.eye(3).tolist()))
+        record['timings_s']['orientation'] = result.orientation_seconds
         record['timings_s']['oriented_detect_and_recognize'] = perf_counter()-start
 
     def __call__(self, conv_res, page_batch):

@@ -147,41 +147,6 @@ def _votes(pts, ch):
     return votes, slopes
 
 
-def _polarity(mask, axis):
-    aligned = np.rot90(mask, axis//90)
-    _, _, stats, centres = cv2.connectedComponentsWithStats(aligned, 8)
-    s, c = stats[1:], centres[1:]
-    valid = (s[:,4] > .000001*aligned.size) & (s[:,2] < .1*aligned.shape[1]) & (s[:,3] < .15*aligned.shape[0])
-    s, c = s[valid], c[valid]
-    if len(s) < 3:
-        return dict(score=0., bodies=0, marks=0)
-    h = float(np.median(s[:,3])); body = (s[:,3] > .65*h) & (s[:,3] < 2*h) & (s[:,2] < 2.5*h) & (s[:,4] > .12*h*h)
-    bs, bc = s[body], c[body]
-    small = (s[:,3] < .55*h) & (s[:,4] < .30*h*h)
-    up = down = 0; differences = []
-    if len(bs):
-        tree = cKDTree(bc)
-        for q, ct in zip(s[small], c[small]):
-            _, ids = tree.query(ct, k=min(4,len(bs))); signs = []
-            for j in np.atleast_1d(ids):
-                b = bs[j]
-                if b[0]-.2*h <= ct[0] <= b[0]+b[2]+.2*h:
-                    for gap, sign in ((b[1]-(q[1]+q[3]),1),(q[1]-(b[1]+b[3]),-1)):
-                        if -.1*h <= gap <= .7*h:
-                            signs.append((abs(gap),sign))
-            if signs:
-                sign = min(signs)[1]; up += sign == 1; down += sign == -1
-        _, ids = tree.query(bc,k=min(8,len(bc)))
-        for i, js in enumerate(ids):
-            near = [j for j in np.atleast_1d(js) if abs(bc[j,1]-bc[i,1]) < .45*h and abs(bc[j,0]-bc[i,0]) < 8*h]
-            if len(near) >= 3:
-                tops, bots = bs[near,1], bs[near,1]+bs[near,3]
-                differences.append((np.median(abs(tops-np.median(tops)))-np.median(abs(bots-np.median(bots))))/h)
-    alignment = float(np.mean(differences)) if differences else 0.
-    return dict(score=(up-down)/max(1,up+down)+2*alignment, bodies=len(bs), marks=up+down,
-                accent_above=up, accent_below=down, alignment=alignment)
-
-
 def _osd(image):
     executable = shutil.which('tesseract')
     if not executable:
@@ -200,9 +165,17 @@ def _osd(image):
                 confidence=float(conf[1]) if conf else 0.,returncode=r.returncode)
 
 
-def measure_orientation(image: Image.Image, *, use_osd: bool = False, unit: str = 'block') -> Orientation:
-    """Measure a region; short words require recognizer evidence for polarity."""
-    _, mask, _, _ = _pixels(image)
+def measure_orientation(image: Image.Image, *, use_osd: bool = False, unit: str = 'block',
+                        axis_hint: str | None = None, content_kind: str = 'unknown',
+                        font_reference: dict | None = None) -> Orientation:
+    """Compare fitted guides in both region readings; words never decide alone.
+
+    ``content_kind='numbers'`` forbids an independent polarity decision. An
+    axis hint may come from region grouping, never from the expected way up.
+    """
+    from time import perf_counter
+    started = perf_counter()
+    small, mask, _, scale_height = _pixels(image)
     s, c, h, body = _components(mask)
     pts = c[body]; votes, slopes = _votes(pts,h)
     totals = votes.sum(axis=0)
@@ -228,6 +201,12 @@ def measure_orientation(image: Image.Image, *, use_osd: bool = False, unit: str 
             result.alternatives = [axis*90,axis*90+180]
             result.evidence['axis_source'] = 'isolated-ink-chain-extent'
             margin = result.axis_confidence
+    if axis_hint in ('horizontal', 'vertical'):
+        axis = int(axis_hint == 'vertical')
+        result.axis = axis_hint
+        result.alternatives = [axis*90, axis*90+180]
+        result.evidence['axis_source'] = 'region-chains'
+        margin = 1.
     corroborated = int(np.argmax(concentrations)) == axis and len(pts) >= 12
     if not mask.any() or (margin < .08 and not corroborated):
         result.axis = 'unknown'; result.alternatives = [0,90,180,270]
@@ -235,29 +214,28 @@ def measure_orientation(image: Image.Image, *, use_osd: bool = False, unit: str 
     if slopes[axis]:
         skew = math.degrees(math.atan(float(np.median(slopes[axis]))))
         result.residual_skew_cw = skew if axis == 0 else -skew
-    polarity = _polarity(mask, axis*90)
-    result.evidence['asymmetry'] = polarity
-    prior = (axis*90 + (180 if polarity['score'] < 0 else 0)) % 360
-    # Many letters and detached marks are required. A single accent is not a vote.
-    strong = polarity['bodies'] >= 24 and polarity['marks'] >= 5 and abs(polarity['score']) >= .35
-    if strong and unit != 'word':
-        result.orientation_cw = prior
-        result.polarity_confidence = min(1., abs(polarity['score']))
-        result.evidence['polarity_source'] = 'block-asymmetry'
-    if use_osd and len(pts) >= 24:
+    if unit == 'word':
+        result.evidence.update(polarity_source='word-requires-region', seconds=perf_counter()-started)
+        return result
+    from .orientation_guides import compare_guides
+    guide = compare_guides(np.asarray(small), mask, scale_height, axis*90, font_reference=font_reference)
+    result.evidence['guide_test'] = guide
+    result.evidence['content_kind'] = content_kind
+    result.orientation_cw = guide['orientation_cw'] if content_kind != 'numbers' else None
+    result.polarity_confidence = (guide['margin_marks']/max(1, sum(r['accent_above']+r['mark_below'] for r in guide['readings']))
+                                  if result.orientation_cw is not None else 0.)
+    result.evidence['polarity_source'] = ('six-guide-comparison' if result.orientation_cw is not None
+                                          else 'numbers-require-header' if content_kind == 'numbers'
+                                          else 'insufficient-guide-evidence')
+    # OSD confirms a guide-supported close call only. Clear guides are final.
+    if (use_osd and result.orientation_cw is None and content_kind != 'numbers' and
+            guide['close_candidate'] is not None and len(pts) >= 24):
         osd = _osd(image); result.evidence['osd'] = osd
-        candidate = osd.get('angle')
-        if candidate in result.alternatives and osd.get('confidence',0) >= 6:
-            if strong and prior != candidate:
-                result.orientation_cw = None; result.polarity_confidence = 0.
-                result.evidence['polarity_source'] = 'conflicting-block-evidence'
-            else:
-                result.orientation_cw = candidate
-                result.polarity_confidence = min(1., osd['confidence']/20)
-                result.evidence['polarity_source'] = 'osd-block'
-        elif candidate is not None and (candidate not in result.alternatives or (strong and candidate != prior)):
-            result.orientation_cw = None; result.polarity_confidence = 0.
-            result.evidence['polarity_source'] = 'weak-or-conflicting-osd'
+        if osd.get('angle') == guide['close_candidate'] and osd.get('confidence', 0) >= 6:
+            result.orientation_cw = guide['close_candidate']
+            result.polarity_confidence = min(1., osd['confidence']/20)
+            result.evidence['polarity_source'] = 'guide-close-call-osd-confirmed'
+    result.evidence['seconds'] = perf_counter()-started
     return result
 
 
@@ -311,7 +289,7 @@ def recognizer_polarity(image: Image.Image, orientation: Orientation, recognizer
     from greekocr.deploy.docling_plugin.recognizer.strips import extract_strip
     from dataclasses import replace
     out = replace(orientation,evidence=dict(orientation.evidence))
-    if out.axis == 'unknown':
+    if out.axis == 'unknown' or out.evidence.get('polarity_source') == 'word-requires-region':
         return out
     angles = [0,180] if out.axis == 'horizontal' else [90,270]
     strips = []
@@ -339,6 +317,19 @@ def recognizer_polarity(image: Image.Image, orientation: Orientation, recognizer
     # More hallucinated letters cannot defeat a clearer shorter reading.
     conf_gap = readings[best]['recognition_confidence']-readings[1-best]['recognition_confidence']
     out.orientation_cw = angles[best] if scores[best] > 0 and gap >= margin and conf_gap >= .03 else None
+    guide = orientation.evidence.get('guide_test')
+    if guide is not None:
+        if orientation.orientation_cw is not None:
+            out.orientation_cw = orientation.orientation_cw
+            out.polarity_confidence = orientation.polarity_confidence
+            out.evidence['polarity_source'] = orientation.evidence['polarity_source']
+        elif (orientation.evidence.get('content_kind') == 'numbers' or
+              out.orientation_cw != guide.get('close_candidate')):
+            out.orientation_cw = None
+            out.polarity_confidence = 0.
+            out.evidence['polarity_source'] = 'recognizer-cannot-replace-guides'
+        elif out.orientation_cw is not None:
+            out.evidence['polarity_source'] = 'guide-close-call-recognizer-confirmed'
     out.evidence['recognition_confidence_gap'] = conf_gap
     return out
 
