@@ -16,12 +16,13 @@ from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
 
 from .baseline import text_lines
+from .page_font import fit_guides
 from .components import _xheight, line_glyphs
 from .pixel_segments import PixelPage, _gray, _runs, prepare_pixels
 
 __all__ = ['LineSegment', 'PageSegmentation', 'page_line_segments', 'segment_page', 'extract_line_image']
 
-CURVES = ('baseline', 'font_top', 'meanline', 'font_bottom', 'top', 'bottom')
+CURVES = ('baseline', 'font_top', 'meanline', 'font_bottom', 'accent_bottom', 'accent_top', 'top', 'bottom')
 
 
 @dataclass
@@ -45,6 +46,21 @@ class LineSegment:
     geometry_source: str = 'crop-pooled'
     component_ids: tuple[int, ...] = field(default=(), repr=False)
 
+    accent_bottom: NDArray | None = field(default=None, repr=False)
+    accent_top: NDArray | None = field(default=None, repr=False)
+    borrowed: tuple[str, ...] = ()
+    ink_classes: dict = field(default_factory=dict)
+    contrast: float = 1.
+    discounted: str | None = None
+    guide_residuals: dict = field(default_factory=dict)
+    guide_samples: dict = field(default_factory=dict, repr=False)
+
+    def __post_init__(self):
+        if self.accent_top is None:
+            self.accent_top = self.baseline - 1.85 * self.xheight
+        if self.accent_bottom is None:
+            self.accent_bottom = self.baseline - 1.25 * self.xheight
+
     def unroll(self, page: Image.Image | NDArray[Any], *, xheight: int = 32) -> Image.Image:
         """Return a grayscale strip with meanline at 1.5 and baseline at 2.5 x-heights."""
         return extract_line_image(page, self, xheight=xheight)
@@ -55,7 +71,9 @@ class LineSegment:
         row.update(x0=self.x0, x1=self.x1, xheight=self.xheight, column=self.column,
                    segment_indices=list(self.segment_indices), hint_indices=list(self.hint_indices),
                    segment_positions=[list(p) for p in self.segment_positions], support=self.support,
-                   geometry_source=self.geometry_source,
+                   geometry_source=self.geometry_source, borrowed=list(self.borrowed),
+                   ink_classes=self.ink_classes, contrast=round(self.contrast, 4), discounted=self.discounted,
+                   guide_residuals=self.guide_residuals,
                    neighbours={k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in self.neighbours.items()})
         return row
 
@@ -81,7 +99,7 @@ def _blocked(p: PixelPage, x0, x1, base, xh):
         if p.barriers[rows, x].any():
             return True
     for l, t, r, bot in p.gutters:
-        if a < r and b > l and t <= np.median(y) < bot:
+        if (bot-t == p.gray.shape[0] or r-l > 2*xh) and a < r and b > l and t <= np.median(y) < bot:
             return True
     return False
 
@@ -106,9 +124,10 @@ def _discover(p: PixelPage):
         mask = p.ink[t0:t1, a:b] & np.isin(p.labels[t0:t1, a:b], strong_ids)
         sub = np.where(mask, p.gray[t0:t1, a:b], paper)
         xh = p.xheight
-        if len(useful) >= 3:
-            measured = _xheight(useful[:, 3] - useful[:, 1])
-            if .65 * xh <= measured <= 3 * xh:
+        size_ink = useful[useful[:, 6] <= paper-.7*(paper-ink_level)]
+        if len(size_ink) >= 1:
+            measured = _xheight(size_ink[:, 3] - size_ink[:, 1])
+            if .65 * xh <= measured <= 5 * xh:
                 xh = measured
         if b - a < 3 * xh and len(useful):
             # A one/two-character cell cannot determine orientation. Keep its
@@ -154,7 +173,7 @@ def _discover(p: PixelPage):
                     body_ids.update(int(k) for k in np.unique(labs) if k)
                 sub[sl][g.labels[sl] == c.index] = paper
             if not body_ids:
-                continue
+                break
             q = cc[np.isin(cc[:, 5], list(body_ids))]
             cy = float(np.median((q[:, 1] + q[:, 3]) / 2))
             # Expanded windows see neighbours too. Only seed-owned bands enter
@@ -169,6 +188,47 @@ def _discover(p: PixelPage):
                                down=float(np.median(guide.descender - guide.base)),
                                ids=ids, body_ids=body_ids, segments={si}, support=support,
                                cy=cy, column=0))
+    return models
+
+
+def _recover_bodies(p, models):
+    """Recover body rows left by crop peeling (including all-capital heads).
+
+    Crop focus may select the body paragraph repeatedly and leave its taller
+    running head untouched. Independent bottom-contact groups seed those rows.
+    Nothing is recovered from OCR hints.
+    """
+    used = set().union(*(m['body_ids'] for m in models)) if models else set()
+    q = p.components
+    pending = q[(~np.isin(q[:, 5], list(used))) & (q[:, 3]-q[:, 1] > .7*p.xheight)
+                & (q[:, 3]-q[:, 1] < 3.5*p.xheight) & (q[:, 2]-q[:, 0] < 3*p.xheight)
+                & (q[:, 4] > .12*p.xheight**2)]
+    groups = []
+    for row in sorted(pending, key=lambda q: q[3]):
+        choices = [g for g in groups if abs(row[3]-np.median(np.array(g)[:, 3])) < .35*p.xheight
+                   and min(abs(row[0]-r[2]) for r in g) < 8*max(p.xheight, row[3]-row[1])]
+        if choices:
+            choices[-1].append(row)
+        else:
+            groups.append([row])
+    for rows in groups:
+        q = np.array(rows)
+        if len(q) < 3:
+            continue
+        xh = float(np.median(q[:, 3]-q[:, 1]))
+        a, b = int(q[:, 0].min()), int(q[:, 2].max())
+        base = float(np.median(q[:, 3]))
+        if _blocked(p, a, b, base, xh):
+            continue
+        segments = {i for i, (l,t,r,bot) in enumerate(p.boxes)
+                    if a < r and b > l and t <= np.median(q[:, 1:4:2]) <= bot}
+        if not segments:
+            continue
+        support = np.column_stack(((q[:, 0]+q[:, 2])/2, q[:, 3]))
+        ids = set(q[:, 5].astype(int))
+        models.append(dict(a=a, b=b, base=np.full(b-a, base), xh=xh, up=1.5*xh, down=.5*xh,
+                           ids=ids, body_ids=ids.copy(), segments=segments, support=support,
+                           cy=base-xh/2, column=0))
     return models
 
 
@@ -275,7 +335,7 @@ def _lanes(models):
 
 def _pool_geometry(models):
     """Local shared column warp + per-line vertical shift; sparse cells borrow."""
-    reliable = [m for m in models if len(m['support']) >= 8 and m['b'] - m['a'] >= 8 * m['xh']]
+    reliable = [m for m in models if len(m['support']) >= 8 and m['b'] - m['a'] >= 8 * m['xh'] and not m.get('faint', False)]
     slopes = [np.median(np.diff(m['base'])) for m in reliable]
     page_slope = float(np.median(slopes)) if slopes else 0.
     new = []
@@ -331,12 +391,17 @@ def _assign(p, models):
     """Follow the final paths through ALL text pixels, independent of seed boxes."""
     assigned = np.full(len(p.components), -1, int)
     # Components are never assigned by text-layer text or its rectangles.
+    paper = float(np.percentile(p.gray, 90))
+    reference = float(np.percentile(p.components[:, 6], 25)) if len(p.components) else paper
+    faint_level = paper-.6*(paper-reference)
     for qi, q in enumerate(p.components):
         a, t, b, bot, area = q[:5]
         cx, cy = (a + b) / 2, (t + bot) / 2
         best = None
         for j, m in enumerate(models):
             xh = m['xh']
+            if q[6] > faint_level and not m.get('faint', False):
+                continue
             gap = max(m['a'] - b, a - m['b'], 0)
             small = bot - t < .55 * xh or area < .08 * xh * xh
             if small and gap > xh:
@@ -351,7 +416,7 @@ def _assign(p, models):
             # attach by proximity; they cannot invent a baseline of their own.
             if bot - t >= .6 * xh and min(bot, base + .2 * xh) - max(t, base - 1.1 * xh) < .25 * xh:
                 continue
-            if gap and _blocked(p, min(cx, np.clip(cx, m['a'], m['b'] - 1)),
+            if _blocked(p, min(cx, np.clip(cx, m['a'], m['b'] - 1)),
                                 max(cx, np.clip(cx, m['a'], m['b'] - 1)) + 1,
                                 base, xh):
                 continue
@@ -376,6 +441,8 @@ def _assign(p, models):
             options = []
             for n in body[np.atleast_1d(near)]:
                 j = assigned[n]; xh = models[j]['xh']
+                if q[k, 6] > faint_level and not models[j].get('faint', False):
+                    continue
                 dx = max(q[k, 0] - q[n, 2], q[n, 0] - q[k, 2], 0)
                 dy = max(q[k, 1] - q[n, 3], q[n, 1] - q[k, 3], 0)
                 if dx <= .3 * xh and dy <= .6 * xh:
@@ -387,16 +454,6 @@ def _assign(p, models):
 
 def _make_lines(p, models, owners, hints):
     lines = []
-    # Pool measured font offsets among comparable type sizes. Actual ink
-    # extrema include accents and capitals, which are not x-height samples.
-    ups, downs = [], []
-    for m, ids in zip(models, owners):
-        q = p.components[ids]
-        if not len(q):
-            ups.append([]); downs.append([]); continue
-        base = _at(m, (q[:, 0] + q[:, 2]) / 2)
-        ups.append(((base - q[:, 1]) / m['xh']).tolist())
-        downs.append(((q[:, 3] - base) / m['xh']).tolist())
     for i, (m, ids) in enumerate(zip(models, owners)):
         if not ids:
             continue
@@ -408,10 +465,7 @@ def _make_lines(p, models, owners, hints):
         a, b = int(q[:, 0].min()), int(q[:, 2].max())
         grid = np.arange(a, b)
         base = _at(m, grid)
-        up = [v for j, n in enumerate(models) if .8 <= n['xh'] / xh <= 1.25 for v in ups[j] if .5 < v < 2.5]
-        down = [v for j, n in enumerate(models) if .8 <= n['xh'] / xh <= 1.25 for v in downs[j] if -.3 < v < 1.2]
-        topoff = max(1., float(np.percentile(up, 98)) if up else m['up'] / xh) * xh
-        botoff = max(.05, float(np.percentile(down, 98)) if down else m['down'] / xh) * xh
+        topoff, botoff = 1.9*xh, .6*xh
         # Stop on the final curve, including the whole font band. No subsequent
         # geometry operation can extend across a detected rule / gutter.
         safe = np.ones(len(grid), bool)
@@ -419,6 +473,8 @@ def _make_lines(p, models, owners, hints):
             y = np.clip(np.rint(base + dy).astype(int), 0, p.gray.shape[0] - 1)
             safe &= ~p.barriers[y, grid]
         for l, t, r, bot in p.gutters:
+            if bot-t < p.gray.shape[0] and r-l <= 2*xh:
+                continue
             safe &= ~((grid >= l) & (grid < r) & (base - xh / 2 >= t) & (base - xh / 2 < bot))
         for l, r in _runs(safe):
             part = q[(q[:, 0] + q[:, 2] >= 2 * (a + l)) & (q[:, 0] + q[:, 2] < 2 * (a + r))]
@@ -481,38 +537,157 @@ def _refine_bottom_contacts(p, models, owners):
     _pool_geometry(models)
 
 
-def _boundaries(lines, height, width):
-    """One sweep builds neighbour addresses; facing font lines define ONE seam."""
-    starts, ends = {}, {}
-    for i, line in enumerate(lines):
-        starts.setdefault(line.x0, []).append(i); ends.setdefault(line.x1, []).append(i)
-        line.neighbours = {k: np.full(line.x1 - line.x0, -1, int) for k in ('above', 'below')}
+def _line_contrast(p, lines):
+    """Darkest fifth of owned ink, relative to page print AND local paper."""
+    values = []
+    for line in lines:
+        y0 = max(0, int(line.top.min()-line.xheight))
+        y1 = min(p.gray.shape[0], int(line.bottom.max()+line.xheight))
+        region = p.gray[y0:y1, line.x0:line.x1]
+        mask = np.isin(p.labels[y0:y1, line.x0:line.x1], line.component_ids)
+        ink = region[mask]
+        paper = float(np.percentile(region, 90)) if region.size else 255.
+        darkness = float(np.percentile(ink, 10)) if ink.size else paper
+        values.append(max(0., paper-darkness))
+    strong = [v for v, line in zip(values, lines) if line.support >= 8]
+    reference = float(np.percentile(strong or values or [1], 70))
+    for line, contrast in zip(lines, values):
+        line.contrast = contrast/max(1., reference)
+        if line.contrast < .62:
+            line.discounted = 'faint ink relative to page text and local paper'
+
+
+def _extended(line, name, xs):
+    values = getattr(line, name)
+    grid = np.arange(line.x0, line.x1)
+    n = min(len(grid)-1, max(1, round(3*line.xheight)))
+    out = np.interp(xs, grid, values)
+    if n:
+        left = np.clip((values[n]-values[0])/n, -.35, .35)
+        right = np.clip((values[-1]-values[-1-n])/n, -.35, .35)
+        out = np.where(xs < line.x0, values[0]+left*(xs-line.x0), out)
+        out = np.where(xs >= line.x1, values[-1]+right*(xs-line.x1+1), out)
+    return out
+
+
+def _boundaries(lines, height, width, pixels=None):
+    """Stable column neighbours, smooth shared seams and local ink ownership.
+
+    Seams extend through a short neighbour's ends: a neighbour disappearing at
+    one x no longer produces a vertical spike. Distant paragraphs/pictures do
+    not enlarge the ordinary font margin.
+    """
+    lookup = {int(q[5]): q for q in pixels.components} if pixels is not None else {}
+    for line in lines:
+        line.neighbours = {k: np.full(line.x1-line.x0, -1, int) for k in ('above', 'below')}
         line.neighbours.update(left=None, right=None)
-    active = set()
-    for x in range(width):
-        active.difference_update(ends.get(x, ())); active.update(starts.get(x, ()))
-        order = sorted(active, key=lambda i: lines[i].baseline[x - lines[i].x0] - lines[i].xheight / 2)
-        for i, j in zip(order[:-1], order[1:]):
-            a, b = lines[i], lines[j]
-            ai, bi = x - a.x0, x - b.x0
-            a.neighbours['below'][ai], b.neighbours['above'][bi] = j, i
-    for a in lines:
-        for j in np.unique(a.neighbours['below']):
-            if j < 0:
+        xh = line.xheight
+        line.top = np.maximum(0, np.minimum(line.accent_top, line.font_top)-.3*xh)
+        line.bottom = np.minimum(height, line.font_bottom+.3*xh)
+        # Ink envelope follows the shape, with a smooth margin; extrema affect
+        # the region only, never the font guides.
+        rises, drops = [], []
+        for k in line.component_ids:
+            q = lookup.get(k)
+            if q is None:
+                continue
+            bs = float(np.interp((q[0]+q[2])/2, np.arange(line.x0,line.x1), line.baseline))
+            rises.append(bs-q[1]); drops.append(q[3]-bs)
+        if rises:
+            line.top = np.maximum(0, line.baseline-max(max(rises)+.15*xh, 1.95*xh))
+            line.bottom = np.minimum(height, line.baseline+max(max(drops)+.15*xh, .65*xh))
+    active = [i for i,l in enumerate(lines) if l.discounted is None]
+    pairs = set()
+    for i in active:
+        a = lines[i]
+        choices = []
+        for j in active:
+            if i == j:
                 continue
             b = lines[j]
-            ai = np.flatnonzero(a.neighbours['below'] == j); bi = ai + a.x0 - b.x0
-            seam = np.clip((a.font_bottom[ai] + b.font_top[bi]) / 2, 0, height)
-            a.bottom[ai], b.top[bi] = seam, seam
-    for i, a in enumerate(lines):
-        for side in ('left', 'right'):
-            choices = []
-            for j, b in enumerate(lines):
-                gap = a.x0 - b.x1 if side == 'left' else b.x0 - a.x1
-                if j != i and gap >= 0 and abs(np.median(a.baseline) - np.median(b.baseline)) < .6 * max(a.xheight, b.xheight):
-                    choices.append((gap, j))
+            lo, hi = max(a.x0,b.x0), min(a.x1,b.x1)
+            if hi <= lo:
+                continue
+            xs = np.linspace(lo, hi-1, 5)
+            delta = np.median(_extended(b, 'baseline', xs)-_extended(a, 'baseline', xs))
+            if 0 < delta < 4.5*max(a.xheight,b.xheight):
+                choices.append((delta,j))
+        if choices:
+            pairs.update((i,j) for _,j in choices)
+    seams_above = {i: [] for i in active}
+    seams_below = {i: [] for i in active}
+    for i,j in sorted(pairs, key=lambda ij: np.median(lines[ij[0]].baseline)):
+        a,b = lines[i],lines[j]
+        lo,hi = min(a.x0,b.x0),max(a.x1,b.x1)
+        xs = np.arange(lo,hi)
+        overlap = np.arange(max(a.x0,b.x0),min(a.x1,b.x1))
+        def extend(line, name):
+            other = b if line is a else a
+            value = _extended(line,name,xs)
+            shift = np.median(_extended(line,name,overlap)-_extended(other,'baseline',overlap))
+            return np.where((xs<line.x0)|(xs>=line.x1),_extended(other,'baseline',xs)+shift,value)
+        seam = (extend(a,'font_bottom')+extend(b,'accent_top'))/2
+        # Smoothly route around the owned component extents where feasible.
+        lower = extend(a,'baseline')+.05*a.xheight
+        upper = extend(b,'meanline')-.05*b.xheight
+        for line, edge, target in ((a,3,lower),(b,1,upper)):
+            for k in line.component_ids:
+                q = lookup.get(k)
+                if q is None:
+                    continue
+                aa,bb=max(lo,int(q[0])),min(hi,int(q[2]))
+                if bb<=aa:
+                    continue
+                sl=slice(aa-lo,bb-lo)
+                if edge==3:
+                    target[sl]=np.maximum(target[sl],q[edge]+.5)
+                else:
+                    target[sl]=np.minimum(target[sl],q[edge]-.5)
+        radius=max(1,round(.35*min(a.xheight,b.xheight)))
+        lower=ndi.gaussian_filter1d(ndi.maximum_filter1d(lower,2*radius+1),radius)
+        upper=ndi.gaussian_filter1d(ndi.minimum_filter1d(upper,2*radius+1),radius)
+        feasible=lower<=upper
+        seam=np.where(feasible,np.maximum(lower,np.minimum(upper,seam)),(lower+upper)/2)
+        seam=ndi.gaussian_filter1d(seam,max(1.,.15*min(a.xheight,b.xheight)))
+        ai=slice(a.x0-lo,a.x1-lo); bi=slice(b.x0-lo,b.x1-lo)
+        # Only neighbours close enough to meet need a seam. Applying it to both
+        # sides keeps the non-overlap invariant, including short final lines.
+        seams_below[i].append(seam[ai]); seams_above[j].append(seam[bi])
+        left,right=max(a.x0,b.x0),min(a.x1,b.x1)
+        if right>left:
+            a.neighbours['below'][left-a.x0:right-a.x0]=j
+            b.neighbours['above'][left-b.x0:right-b.x0]=i
+    for i in active:
+        if seams_below[i]:
+            lines[i].bottom = np.clip(np.min(seams_below[i],axis=0),0,height)
+        if seams_above[i]:
+            lines[i].top = np.clip(np.max(seams_above[i],axis=0),0,height)
+    # The serialized addresses name the nearest actually present neighbour,
+    # even where a short line's extent ends. Geometry above remains smooth.
+    for line in lines:
+        line.neighbours['above'].fill(-1); line.neighbours['below'].fill(-1)
+    starts,ends={},{}
+    for i in active:
+        starts.setdefault(lines[i].x0,[]).append(i)
+        ends.setdefault(lines[i].x1,[]).append(i)
+    present=set()
+    for x in range(width):
+        present.difference_update(ends.get(x,())); present.update(starts.get(x,()))
+        order=sorted(present,key=lambda i:lines[i].baseline[x-lines[i].x0])
+        for i,j in zip(order,order[1:]):
+            if (i,j) in pairs:
+                lines[i].neighbours['below'][x-lines[i].x0]=j
+                lines[j].neighbours['above'][x-lines[j].x0]=i
+    # Discounted records are diagnostics, not tessellation neighbours or OCR.
+    for i,a in enumerate(lines):
+        for side in ('left','right'):
+            choices=[]
+            for j,b in enumerate(lines):
+                gap=a.x0-b.x1 if side=='left' else b.x0-a.x1
+                if j!=i and gap>=0 and abs(np.median(a.baseline)-np.median(b.baseline))<.6*max(a.xheight,b.xheight):
+                    choices.append((gap,j))
             if choices:
-                a.neighbours[side] = min(choices)[1]
+                a.neighbours[side]=min(choices)[1]
 
 
 def _coalesce_lines(p, lines):
@@ -571,6 +746,33 @@ def _addresses(lines, boxes):
             line.segment_positions += ((j, row, len(peers) - 1),)
 
 
+def _final_columns(lines):
+    """Address final extents, widest text first, so indents do not invent lanes.
+
+    Discovery seed lanes can differ on either side of a drop capital. Once
+    those seeds have been forgotten, the full paragraph establishes the lane
+    for its short/indented lines. Page stops already bound every final extent.
+    """
+    spans=[]
+    assigned={}
+    for i in sorted(range(len(lines)),key=lambda i:(lines[i].discounted is not None,
+                                                  -(lines[i].x1-lines[i].x0))):
+        line=lines[i]
+        options=[]
+        for j,(a,b) in enumerate(spans):
+            overlap=min(b,line.x1)-max(a,line.x0)
+            if overlap>.55*min(b-a,line.x1-line.x0):
+                options.append((overlap,j))
+        if options:
+            j=max(options)[1]
+        else:
+            j=len(spans);spans.append((line.x0,line.x1))
+        assigned[i]=j
+    order={j:k for k,j in enumerate(sorted(range(len(spans)),key=lambda j:spans[j][0]))}
+    for i,line in enumerate(lines):
+        line.column=order[assigned[i]]
+
+
 def _reading_order(lines):
     """Recursive whitespace order: spanning headings, then separate columns."""
     if len(lines) < 2:
@@ -599,8 +801,10 @@ def _diagnostics(p, lines):
     owned_ink, clipped_ink = 0, 0
     threshold = float(np.percentile(p.gray[p.ink], 75)) if p.ink.any() else 128
     cc_by_id = {int(q[5]): q for q in p.components}
-    owners = {k: i for i, line in enumerate(lines) for k in line.component_ids}
+    owners = {k: i for i, line in enumerate(lines) if line.discounted is None for k in line.component_ids}
     for i, line in enumerate(lines):
+        if line.discounted is not None:
+            continue
         x = np.arange(line.x0, line.x1)
         clipped = False; contaminated = False
         if not np.isfinite(line.top).all() or not np.isfinite(line.bottom).all() or np.any(line.top >= line.bottom):
@@ -615,8 +819,8 @@ def _diagnostics(p, lines):
                 continue
             yy, ix = yy + t, xx + a - line.x0
             outside = ((yy < line.top[ix]) | (yy >= line.bottom[ix])
-                       | (yy - line.baseline[ix] < -2.5 * line.xheight)
-                       | (yy - line.baseline[ix] >= 1.5 * line.xheight))
+                       | (yy - line.baseline[ix] < -2.5 * (line.baseline[ix]-line.meanline[ix]))
+                       | (yy - line.baseline[ix] >= 1.5 * (line.baseline[ix]-line.meanline[ix])))
             clipped |= bool(outside.any())
             owned_ink += len(yy); clipped_ink += int(outside.sum())
         if clipped:
@@ -642,6 +846,8 @@ def _diagnostics(p, lines):
             crossings.append(i)
         for j in range(i + 1, len(lines)):
             b = lines[j]
+            if b.discounted is not None:
+                continue
             lo, hi = max(line.x0, b.x0), min(line.x1, b.x1)
             if hi > lo:
                 ai, bi = slice(lo - line.x0, hi - line.x0), slice(lo - b.x0, hi - b.x0)
@@ -657,7 +863,54 @@ def _diagnostics(p, lines):
             if not _blocked(p, left.x1, right.x0, float((left.baseline[-1] + right.baseline[0]) / 2), left.xheight):
                 broken.append([i, j])
     multi = sum(sum(j in line.segment_indices for line in lines) > 1 for j in range(len(p.boxes)))
-    return dict(pixel_segments=len(p.boxes), final_lines=len(lines), multi_line_segments=multi,
+    active = [(i,l) for i,l in enumerate(lines) if l.discounted is None]
+    no_bodies = [i for i,l in active if not sum(l.ink_classes.get(k,0) for k in
+                                              ('body_on_baseline','body_with_descender','tall_body'))]
+    close_pairs = []
+    for column in sorted({l.column for _,l in active}):
+        rows = sorted([(i,l) for i,l in active if l.column==column], key=lambda r: np.median(r[1].baseline))
+        spacings = [np.median(b.baseline)-np.median(a.baseline) for (_,a),(_,b) in zip(rows,rows[1:])
+                    if max(a.x0,b.x0)<min(a.x1,b.x1)]
+        pitch = float(np.median([v for v in spacings if v>1.5*p.xheight])) if any(v>1.5*p.xheight for v in spacings) else 2.5*p.xheight
+        for (i,a),(j,b) in zip(rows,rows[1:]):
+            if max(a.x0,b.x0)<min(a.x1,b.x1) and np.median(b.baseline)-np.median(a.baseline)<.5*pitch:
+                close_pairs.append([i,j])
+    jumps = [dict(line=i, top=float(np.max(abs(np.diff(l.top)),initial=0)/l.xheight),
+                  bottom=float(np.max(abs(np.diff(l.bottom)),initial=0)/l.xheight)) for i,l in active]
+    unassigned = [q for q in p.components if int(q[5]) not in owners and .55*p.xheight<=q[3]-q[1]<=2.5*p.xheight
+                  and .08*p.xheight**2<=q[4]<=4*p.xheight**2]
+    nontext_hits=[]
+    for i,l in active:
+        if any(l.x0<b and l.x1>a and t<np.median(l.baseline)<bot for a,t,b,bot in p.nontext_boxes):
+            nontext_hits.append(i)
+    seam_gaps=[]
+    for i,l in active:
+        for j in np.unique(l.neighbours['below']):
+            if j<0:
+                continue
+            xs=np.flatnonzero(l.neighbours['below']==j)
+            lower=lines[j]
+            delta=lower.top[xs+l.x0-lower.x0]-l.bottom[xs]
+            if np.max(delta,initial=0)>1e-8:
+                seam_gaps.append(dict(above=i,below=int(j),maximum_xh=float(delta.max()/l.xheight)))
+    checks = {
+        '1_font_and_accent_lines': dict(per_line=[dict(line=i, borrowed=list(l.borrowed), distances=l.guide_residuals) for i,l in enumerate(lines)],
+                                       borrowed_lines=sum(bool(l.borrowed) for _,l in active)),
+        '2_extra_lines': dict(no_body_lines=no_bodies, close_pairs=close_pairs),
+        '3_cutoffs': dict(lines=cuts, source_boundary_lines=boundary_cuts, strip_edge_lines=strip_edges),
+        '4_faint_detections': dict(discounted=sum(l.discounted is not None for l in lines),
+                                   per_line=[dict(line=i,contrast=l.contrast,discounted=l.discounted) for i,l in enumerate(lines)]),
+        '5_smoothness': dict(per_line=jumps, maximum=max([max(v['top'],v['bottom']) for v in jumps]+[0.])),
+        '6_column_crossings': dict(lines=crossings, full_height_boundaries=[list(g) for g in p.gutters if g[1]==0 and g[3]==p.gray.shape[0]],
+                                  all_boundaries=[list(g) for g in p.gutters], continued_rules=p.column_boundaries),
+        '7_missed_text': dict(unassigned_text_size_components=len(unassigned), unassigned_text_size_ink=int(sum(q[4] for q in unassigned)),
+                              rule_mask_fraction=float(p.barriers.mean())),
+        '8_nontext_ink': dict(candidate_lines_on_detected_graphics=nontext_hits, detected_graphics=[list(map(int,b)) for b in p.nontext_boxes],
+                             stamp_truncation='Requires visual review; no independent stamp/text labels'),
+        '9_headings': dict(possible_broken_pairs=broken),
+        '10_existing_checks': dict(foreign_lines=foreign, overlap_pairs=overlaps, broken_pairs=broken, seam_gaps=seam_gaps),
+    }
+    return dict(checks=checks, active_lines=len(active), discounted_lines=len(lines)-len(active), pixel_segments=len(p.boxes), final_lines=len(lines), multi_line_segments=multi,
                 cut_ink_lines=len(cuts), foreign_ink_lines=len(foreign), rule_gutter_crossings=len(crossings),
                 boundary_overlaps=len(overlaps), broken_line_pairs=len(broken),
                 cut_line_indices=cuts, foreign_line_indices=foreign, crossing_line_indices=crossings,
@@ -679,7 +932,12 @@ def segment_page(page: Image.Image | NDArray[Any], hints: Sequence[Sequence[floa
         raise ValueError('hints must be finite positive-area (x0,y0,x1,y1) boxes')
     boxes = boxes.reshape(-1, 4)
     p = prepare_pixels(page)
-    models = _reject_residual_bands(_merge(p, _discover(p)))
+    models = _reject_residual_bands(_merge(p, _recover_bodies(p, _discover(p))))
+    reference = float(np.percentile(p.components[:, 6], 25)) if len(p.components) else 0
+    paper = float(np.percentile(p.gray, 90))
+    for m in models:
+        own = p.components[np.isin(p.components[:, 5], list(m['body_ids']))]
+        m['faint'] = bool(len(own) and paper-np.median(own[:, 6]) < .6*(paper-reference))
     _lanes(models)
     _pool_geometry(models)
     # Pooling can align formerly isolated seed pieces; join again before owning
@@ -690,15 +948,24 @@ def segment_page(page: Image.Image | NDArray[Any], hints: Sequence[Sequence[floa
     owners = _assign(p, models)
     lines = _make_lines(p, models, owners, boxes)
     lines = _coalesce_lines(p, lines)
+    _line_contrast(p, lines)
+    fit_guides(p, lines)
+    for line in lines:
+        bodies = sum(line.ink_classes.get(k, 0) for k in ('body_on_baseline', 'body_with_descender', 'tall_body'))
+        if not bodies:
+            line.discounted = line.discounted or 'no letter bodies'
+        if line.support < 3 and line.x1-line.x0 > 5*line.xheight:
+            line.discounted = line.discounted or 'non-text: incoherent component band'
+    _final_columns(lines)
     lines = _reading_order(lines)
-    _boundaries(lines, *p.gray.shape)
+    _boundaries(lines, *p.gray.shape, pixels=p)
     _addresses(lines, p.boxes)
     return PageSegmentation(lines, p.boxes, p.xheight, _diagnostics(p, lines), p)
 
 
 def page_line_segments(page: Image.Image | NDArray[Any], hints: Sequence[Sequence[float]] | None = None) -> list[LineSegment]:
     """Return one curved segment per detected printed line, starting from pixels."""
-    return segment_page(page, hints=hints).lines
+    return [line for line in segment_page(page, hints=hints).lines if line.discounted is None]
 
 
 def extract_line_image(page: Image.Image | NDArray[Any], line: LineSegment, *, xheight: int = 32) -> Image.Image:
@@ -716,8 +983,9 @@ def _extract(gray, line, xheight):
     xs = np.clip(xs, line.x0, line.x1 - 1)
     grid = np.arange(line.x0, line.x1)
     base = np.interp(xs, grid, line.baseline)
-    offsets = (np.arange(4 * xheight) - 2.5 * xheight) / scale
-    yy = base[None, :] + offsets[:, None]
+    local_xh = np.interp(xs, grid, line.baseline-line.meanline)
+    offsets = (np.arange(4*xheight)-2.5*xheight)/xheight
+    yy = base[None, :] + offsets[:, None]*local_xh[None, :]
     xx = np.broadcast_to(xs, yy.shape)
     strip = ndi.map_coordinates(gray, [yy, xx], order=1, mode='constant', cval=255)
     top, bottom = np.interp(xs, grid, line.top), np.interp(xs, grid, line.bottom)

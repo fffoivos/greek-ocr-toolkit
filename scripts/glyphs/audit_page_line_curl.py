@@ -30,6 +30,8 @@ def audit(pages, out):
         x = np.array([a + p[0] for p in contacts]); y = np.array([t + p[1] for p in contacts])
         candidates = []
         for i, line in enumerate(lines):
+            if line.get('discounted') is not None:
+                continue
             inside = (x >= line['x0']) & (x < line['x1'])
             if inside.sum() >= len(x) / 2:
                 pred = np.interp(x, np.arange(line['x0'], line['x1']), line['baseline'])

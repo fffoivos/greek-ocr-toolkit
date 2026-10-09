@@ -31,13 +31,19 @@ def render(page, result, prefix):
         top = [(int(x[k]), float(line.top[k])) for k in indices]
         bottom = [(int(x[k]), float(line.bottom[k])) for k in indices]
         d.polygon(top + bottom[::-1], fill=color + (32,))
-        for curve in ('top', 'bottom', 'font_top', 'meanline', 'baseline', 'font_bottom'):
+        for curve in ('top', 'bottom', 'font_top', 'meanline', 'baseline', 'font_bottom', 'accent_bottom', 'accent_top'):
             points = [(int(x[k]), float(getattr(line, curve)[k])) for k in indices]
             if len(points) < 2:
                 continue
-            d.line(points, fill=((20, 20, 20, 150) if curve in ('top', 'bottom') else color + (220,)),
-                   width=2 if curve == 'baseline' else 1)
-        d.text((line.x0, float(line.baseline[0]) - line.xheight), str(i), fill=(0, 0, 0, 255))
+            guide_colors = dict(baseline=(220,30,30), meanline=(0,110,235), font_top=(0,150,90),
+                                font_bottom=(150,40,190), accent_bottom=(230,120,0), accent_top=(20,170,180))
+            stroke = guide_colors.get(curve,(30,30,30))+(220,)
+            if curve.startswith('accent'):
+                for start in range(0,len(points)-1,4):
+                    d.line(points[start:start+2],fill=stroke,width=2)
+            else:
+                d.line(points,fill=stroke,width=2 if curve=='baseline' else 1)
+        d.text((line.x0, float(line.baseline[0]) - line.xheight), str(i)+(' [discounted]' if line.discounted else ''), fill=(0, 0, 0, 255))
     Image.alpha_composite(page.convert('RGBA'), overlay).convert('RGB').save(str(prefix) + '.lines.jpg', quality=92)
     strips = [_extract(result.pixels.gray, line, 32) for line in result.lines]
     # All strips use the same scale and baseline position. Nothing is squeezed
@@ -51,7 +57,7 @@ def render(page, result, prefix):
     for i, (line, strip) in enumerate(zip(result.lines, strips)):
         x, y = (i // rows) * width, (i % rows) * 140
         sheet.paste(strip, (x + 60, y))
-        sd.text((x + 4, y + 50), f'{i}\nc{line.column}', fill=COLORS[i % len(COLORS)])
+        sd.text((x + 4, y + 50), f'{i}\nc{line.column}'+(' D' if line.discounted else ''), fill=COLORS[i % len(COLORS)])
         sd.line([(x, y + 134), (x + width, y + 134)], fill=(210, 210, 210))
     sheet.save(str(prefix) + '.unrolled.jpg', quality=94)
 
@@ -65,7 +71,7 @@ def main():
     args = parser.parse_args(); args.out.mkdir(parents=True, exist_ok=True)
     rows = []
     sources = ['greekocr/glyphs/pixel_segments.py', 'greekocr/glyphs/page_text_lines.py',
-               'greekocr/glyphs/components.py', 'greekocr/glyphs/baseline.py', __file__]
+               'greekocr/glyphs/page_font.py', 'greekocr/glyphs/components.py', 'greekocr/glyphs/baseline.py', __file__]
     implementation_sha256 = hashlib.sha256(b''.join(Path(p).read_bytes() for p in sources)).hexdigest()
     for path in sorted(args.pages.glob('*.png')):
         if args.keys and path.stem not in args.keys:

@@ -1,11 +1,11 @@
 # Pixel-first page line segments
 
 `greekocr.glyphs.page_text_lines.page_line_segments(page, hints=None)` starts
-with the page pixels. `segment_page` returns the same lines together with their
+with the page pixels. `segment_page` retains both active and explicitly discounted candidates together with their
 rough pixel boxes, intermediate masks and measured diagnostics. This is an
 experimental page pipeline; the reviewed crop tools and their defaults are
 unchanged. See the measured development report in
-`docs/reviews/PAGE_LINES_ROUND2_20261009.md` before using its output for OCR.
+`docs/reviews/PAGE_LINES_ROUND3_20261009.md` before using its output for OCR.
 
 ## Method
 
@@ -28,23 +28,34 @@ rules, persistent gutters, or a gap over ten x-heights. A three-x-height gap
 alone is not a stop. Weak residual bands beside well-supported lines are
 rejected; isolated short cells retain their own vertical position.
 
-The crop fits establish the identities. A local shared column surface then
-pools their baseline support, with one vertical shift per line. A linear term
-in page height accommodates gradual skew drift. One/two-character cells
-borrow this geometry instead of fitting an angle. A second joint fit uses the
-local mode of actual letter bottoms: the top of a capital is not an x-height
-measurement, and descenders must not pull the baseline down. Detached accents
-attach to nearby letter bodies. Font offsets pool measurements among similar
-sizes, rather than applying the body font's absolute height to headings.
+The crop fits establish provisional identities and shared column geometry.
+`page_font` then classifies bodies, tall letters, descenders, upper/lower marks,
+punctuation and non-text. Detached marks follow nearby physical bodies. A fused
+upper mark can be split at a narrow neck above the mean line. Each class supplies
+its own contacts to a robust fit of one shape with six vertical offsets. Missing
+classes borrow median ratios from comparable type sizes, with defaults only
+when the page has no such evidence. Borrowing is explicit in every record.
+All-capital bands measure their capital guide and borrow a mean line.
 
-After fitting, the seed rectangles are only provenance. Each final line's
-extent comes from the owned page components and is stopped again at the
-final curve's rules/gutters. A sweep constructs per-column neighbour
-addresses. Neighbours share one boundary: the midpoint of their facing font
-lines. Sampling follows the baseline and clips at these boundaries. The
-normalised image has x-height 32 by default, meanline row 48, baseline row 80,
-and height 128. Pixels are resampled from the original grayscale image; no
-recognised text is used to repair or erase them.
+Faint ink is measured against both local paper and the page's stronger text.
+Discounted candidates remain in `segment_page().lines` and the saved review,
+but `page_line_segments()` excludes them from OCR. They do not enter the
+neighbour graph or the active overlap/cutoff counts. A uniformly faded page
+remains detectable. This is photometric evidence, not a semantic stamp or
+mirrored-letter recognizer.
+
+After fitting, seed rectangles are provenance. Final extents follow owned
+components and stop at graphical rules and persistent gutters. Broken and
+tilted rule pieces establish continued page-coordinate paths. Stable neighbour
+seams extend through short line ends using the longer neighbour's shape;
+local ink constraints route seams around marks. Incompatible ownership still
+produces measured cutoff errors rather than a claim of perfect tessellation.
+Regions without nearby text neighbours retain an ordinary font margin.
+
+The normalised image has x-height 32 by default, meanline row 48, baseline row
+80, and height 128. Slowly varying measured x-height is normalized per column.
+Pixels are resampled from the original grayscale image; no recognised text is
+used to repair or erase them. Faint stamps can remain visible in those pixels.
 
 ## API and coordinates
 
@@ -57,18 +68,26 @@ record = line.to_record()
 ```
 
 `x0` is inclusive, `x1` exclusive. The arrays `baseline`, `font_top`,
-`meanline`, `font_bottom`, `top`, and `bottom` have one value for every source
+`meanline`, `font_bottom`, `accent_bottom`, `accent_top`, `top`, and `bottom` have one value for every source
 pixel column. Image y increases downwards. A `column` is a spatial lane ID,
 not a recovered table cell or semantic reading-order label. Layout changes
 and spanning headings can still make these lane IDs approximate.
+
+`borrowed` lists guides without trustworthy measurements; `ink_classes` counts
+classified pieces (a fused mark may add a second piece). `contrast` is relative
+to the page's stronger text; `discounted` is null or an explicit reason.
+`guide_residuals` reports count, median, p90 and maximum normalized distance
+for each observed class, with null distances for absent classes. These are
+self-consistency measurements, not independently labelled font truth.
 
 `segment_indices` refer to `result.segments`, the pixel-only boxes.
 `segment_positions` contain `(segment, row, horizontal_position)` addresses.
 `neighbours['above']` and `['below']` are per-pixel arrays of final line indices;
 `-1` means no neighbour. Left/right addresses are scalars or `None`.
 `hint_indices` refer only to optional rectangles. Hints never create, split,
-fit or move a line, and their `text` is never consumed. The renderer can rerun
-Vouli pages with hints and compare every final geometry array exactly.
+fit or move a line, and their `text` is never consumed. The renderer reruns
+Vouli pages with hints and compares extents, column, provenance, four font
+curves and both region edges exactly.
 
 The restored opt-in Docling `mode='detector'` uses this API and these unrolled
 strips before layout. Docling receives rectangular envelopes; its call log
@@ -82,13 +101,18 @@ Run these commands from the worktree root with the Python specified in the
 implementer brief (set `PYTHONDONTWRITEBYTECODE=1` for each invocation):
 
 ```sh
+python scripts/generate_api_docs.py
+python -m pytest -q -p no:cacheprovider tests/glyphs tests/test_provenance_cli_api.py tests/test_docling_contract.py > .astra/tests-round3.log 2>&1
 python scripts/glyphs/render_page_line_segments.py --compare-hints
+python scripts/glyphs/review_page_lines_round3.py
 python scripts/glyphs/audit_page_line_outputs.py
 python scripts/glyphs/audit_page_line_curl.py
-python scripts/generate_api_docs.py
-python -m pytest -q -p no:cacheprovider tests/glyphs tests/test_provenance_cli_api.py tests/test_docling_contract.py > .astra/tests-final.log 2>&1
-python scripts/glyphs/summarize_page_line_review.py
+python scripts/glyphs/review_page_lines_round3.py
 ```
+
+The first report pass supplements check 8 with rough-box/graphic intersections.
+The audit then binds those saved files, and the last report pass includes the
+completed audit and test receipts. It does not change detector geometry.
 
 The renderer writes `.astra/out/<key>.segments.json`, `.lines.json`,
 `.checks.json`, `.lines.jpg`, and `.unrolled.jpg`. Strips retain their fixed
@@ -113,7 +137,7 @@ the frozen crop fixtures, then measures the manually selected contacts.
   Stamps rejected during discovery, missed lines and unassigned ink are not
   magically recognised by this measurement. Unassigned body-component counts
   and retained assigned-ink fractions are included separately.
-* **Cross** counts crossing a detected rule/gutter, not undetected boundaries.
+* **Cross** counts crossing a detected rule/gutter, including continued rule paths and full-height folds. It still cannot count an undetected boundary.
 * **Overlap** tests actual positive intersection of all pairs of regions. The
   independent saved-output audit repeats this on the rounded JSON curves.
 * **Broken** counts aligned disjoint pieces separated by at most ten x-heights
