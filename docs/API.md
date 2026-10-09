@@ -649,6 +649,152 @@ from greekocr.glyphs.lines_api import separate_lines
 lines = separate_lines(Image.open("crop.png"), min_visible=.5)
 ```
 
+### `greekocr.glyphs.orientation.QuarterTurn`
+
+Exact boundary-coordinate transform from a source crop to upright pixels.
+
+```python
+from greekocr.glyphs.orientation import QuarterTurn
+frame = QuarterTurn(image.width, image.height, 270, offset=(11, 13))
+```
+
+### `greekocr.glyphs.orientation.QuarterTurn.points`
+
+`def points(self, points: Sequence[Sequence[float]] | np.ndarray, *, inverse: bool=False) -> np.ndarray`
+
+Map N corners or guide samples; never reduce an oriented quad to AABB.
+
+```python
+from greekocr.glyphs.orientation import QuarterTurn
+mapped = frame.points(corners, inverse=True)
+```
+
+### `greekocr.glyphs.orientation.QuarterTurn.image`
+
+`def image(self, image: Image.Image) -> Image.Image`
+
+Normalize pixels with exact transposition (no quarter-turn resampling).
+
+```python
+from greekocr.glyphs.orientation import QuarterTurn
+upright = frame.image(image)
+```
+
+### `greekocr.glyphs.orientation.QuarterTurn.rectangle`
+
+`def rectangle(self, box: Sequence[float], *, inverse: bool=True) -> np.ndarray`
+
+Ordered BL, BR, TR, TL corners, mapped from an upright text box.
+
+```python
+from greekocr.glyphs.orientation import QuarterTurn
+corners = frame.rectangle((10, 20, 80, 45))
+```
+
+### `greekocr.glyphs.orientation.Orientation`
+
+Axis, polarity, residual skew and their independent evidence.
+
+```python
+from greekocr.glyphs.orientation import Orientation
+decision = Orientation(axis="horizontal", orientation_cw=None, alternatives=[0, 180])
+```
+
+### `greekocr.glyphs.orientation.Orientation.to_record`
+
+`def to_record(self) -> dict`
+
+JSON-ready record; None serializes as explicit unknown (null).
+
+```python
+from greekocr.glyphs.orientation import Orientation
+record = decision.to_record()
+```
+
+### `greekocr.glyphs.orientation.measure_orientation`
+
+`def measure_orientation(image: Image.Image, *, use_osd: bool=False, unit: str='block') -> Orientation`
+
+Measure a region; short words require recognizer evidence for polarity.
+
+```python
+from greekocr.glyphs.orientation import measure_orientation
+decision = measure_orientation(image, use_osd=False, unit="word")
+```
+
+### `greekocr.glyphs.orientation.canonical_word_crop`
+
+`def canonical_word_crop(image: Image.Image) -> Image.Image`
+
+Remove arbitrary margins, keep all significant ink, add 0.1 body heights.
+
+```python
+from greekocr.glyphs.orientation import canonical_word_crop
+crop = canonical_word_crop(word_image)
+```
+
+### `greekocr.glyphs.orientation.recognizer_polarity`
+
+`def recognizer_polarity(image: Image.Image, orientation: Orientation, recognizer: _Recognizer, *, margin: float=0.12) -> Orientation`
+
+Compare axis-consistent readings with our recognizer; retain both on doubt.
+
+```python
+from greekocr.glyphs.orientation import recognizer_polarity
+decision = recognizer_polarity(crop, axis_decision, recognizer)
+```
+
+### `greekocr.glyphs.orientation.discover_directions`
+
+`def discover_directions(image: Image.Image) -> list[dict]`
+
+Propose local chains in BOTH axes before fitting any horizontal lines.
+
+```python
+from greekocr.glyphs.orientation import discover_directions
+proposals = discover_directions(page_image)
+```
+
+### `greekocr.glyphs.oriented_page.OrientedWord`
+
+A separately recognizable word and its local guides, in a reversible frame.
+
+```python
+from greekocr.glyphs.oriented_page import OrientedWord
+word = OrientedWord(**measured_word_geometry)
+```
+
+### `greekocr.glyphs.oriented_page.OrientedWord.to_record`
+
+`def to_record(self, image_size: Sequence[int], page_size: Sequence[float] | None=None) -> dict`
+
+Serialize original-frame corners, local guides and separate confidences.
+
+```python
+from greekocr.glyphs.oriented_page import OrientedWord
+record = word.to_record(image.size, (page_width, page_height))
+```
+
+### `greekocr.glyphs.oriented_page.OrientedPage`
+
+Legacy horizontal records plus independent local-frame words and evidence.
+
+```python
+from greekocr.glyphs.oriented_page import OrientedPage
+page = OrientedPage(**measured_oriented_page)
+```
+
+### `greekocr.glyphs.oriented_page.oriented_page`
+
+`def oriented_page(image: Image.Image, table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, recognizer: _Recognizer | None=None, use_osd: bool=True, segmentation: Any=None, pieces: list | None=None, dominant: Orientation | None=None, discover: bool=True) -> OrientedPage`
+
+Discover directions, normalize groups, fit, split and inverse-map words.
+
+```python
+from greekocr.glyphs.oriented_page import oriented_page
+page = oriented_page(image, table_regions, recognizer=recognizer)
+```
+
 ### `greekocr.glyphs.page_lines.PageTextLine`
 
 ```python

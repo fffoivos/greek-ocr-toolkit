@@ -5,6 +5,20 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 CALLS={
+'Orientation':'decision = Orientation(axis="horizontal", orientation_cw=None, alternatives=[0, 180])',
+'QuarterTurn':'frame = QuarterTurn(image.width, image.height, 270, offset=(11, 13))',
+'points':'mapped = frame.points(corners, inverse=True)',
+'image':'upright = frame.image(image)',
+'rectangle':'corners = frame.rectangle((10, 20, 80, 45))',
+'measure_orientation':'decision = measure_orientation(image, use_osd=False, unit="word")',
+'recognizer_polarity':'decision = recognizer_polarity(crop, axis_decision, recognizer)',
+'discover_directions':'proposals = discover_directions(page_image)',
+'canonical_word_crop':'crop = canonical_word_crop(word_image)',
+'OrientedWord':'word = OrientedWord(**measured_word_geometry)',
+'OrientedPage':'page = OrientedPage(**measured_oriented_page)',
+'OrientedWord.to_record':'record = word.to_record(image.size, (page_width, page_height))',
+'Orientation.to_record':'record = decision.to_record()',
+'oriented_page':'page = oriented_page(image, table_regions, recognizer=recognizer)',
 'TextPiece':'piece = TextPiece((10, 20, 80, 45), 0, detected_line, "table-0", "piece-0")',
 'TextPiece.to_record':'record = piece.to_record(0, image.size, (page_width, page_height))',
 'table_text_pieces':'pieces = table_text_pieces(image, (10, 20, 800, 900))',

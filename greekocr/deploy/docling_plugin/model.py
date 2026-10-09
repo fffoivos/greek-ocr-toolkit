@@ -179,6 +179,59 @@ class GlossapiOcrModel(BaseOcrModel):
                                   line_index=p.line_index, table_id=p.table_id, cell_id=p.cell_id,
                                   geometry_source=p.line.geometry_source) for c, p in zip(ours, pieces)])
 
+    def _detect_oriented(self, page, record):
+        from greekocr.glyphs.oriented_page import oriented_page
+        from greekocr.glyphs.orientation import _recognition_strip
+        from docling_core.types.doc.page import TextDirection
+
+        if page.parsed_page is None:
+            record['reason'] = 'no_parsed_page'
+            return
+        start = perf_counter()
+        image = page.get_image(scale=self.options.crop_scale)
+        if image is None:
+            record['reason'] = 'no_page_image'
+            return
+        sx, sy = image.width/page.size.width, image.height/page.size.height
+        regions = []
+        layout = getattr(page.predictions,'layout',None)
+        for c in getattr(layout,'clusters',[]):
+            if c.label in (DocItemLabel.TABLE,DocItemLabel.DOCUMENT_INDEX) and c.confidence >= .5:
+                b = c.bbox.to_top_left_origin(page_height=page.size.height)
+                regions.append((str(c.id),(b.l*sx,b.t*sy,b.r*sx,b.b*sy)))
+        recognizer = self._get_recognizer()
+        result = oriented_page(image,regions,recognizer=recognizer)
+        strips = []
+        for w in result.words:
+            strip = _recognition_strip(w.crop)
+            if strip is None:
+                raise ValueError('invalid oriented word crop')
+            strips.append(strip)
+        predictions = recognizer.recognize(strips) if strips else []
+        if len(predictions) != len(result.words):
+            raise ValueError('recognizer returned a different number of words')
+        ours, records = [], []
+        for w,(text,confidence) in zip(result.words,predictions):
+            w.text,w.recognition_confidence = text,confidence
+            r = w.to_record(image.size,(page.size.width,page.size.height))
+            rect = BoundingRectangle(**{f'r_{axis}{i}':p[j] for i,p in enumerate(r['corners_page'])
+                                        for j,axis in enumerate(('x','y'))},coord_origin=CoordOrigin.TOPLEFT)
+            ours.append(TextCell(index=w.index,from_ocr=True,rect=rect,text=text,orig=text,
+                                 confidence=confidence,text_direction=TextDirection.LEFT_TO_RIGHT))
+            records.append(r)
+        self._install(ours,page)
+        if getattr(page,'_backend',None) is not None:
+            page._backend._greekocr_word_orientations = {w.index:w.orientation.orientation_cw for w in result.words}
+        record.update(status='replaced',installed=True,output_line_count=len(ours),
+                      output_word_count=len(ours),recognition_performed=bool(strips),
+                      dominant_orientation=result.dominant.to_record(),groups=result.groups,
+                      proposals=result.proposals,words=records,
+                      frame=dict(image_size=list(image.size),page_size=[page.size.width,page.size.height],
+                                 image_to_page=[[1/sx,0,0],[0,1/sy,0],[0,0,1]],
+                                 source_to_page=getattr(getattr(page._backend,'frame',None),'matrix',np.eye(3)).tolist()
+                                 if getattr(page,'_backend',None) is not None else np.eye(3).tolist()))
+        record['timings_s']['oriented_detect_and_recognize'] = perf_counter()-start
+
     def __call__(self, conv_res, page_batch):
         if not self.enabled:
             yield from page_batch
@@ -194,8 +247,11 @@ class GlossapiOcrModel(BaseOcrModel):
                       "mode": self.options.mode, "recognition_mode": self.options.recognition_mode,
                       "crop_scale": self.options.crop_scale,
                       "status": "unsupported", "timings_s": {}}
-            if self.options.recognition_mode == "detector":
-                self._detect(page, record)
+            if self.options.recognition_mode in ("detector", "oriented"):
+                if self.options.recognition_mode == 'oriented':
+                    self._detect_oriented(page, record)
+                else:
+                    self._detect(page, record)
                 self._record(record)
                 yield page
                 continue

@@ -1138,3 +1138,7 @@ The two CLLG implementation files above now support optional confidence records.
 | `tests/fixtures/page_s2-49598b2e848ab1f0ee1e-p00001/crops/s2-49598b2e848ab1f0ee1e-p00001-l00069.png` | `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/tests/fixtures/page_s2-49598b2e848ab1f0ee1e-p00001/crops/s2-49598b2e848ab1f0ee1e-p00001-l00069.png` | 56b378d992d3e4fdf6cfdd1e203810e90b5d4a12 | HEAD (generated in this repository) | byte-identical |
 | `tests/fixtures/page_s2-49598b2e848ab1f0ee1e-p00001/crops/s2-49598b2e848ab1f0ee1e-p00001-l00070.png` | `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/tests/fixtures/page_s2-49598b2e848ab1f0ee1e-p00001/crops/s2-49598b2e848ab1f0ee1e-p00001-l00070.png` | 56b378d992d3e4fdf6cfdd1e203810e90b5d4a12 | HEAD (generated in this repository) | byte-identical |
 | `tests/fixtures/page_s2-49598b2e848ab1f0ee1e-p00001/index.json` | `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/tests/fixtures/page_s2-49598b2e848ab1f0ee1e-p00001/index.json` | 56b378d992d3e4fdf6cfdd1e203810e90b5d4a12 | HEAD (generated in this repository) | byte-identical |
+
+Round 4 part 3 adds the opt-in oriented OCR mode without changing the compatibility detector.
+
+| `greekocr/deploy/docling_plugin/orientation.py` | new toolkit implementation | uncommitted at capture | new | coherent pre-layout and rotated-table adapters |

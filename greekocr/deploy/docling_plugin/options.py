@@ -12,7 +12,7 @@ class GlossapiOcrOptions(OcrOptions):
     lang: list[str] = Field(default_factory=lambda: ["el", "en"])
     checkpoint: Path
     codec: Path
-    recognition_mode: Literal["textlayer", "detector"] = "textlayer"
+    recognition_mode: Literal["textlayer", "detector", "oriented"] = "textlayer"
     crop_scale: float = Field(default=3.0, gt=0, allow_inf_nan=False)
     device: str = "cpu"
     routing_sidecar: Path | None = None
