@@ -26,7 +26,8 @@ ids (`<key>-sNNNNN`), which are also indices into `<key>.segments.json`. Two ter
    page's own text, must count against a detection.
 4. **The line regions are jagged.** Their edges jump up and down by several x-heights. Line geometry on a printed
    page is smooth, and so must the regions be.
-5. **A line crosses into the other column**, and the crossing check did not notice.
+5. **Lines cross into the other column, and across the fold of a two-page spread**, and the crossing check did not
+   notice.
 6. **Text is missed where the rule detector takes it for a rule:** a darker grey corner of the page, and the curled
    starts of lines next to the binding.
 7. **Illustrations and ornaments get lines.** The owner calls this a main issue: "ideally we would avoid those that
@@ -67,6 +68,43 @@ document.
   so.
 - The crop tools already measure the rise and drop per crop (`report.line_record`, `baseline.text_lines`). Reuse them,
   or show something better on these pages.
+
+### The owner's proposal: a separate accent band (2–3 lines) on top of the 4 font lines
+
+**Owner:** "one of the reasons that there might be bad 4 font lines here, is that there might need to be a distinct
+accent region from the fonts so maybe 2-3 lines for accents + 4 lines for fonts."
+
+The measurements support it. They are rough: components were sorted by shape on the lines with ≥ 15 components. The
+values are heights above the baseline, in x-heights (10th percentile / median / 90th percentile):
+
+| | an-d6fd2cf2f618-p000047 | s2-49598b2e848ab1f0ee1e-p00001 |
+|---|---|---|
+| tops of small letters | 0.90 / 1.00 / 1.10 | 0.91 / 0.98 / 1.06 |
+| tops of capitals and ascenders | 1.43 / 1.59 / 1.87 | 1.47 / 1.60 / 1.87 |
+| bottoms of accents and breathings | 1.19 / 1.39 / 2.50 | 1.18 / 2.04 / 2.77 |
+| tops of accents and breathings | 1.63 / 1.86 / 2.97 | 1.62 / 2.42 / 3.13 |
+| descender depth below the baseline | 0.42 / 1.05 / 1.38 | 0.36 / 0.63 / 1.44 |
+
+What this shows:
+- On these pages, accents occupy their own band: about 1.2–1.9 x-heights over small letters (higher over capitals
+  and stacked marks).
+- That band **overlaps the height of the capitals** (about 1.4–1.9). So one "top" line cannot stand for both, and
+  height alone cannot tell an accent from a capital. What separates them is that an accent is a small mark detached
+  above a letter body.
+- Astra's pooled top line (−1.91 x-heights on p000047, −1.84 on Vouli p00001) is effectively the **top of the
+  accents** (median 1.86 on p000047), not the top of the capitals.
+
+**Requirement (the owner's model):** each line carries the **4 font lines** plus **2–3 accent lines**:
+- the 4 font lines: top of capitals/ascenders, mean line, baseline, descender bottom, measured on letter bodies only;
+- the accent lines:
+  - accent bottom: where the marks above the small letters start;
+  - accent top: where they end;
+  - possibly a third: for stacked marks (breathing with accent, a circumflex over a breathing) and accents over
+    capitals, which sit higher. Whether this is needed is to be decided from the measurements.
+
+Accent marks are assigned to the letter body under them (or, before a capital, to that capital), and so to that line.
+The accent band is part of the line's region but not of its font geometry. A band holding only accent marks is never a
+line (section 2). Iota subscripts and other marks below the letters stay in the descender zone.
 
 ## 2. Extra lines on parts of real lines, and the cut-offs they cause
 
@@ -241,6 +279,60 @@ Measured:
   gutter, which runs down the full column height. Local evidence at one height is not enough.
 - The crossing check must use that same boundary, so it cannot report 0 when a line crosses.
 
+### an-5c093c79d6bb-p000199: the first lines of the two facing pages joined
+
+**Owner:** "Bad connection of the first two lines of the two opposing pages here."
+
+The scan is a two-page spread (pages 382 and 383) with a white fold between them.
+
+Measured:
+- Lines 20, 21 and 22 each run across both pages (x ≈ 670–2744). They join the first three lines of page 382 to the
+  page number «383» and the first two lines of page 383 («ἐχθρικῶς· ἐκεῖνος ὁποῦ ἀλείφει κεντᾷ …», «κάμνει
+  πλεσιωτέραν τράπεζαν …»).
+- Further down, the pages are kept apart: left-page lines end at x ≈ 1605, right-page lines start at x ≈ 1747. The
+  fold gap is therefore about 140 px, 5.9 x-heights.
+- At the fold the joined lines kink. Line 20's baseline runs y 200 → 165 → 206 between x 1500 and 1763.
+- Checks report 0 crossings.
+
+### an-9ea1564fcf4f-p000013: the two facing pages joined all the way down
+
+**Owner:** "Similarly bad connections between the two pages on all the pages here."
+
+Measured:
+- 26 lines (lines 34–59) each run across both pages, from x ≈ 440 to x ≈ 2230–2850. That is every line of the
+  facing text from the top down to the start of the footnotes.
+- Only the last six text lines of the left page (lines 60–65, ending at x ≈ 1525) and the lower lines of the right
+  page stay separate.
+- The fold is narrow here. The left page's text ends at x ≈ 1525 and the right page's starts at x ≈ 1570, so the gap
+  is about 45–80 px, 2.5–4.5 x-heights (body x-height 18 px).
+- The baselines of the two pages are almost level at the fold (e.g. line 50: y 1048 at x 1500, 1055 at x 1650), so
+  nothing local stops the join.
+- Checks report 0 crossings.
+
+**Cause (both spreads):**
+- `_coalesce_lines` extends a line across any gap of up to **10 x-heights** whose two ends are level within half an
+  x-height, unless a detected rule or gutter blocks it.
+- The fold of a spread was not detected as a boundary at those heights. Its gap (2.5–6 x-heights) is well within the
+  10.
+
+**Requirement:**
+- The fold of a two-page spread is a page boundary: the strongest column boundary there is. No line, segment or
+  region crosses it.
+- Find it from the whole spread, not from the gap at one height. Evidence that runs the full height:
+  - a white or shadowed strip down the middle;
+  - two text blocks with their own margins and their own line phase (the baselines of facing pages are generally
+    not in step);
+  - page numbers and running heads at both tops;
+  - often, dark scan borders at both outer edges.
+- More generally, a gap of several x-heights between level line pieces is joined only when the column structure says
+  both pieces are in the same column.
+
+### Seen while checking these spreads (not named by the owner): lines on the book edge
+
+On both spreads the scanned edge of the book block on the left (the stacked page edges and a dark scan border) carries
+many lines: 20 of the 77 lines on an-5c093c79d6bb-p000199 and 37 of the 96 on an-9ea1564fcf4f-p000013 end left of
+x 480 and 400. These are scan borders (section 7: not text, no lines).
+
 ## 6. Text missed because the rule detector takes it for a rule
 
 ### s2-74cdb23a34ca4a6cd01e-p00002: the bottom-left corner of the page
@@ -349,7 +441,8 @@ handled as a separate one-letter item, or left to the layout stage.
 ## Checks for the next round
 
 Report per page, on all 48 development pages, then on the held-out pages:
-1. **Font lines:** for each line, the distance from each of the four lines to the ink it should touch, in
+1. **Font and accent lines:** for each line, the distance from each of the four font lines (and the accent lines) to
+   the ink it should touch, in
    x-heights:
    - the baseline to the letter bottoms;
    - the mean line to the small-letter tops;
@@ -365,7 +458,8 @@ Report per page, on all 48 development pages, then on the held-out pages:
    why.
 5. **Smoothness:** the largest jump of each region edge between neighbouring pixel columns, in x-heights. It should be
    well under 0.1, except where a seam bends around a mark.
-6. **Column crossings:** the count, measured against the full-height column boundaries (must be 0).
+6. **Column crossings:** the count, measured against the full-height column boundaries and the fold of a spread
+   (must be 0).
 7. **Missed text:** ink of text size left without a line, and the share of the page marked as rule. Report both per
    page.
 8. **Non-text ink:** lines and segments on ornaments, pictures, stamps and scan edges (should be 0), and text lines
@@ -396,3 +490,6 @@ Report per page, on all 48 development pages, then on the held-out pages:
 | 16 | an-1f8e7d022643-p000003 | «ΑΚΟΛΟΥΘΙΑ» | unusual spacing between the letters | 8 |
 | 17 | an-3352d912f2e9-p000104 | s00019, text over the stamp | letters on top of the watermark not detected | 3 |
 | 18 | an-3352d912f2e9-p000104 | s00019, first letter | large first capital: open problem, later | open |
+| 19 | an-5c093c79d6bb-p000199 | first lines of both pages | lines of the two facing pages joined | 5 |
+| 20 | an-9ea1564fcf4f-p000013 | all lines of both pages | lines of the two facing pages joined | 5 |
+| 21 | all pages | — | proposal: a distinct accent region, 2–3 accent lines + the 4 font lines | 1 |
