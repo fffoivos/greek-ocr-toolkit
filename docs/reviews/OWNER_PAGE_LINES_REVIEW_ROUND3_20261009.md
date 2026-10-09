@@ -45,3 +45,16 @@ What this means for the requirements of round 2:
   boundary even without a printed rule.
 - Faintness (round 2, section 3) must be judged on each piece of a line, not on the line as a whole. A faint piece is
   discounted even when it is joined to dark text; with the column boundary respected, the two would not be one line.
+
+## 27. s2-93f8070059f938bda524-p00001: a good result, kept as a reference
+
+**Owner:** "while for example s2-93f8070059f938bda524-p00001 is very good, even though it has faint letters in the
+background."
+
+Measured on the round-3 output:
+- The page has two columns. It has 129 lines, of which 12 are discounted as faint.
+- No active line crosses the columns: the widest active lines are 1422–1450 px, about one column's width on a
+  3271 px page, and every active line lies in column 1 or 2.
+
+This is how case 26 should come out: the faint background letters are discounted, and every line stays within its
+column. Any change made for case 26 must keep this page as good as it is.
