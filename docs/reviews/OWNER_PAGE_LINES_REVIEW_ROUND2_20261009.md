@@ -55,21 +55,9 @@ document.
 - Because the percentile includes accents and breathings, the top line sits at accent height rather than at the tops
   of capitals and ascenders. On lines without capitals or ascenders (all-capital headings, digits) it fits nothing.
 
-**What it must do instead:**
-- Measure all four lines **on each line, from its own letters**, and let them follow the line's skew or curve like
-  the baseline:
-  - baseline: letter bottoms, excluding descenders;
-  - mean line: tops of the small letters (α ε ο ν …), excluding accents;
-  - top line: tops of capitals and ascenders, excluding accents and breathings;
-  - bottom line: bottoms of descenders.
-- Accents, breathings and other diacritics are marks **above a line's letters**: they belong to the line beneath
-  them and lie above its top line. The line's region must still include them (see 4).
-- A line too short to give many points takes its geometry from same-size neighbours in the same column, as the
-  algorithm's shared page geometry says. (The owner, round 1: "we need many points to find an orientation".) Where a
-  line has no capitals or no descenders, the top or bottom offset comes from same-size lines, and the line record says
-  so.
-- The crop tools already measure the rise and drop per crop (`report.line_record`, `baseline.text_lines`). Reuse them,
-  or show something better on these pages.
+**What it must do instead:** measure every guide line on each line from its own class of ink, so that all of them
+follow the line's skew and curve. The required design is at the end of this section, after the owner's accent
+proposal and the measurements behind it.
 
 ### The owner's proposal: a separate accent band (2–3 lines) on top of the 4 font lines
 
@@ -96,17 +84,90 @@ What this shows:
 - Astra's pooled top line (−1.91 x-heights on p000047, −1.84 on Vouli p00001) is effectively the **top of the
   accents** (median 1.86 on p000047), not the top of the capitals.
 
-**Requirement (the owner's model):** each line carries the **4 font lines** plus **2–3 accent lines**:
-- the 4 font lines: top of capitals/ascenders, mean line, baseline, descender bottom, measured on letter bodies only;
-- the accent lines:
-  - accent bottom: where the marks above the small letters start;
-  - accent top: where they end;
-  - possibly a third: for stacked marks (breathing with accent, a circumflex over a breathing) and accents over
-    capitals, which sit higher. Whether this is needed is to be decided from the measurements.
+### Required design: 4 font lines + 2 accent lines, all following the line's curve
 
-Accent marks are assigned to the letter body under them (or, before a capital, to that capital), and so to that line.
-The accent band is part of the line's region but not of its font geometry. A band holding only accent marks is never a
-line (section 2). Iota subscripts and other marks below the letters stay in the descender zone.
+**Owner, on this design:** "this is basically important for following the curve or skew of the lines." The guide
+lines are not decoration. They are how the detector **sees the curve**. A curve is measured from letter positions
+along the line, and every letter contributes only if each piece of ink is matched to the right guide line. A capital
+top read as a mean-line point, or an accent read as a capital top, bends the curve where the paper does not bend.
+
+**The lines**, top to bottom. Typical heights are from the two pages measured above, in x-heights above the baseline.
+
+| Line | Measured on | Typical height |
+|---|---|---|
+| accent top | tops of the detached marks above small letters | ~1.9 |
+| accent bottom | bottoms of those marks | ~1.2–1.4 |
+| capital / ascender | tops of capitals and of β δ ζ θ λ ξ φ ψ | ~1.6 |
+| mean line | tops of small letters (α ε ι ο ν σ τ υ …), accents removed | 1.0 |
+| baseline | bottoms of letters without descenders | 0 |
+| descender | bottoms of β γ ζ η μ ξ ρ φ χ ψ ς | ~0.6–1.0 below |
+
+- A third accent line is added only if accent tops prove to fall at two distinct heights (single marks, and stacked
+  marks such as ἄ ἆ ὅ); otherwise stacked marks simply reach higher inside the same band.
+- Accents on capitals sit to the **left** of the capital, at capital height (Ἀ Ἑ Ὁ). They belong to the capital on
+  their right, not to the accent band.
+- Iota subscripts and other marks below a letter belong to that letter and sit in the descender zone; they get no line
+  of their own.
+
+**Step 1: sort the ink.** Before any line is fitted, every component of a line is classed as one of:
+- body on the baseline;
+- body with a descender;
+- tall body (capital or ascender);
+- mark above a letter (accent, breathing, diaeresis);
+- mark below a letter;
+- punctuation (the raised dot · sits at the mean line and must not pull it; commas and full stops sit at the baseline
+  but are too small to count as letter bottoms);
+- not text (sections 3 and 7).
+
+An accent that has run into its letter in a poor scan is split at the narrowest point just above the mean line.
+
+**Step 2: give every mark an owner.** A mark belongs to the letter body below it, or, before a capital, to the capital
+on its right; it never belongs to a line of its own (section 2).
+
+**Step 3: fit the curve from all the classes together.** This is where the curve or skew is found.
+- Each class gives sample points along the line, at each letter's x position:
+  - body bottoms give baseline points;
+  - small-letter tops give mean-line points;
+  - tall tops give capital-line points;
+  - descender bottoms give descender points;
+  - mark bottoms and tops give accent points.
+- On a printed page, within one line and one font, these six curves are the same shape, offset vertically. Fit **one
+  shape per line** to all the points at once, with one vertical offset per class. This roughly triples the number of
+  points behind the shape compared with the baseline alone, which answers the owner's round-1 remark: "we need many
+  points to find an orientation".
+- The shape is shared and smooth down the column. Neighbouring lines have nearly the same shape, and it changes
+  gradually from one line to the next, as the algorithm's shared page geometry says. A short line takes its shape from
+  its neighbours and fits only its offsets.
+- Where the paper curls (the binding side of s2-3229200bf47ca465a42d-p00004, the end bends the crop tools already
+  handle), the letters are also foreshortened. So the gap between the curves may shrink slowly towards the curl. The
+  fit allows the x-height to vary slowly along the line, never abruptly.
+- Each offset is a robust centre (a median) of its own class, never the 98th percentile of everything. One stray
+  mark cannot move a line.
+
+**Step 4: per-font ratios, used for borrowing and checking.**
+- A font is a group of lines with the same x-height and proportions: body, footnote, heading, italic. Each font keeps
+  its ratios: capital height, descender depth, accent bottom and top, all relative to the x-height.
+- A line lacking a class borrows that line from its font's ratios and records it as borrowed. Examples: no
+  descenders, or no small letters (an all-capital head like «ΧΡΗΣΤΟΗΘΕΙΑ», whose mean line is unknown).
+- Order is a check: descender < baseline < mean line < accent bottom, and capital ≤ accent top. A candidate line whose
+  classes break the order or its font's ratios is wrong. The accent rows on p000047 and Vouli p00001 fail it: they
+  have no bodies.
+
+**Step 5: the segments follow from the lines.**
+- A line's region runs from just above its accent top to just below its descender line, along the same curve.
+- The boundary between two lines lies where the upper line's descenders meet the lower line's accents. On tightly set
+  pages (Vouli) these overlap. There the boundary follows which line each component belongs to, rather than a straight
+  cut, so neither line's ink is cut (sections 2 and 4).
+- The unrolled image is straightened along the fitted shape. The baseline and mean line are placed at fixed heights,
+  with the accent band kept above them.
+
+**Step 6: show and check.**
+- The review page draws all six lines, each in its own style.
+- The per-line check (Checks, item 1) is how far each class of ink sits from its own line. On a curled or skewed line
+  that distance stays small along the whole length, not only on average.
+
+The crop tools already measure the rise and drop per crop (`report.line_record`, `baseline.text_lines`). Reuse them,
+or show something better on these pages.
 
 ## 2. Extra lines on parts of real lines, and the cut-offs they cause
 
