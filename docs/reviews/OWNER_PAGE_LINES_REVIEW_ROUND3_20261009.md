@@ -181,6 +181,7 @@ Requirement (round 2, section 6 and the guide-line design in section 1):
 | 29 | s2-9de6cda8f03f0fc60a58-p00005 | whole page | lines still joined across the columns (slanted rule) | — |
 | 30 | s2-d1ed1c2db37f431f4acb-p00001 | whole page | lines joined across the columns (slanted rule) | 10 (show-through, same page) |
 | 31 | s2-3229200bf47ca465a42d-p00004 | bottom, lines 32–46 | first characters still missed | 14 |
+| 32 | an-1436ae03653f-p000163 (50-page set) | s00039, ornamental border | non-text line passed to OCR | 7 (ornaments) |
 
 
 ## Tables: first find out what Docling needs
