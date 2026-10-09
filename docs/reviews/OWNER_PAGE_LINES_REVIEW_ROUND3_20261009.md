@@ -1,13 +1,30 @@
 # Owner review of the page-lines detector, round 3 (9 October 2026)
 
-This is the owner's review of Astra's round-3 output: branch `astra/page-lines-3`, commit 0c08015, review page
-https://claude.ai/artifact/7rt1qMCTEkPsvkj3iyrmjz. The cases are numbered after the 25 of round 2
-(`OWNER_PAGE_LINES_REVIEW_ROUND2_20261009.md`). Lines marked **Owner:** are the owner's words. The measurements were
-taken by the coordinator from the round-3 outputs (`.astra/out/<key>.lines.json`) and the page images.
+This is the owner's review of Astra's round-3 output on the 48 development pages:
+- branch `astra/page-lines-3`, commit 0c08015;
+- review page https://claude.ai/artifact/7rt1qMCTEkPsvkj3iyrmjz.
 
-**Owner, overall:** "ok this is quite good and I think we shouldnt improve on it before we complete the first work
-cycle." Before the code's quality is trusted, it is to be run on 50 new, varied pages (owner: "we should run this on
-50 diverse new pages though before we are sure of the quality of the code").
+Lines marked **Owner:** are the owner's own words, verbatim apart from typo fixes. The measurements, stated causes and
+requirements were written by the coordinator from the round-3 outputs (`.astra/out/<key>.lines.json`, `.segments.json`)
+and the page images. Line numbers are the indices on the review cards (indices into `<key>.lines.json`).
+
+The cases are numbered after the 25 of round 2 (`OWNER_PAGE_LINES_REVIEW_ROUND2_20261009.md`). That document, its
+required design for the guide lines and its checks remain in force; every round-2 case not mentioned here is to be
+re-checked, not assumed fixed.
+
+## The owner's overall comments
+
+- **Verdict:** "ok this is quite good and I think we shouldnt improve on it before we complete the first work cycle."
+- **Generalisation before trust:** "we should run this on 50 diverse new pages though before we are sure of the
+  quality of the code."
+  - That run is under way on the MacBook: 50 pages, 25 Anemi and 25 Vouli, each from a different book or PDF, none of
+    them among the 72 pages used so far. It runs the frozen round-3 code, commit 0c08015.
+  - Its results will be reviewed before any further fix.
+- **Per-letter ink analysis:** "Does astra's code have per char detection so we can do the ink analysis like before?"
+  - Not yet. Each line knows its own connected components (`component_ids`) and their classes; the output keeps only
+    the class counts (`ink_classes`).
+  - The per-letter ink state of the crop review (intact, merged, broken or faint) is not produced for page lines. It is
+    a small addition: run the letter tool on each final line and write each letter's box and state.
 
 ## 26. s2-0ce9d1025b3f23c7119e-p00001: still joined across the columns, and the faint letters still detected
 
@@ -131,3 +148,37 @@ Measured on the round-3 output:
 
 Requirement: as for case 29. Cases 26, 29 and 30 together show that the column boundary is still not found from the
 page's column structure. A straight full-height rule, slanted with the page, is the clearest boundary there is.
+
+## 31. s2-3229200bf47ca465a42d-p00004: the first characters of the bottom lines are still missed
+
+**Owner:** "in s2-3229200bf47ca465a42d-p00004 at the bottom lines 32-46 have missed first chars."
+
+This is round-2 case 14 (the curled starts of the lines on the binding side), improved but not fixed.
+
+Measured on the round-3 output:
+- **Line starts.** In round 2 the bottom lines started at x ≈ 184–224. In round 3 lines 32–44 start at x 109–123,
+  and line 39 at 139.
+- **The printed lines begin further left.** Most begin at about x 85–100 at this height (read from the page image).
+  The first one or two letters of each line still lie left of the line's start.
+  Examples: «π» of «προταχθῆ» (33), «Ἡ» of «Ἡ Βουλὴ» (35), «π» of «προβῇ» (40), «Β» of «Βουλευτῶν» (41).
+- **Line 45** («Εἰς τοῦτο συνεφώνησε …») starts at x 167 and misses the whole first word «Εἰς».
+- **The baseline curve at the start.** On several lines the baseline bends away from the letters over the first
+  letters, where the paper curls (e.g. lines 36 and 37). So the curl itself is not yet followed to the line's
+  first letter.
+- Line 46 is a discounted candidate at the page's bottom edge.
+
+Requirement (round 2, section 6 and the guide-line design in section 1):
+- A line follows its curl to its first letter, the same way it does at its end.
+- The guide-line fit near the start uses the first letters' own ink, so the baseline stays on their bottoms.
+
+## Every case of this round
+
+| # | Page | Place | What the owner saw | Round-2 case |
+|---|---|---|---|---|
+| 26 | s2-0ce9d1025b3f23c7119e-p00001 | whole page | still joined across the columns; faint letters still detected | 8 |
+| 27 | s2-93f8070059f938bda524-p00001 | whole page | very good, despite faint letters in the background: the reference to keep | — |
+| 28 | s2-831443dc5e6f1ccfbaf5-p00020 | table, left side | the first two table columns are not detected | tables (round-1 remark) |
+| 29 | s2-9de6cda8f03f0fc60a58-p00005 | whole page | lines still joined across the columns (slanted rule) | — |
+| 30 | s2-d1ed1c2db37f431f4acb-p00001 | whole page | lines joined across the columns (slanted rule) | 10 (show-through, same page) |
+| 31 | s2-3229200bf47ca465a42d-p00004 | bottom, lines 32–46 | first characters still missed | 14 |
+
