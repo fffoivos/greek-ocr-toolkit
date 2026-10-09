@@ -609,6 +609,50 @@ from greekocr.glyphs.letters import letter_boxes
 boxes = letter_boxes(line_glyphs(Image.open("crop.png")))
 ```
 
+### `greekocr.glyphs.line_structure.build_structure`
+
+`def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[int], *, gutters: Sequence=(), rules: Sequence[dict]=(), boundaries: Sequence[dict]=(), fold: dict | bool | None=None) -> dict`
+
+Add addresses to line/cell records in place without changing geometry.
+
+```python
+from greekocr.glyphs.line_structure import build_structure
+structure = build_structure(line_records, cell_records, image.size, gutters=detected_gutters, rules=detected_rules)
+```
+
+### `greekocr.glyphs.line_structure.join_pieces`
+
+`def join_pieces(pieces: Sequence[dict], *, structure: dict) -> dict`
+
+Join one addressed row, rejecting mixed addresses and boundary crossings.
+
+```python
+from greekocr.glyphs.line_structure import join_pieces
+row = join_pieces(addressed_row_pieces, structure=structure)
+```
+
+### `greekocr.glyphs.line_structure.delivery_records`
+
+`def delivery_records(lines: Sequence[dict], *, structure: dict, granularity: str='default') -> list[dict]`
+
+Return whole ordinary rows and table pieces; optionally all rows or pieces.
+
+```python
+from greekocr.glyphs.line_structure import delivery_records
+records = delivery_records(line_records, structure=structure, granularity="default")
+```
+
+### `greekocr.glyphs.line_structure.render_structure`
+
+`def render_structure(page: Image.Image, lines: Sequence[dict], structure: dict) -> Image.Image`
+
+Draw row colours, piece order, finite column boundaries and the fold.
+
+```python
+from greekocr.glyphs.line_structure import render_structure
+overlay = render_structure(image, line_records, structure)
+```
+
 ### `greekocr.glyphs.lines_api.LineImage`
 
 ```python

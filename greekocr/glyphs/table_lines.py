@@ -8,7 +8,7 @@ separately; text is never divided in proportion to a box's width.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import copy
 import math
 from typing import Any, Sequence
@@ -33,6 +33,7 @@ class TextPiece:
     line: LineSegment
     table_id: str | None = None
     cell_id: str | None = None
+    address: dict = field(default_factory=dict)
 
     def to_record(self, index: int, image_size: Sequence[int], page_size: Sequence[float]) -> dict:
         """Serialize pixel and page-unit boxes using the actual image/page ratios."""
@@ -41,7 +42,7 @@ class TextPiece:
         return dict(index=index, box_pixels=list(self.box),
                     box_page=[a*sx, t*sy, b*sx, bot*sy], coord_origin='TOPLEFT',
                     line_index=self.line_index, table_id=self.table_id, cell_id=self.cell_id,
-                    cell_id_kind='detector_piece_group' if self.cell_id else None)
+                    cell_id_kind='detector_piece_group' if self.cell_id else None, **self.address)
 
 
 def rule_ink(ink, xh):
@@ -215,11 +216,12 @@ def table_text_pieces(page: Image.Image | NDArray[Any], region: Sequence[float],
         raise ValueError('table region must have positive area inside the page')
     p=table_pixels(gray[t:bot,a:b])
     pieces=[]
-    for row in _row_groups(p.components,p.xheight):
+    for row_index,row in enumerate(_row_groups(p.components,p.xheight)):
         for group in split_group(row,p.barriers,p.xheight):
             built=_line_from_group(group,p,a,t,table_index)
             if built is not None:
                 line,box=built
+                line.row_source=f'{table_id}:component-row-{row_index}'
                 pieces.append(TextPiece(box,-1,line,table_id))
     pieces.sort(key=lambda s:(round(float(np.median(s.line.baseline))/p.xheight),s.box[0]))
     for i,piece in enumerate(pieces):
@@ -377,13 +379,17 @@ def prepare_delivery(page: Image.Image | NDArray[Any], result: PageSegmentation,
                      supplement: bool = True) -> tuple[PageSegmentation, list[TextPiece], list]:
     """Attach table recovery to a normal segmentation, retaining audit candidates.
 
-    Returns (updated round-3-schema segmentation, recognition pieces, regions).
-    No proposals means the exact original segmentation is returned unchanged.
+    Returns (addressed segmentation, recognition pieces, regions).
+    With no proposals, original line geometry is retained and piece addresses
+    are attached to the original segmentation.
     """
     from .page_text_lines import _diagnostics, _addresses
+    from .line_structure import _attach_structure, _table_structure
     pieces,regions,prefix=recognition_pieces(page,result.lines,table_regions,supplement=supplement)
     if not regions:
-        return result,detector_pieces(page,result.lines),regions
+        pieces=detector_pieces(page,result.lines)
+        _attach_structure(result,pieces)
+        return result,pieces,regions
     gray=result.pixels.gray;h,w=gray.shape
     if prefix is not None:stop=prefix.pixels.gray.shape[0]
     lines=[]
@@ -433,4 +439,7 @@ def prepare_delivery(page: Image.Image | NDArray[Any], result: PageSegmentation,
     diagnostics['table_delivery']=dict(regions=[dict(id=i,box_pixels=list(b)) for i,b in regions],
         pieces=len(pieces),table_pieces=sum(p.table_id is not None for p in pieces),
         prefix_refitted=prefix is not None)
-    return PageSegmentation(lines,p.boxes,result.xheight,diagnostics,p),pieces,regions
+    delivered=PageSegmentation(lines,p.boxes,result.xheight,diagnostics,p)
+    _,boundaries=_table_structure(gray,regions)
+    _attach_structure(delivered,pieces,boundaries=boundaries)
+    return delivered,pieces,regions

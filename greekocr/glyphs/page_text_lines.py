@@ -55,6 +55,8 @@ class LineSegment:
     discounted: str | None = None
     guide_residuals: dict = field(default_factory=dict)
     guide_samples: dict = field(default_factory=dict, repr=False)
+    address: dict = field(default_factory=dict)
+    row_source: str | None = None
 
     def __post_init__(self):
         if self.accent_top is None:
@@ -76,6 +78,9 @@ class LineSegment:
                    ink_classes=self.ink_classes, contrast=round(self.contrast, 4), discounted=self.discounted,
                    guide_residuals=self.guide_residuals,
                    neighbours={k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in self.neighbours.items()})
+        row.update(self.address)
+        if self.row_source is not None:
+            row['row_source'] = self.row_source
         return row
 
 
@@ -87,6 +92,7 @@ class PageSegmentation:
     xheight: float
     diagnostics: dict
     pixels: PixelPage = field(repr=False)
+    structure: dict = field(default_factory=dict)
 
 
 def _blocked(p: PixelPage, x0, x1, base, xh):
@@ -1051,7 +1057,10 @@ def segment_page(page: Image.Image | NDArray[Any], hints: Sequence[Sequence[floa
     lines = _reading_order(lines)
     _boundaries(lines, *p.gray.shape, pixels=p)
     _addresses(lines, p.boxes)
-    return PageSegmentation(lines, p.boxes, p.xheight, _diagnostics(p, lines), p)
+    result = PageSegmentation(lines, p.boxes, p.xheight, _diagnostics(p, lines), p)
+    from .line_structure import _attach_structure
+    _attach_structure(result)
+    return result
 
 
 def page_line_segments(page: Image.Image | NDArray[Any], hints: Sequence[Sequence[float]] | None = None) -> list[LineSegment]:

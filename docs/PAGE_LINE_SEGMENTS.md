@@ -136,6 +136,31 @@ The first report pass supplements check 8 with rough-box/graphic intersections.
 The audit then binds those saved files, and the last report pass includes the
 completed audit and test receipts. It does not change detector geometry.
 
+The renderer also writes `<key>.structure.json` and `<key>.structure.jpg`.
+Line and delivered-cell records include `page_side`, `column_id`, `block_id`,
+`row_id`, `piece_index`, `reading_order`, and reciprocal `neighbours.left/right`.
+IDs are scoped to one input image. A null neighbour is the end of a row; line
+neighbours reference line indices, and cell neighbours reference cell indices.
+The structure contains physical leaf polygons, the inferred or supplied spread
+fold, finite rule/gutter paths, columns, blocks, and row membership. A block is
+a column-local text/table/diagnostic group, not a semantic paragraph. The legacy
+`column` number and all original geometry remain unchanged.
+
+`greekocr.glyphs.line_structure.build_structure` can address frozen JSON records
+without detecting lines again. Its automatic fold decision is a wide-scan
+heuristic; supply a pixel boundary path as `fold` when scan metadata is available,
+or `fold=False` for a landscape single page. `join_pieces(records, structure=...)`
+accepts one addressed printed row, copies every original curve sample, and
+interpolates only gaps. It rejects mismatched addresses, incompatible overlapping
+geometry, discounted candidates and boundary crossings. Use line records selected
+through each delivered cell's `line_index`, since cell records contain boxes but
+not guide curves. `delivery_records(..., granularity="default")` returns ordinary
+whole lines and table pieces; `"rows"` and `"pieces"` expose both granularities.
+Unsafe joins raise `ValueError`; callers must not silently treat them as accepted.
+The frozen-review command `scripts/glyphs/review_line_structure.py` also writes
+`.rows.json` with safe rows and an explicit `blocked_rows` list. It reads table
+annotations only for evaluation, after production structure has been built.
+
 The renderer writes `.astra/out/<key>.segments.json`, `.lines.json`,
 `.checks.json`, `.lines.jpg`, and `.unrolled.jpg`. Strips retain their fixed
 scale; sheets exceeding 300 lines wrap into consecutive stacks, read down

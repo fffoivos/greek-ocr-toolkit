@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from greekocr.glyphs.page_text_lines import _extract, segment_page
+from greekocr.glyphs.line_structure import render_structure
 
 COLORS = [(204, 44, 58), (26, 118, 180), (25, 143, 92), (159, 65, 178)]
 
@@ -76,7 +77,8 @@ def main():
     rows = []
     sources = ['greekocr/glyphs/pixel_segments.py', 'greekocr/glyphs/page_text_lines.py',
                'greekocr/glyphs/table_lines.py', 'greekocr/glyphs/page_font.py',
-               'greekocr/glyphs/components.py', 'greekocr/glyphs/baseline.py', __file__]
+               'greekocr/glyphs/components.py', 'greekocr/glyphs/baseline.py',
+               'greekocr/glyphs/line_structure.py', __file__]
     implementation_sha256 = hashlib.sha256(b''.join(Path(p).read_bytes() for p in sources)).hexdigest()
     for path in sorted(args.pages.glob('*.png')):
         if args.keys and path.stem not in args.keys:
@@ -91,6 +93,9 @@ def main():
             layout = json.loads((args.layout / f'{path.stem}.json').read_text())
             regions = [(str(c['id']), [v*3 for v in c['box']]) for c in layout['retained']]
             result, pieces, _ = prepare_delivery(page, result, regions)
+        else:
+            from greekocr.glyphs.table_lines import prepare_delivery
+            result, pieces, _ = prepare_delivery(page, result, supplement=False)
         comparison = None
         hint_path = path.with_suffix('.boxes.json')
         if args.compare_hints and path.stem.startswith('s2-') and hint_path.exists():
@@ -107,6 +112,9 @@ def main():
                 raise AssertionError(f'hints changed pixel geometry: {path.stem}')
         prefix = args.out / path.stem
         render(page, result, prefix)
+        (args.out / f'{path.stem}.structure.json').write_text(json.dumps(result.structure,indent=2))
+        render_structure(page,[l.to_record() for l in result.lines],result.structure).save(
+            args.out / f'{path.stem}.structure.jpg',quality=92)
         (args.out / f'{path.stem}.segments.json').write_text(json.dumps([
             dict(line_id=f'{path.stem}-s{i:05d}', box=list(box)) for i, box in enumerate(result.segments)]))
         (args.out / f'{path.stem}.lines.json').write_text(json.dumps([l.to_record() for l in result.lines]))
