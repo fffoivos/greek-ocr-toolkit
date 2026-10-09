@@ -289,8 +289,10 @@ Measured on the round-3 output:
   upper half is ordinary text running the full width (x ≈ 325–1780). Every full-width line of the upper half is cut at
   that same place, into a piece ending at x ≈ 1040 and a piece starting at x ≈ 1057 (e.g. baselines y 212, 281, 350,
   417, 486). The lower half's column boundary was carried up through the prose.
-- **an-a3c2bdf81256-p000112.** Below, the page has grammar paradigms in columns. Every line of the upper half is also
-  cut at x ≈ 606–646 (e.g. baselines y 223, 285, 348), the same place as the paradigm columns' gap below.
+- **an-a3c2bdf81256-p000112.** The page opens with a three-line paragraph («§. 55. Περὶ τοῦ σχηματισμοῦ τῶν
+  ἐπιθέτων …») running the full width. Below it the grammar paradigms stand in two columns, separated by a double rule
+  that begins only under the paragraph. The paragraph's lines (baselines y ≈ 223–360) are each cut in two at
+  x ≈ 606–646, the position of that rule. The paradigm lines below are correctly split at the rule.
 
 Requirement:
 - A column boundary holds only over the vertical extent where its gap or rule actually exists. It starts and ends
