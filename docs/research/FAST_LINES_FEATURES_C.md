@@ -1,4 +1,9 @@
-# Round 3, track C — type properties, font geometry and tables
+# Rounds 3–4, track C — type properties, font geometry and tables
+
+**Round 4 continuation is below, under “Round 4”.** Round 3 receipts remain
+unchanged for comparison. The experimental round 4 C pipeline adds two more
+visually verified rows (sixteen total); the separately composed stack retains
+the frozen adapter and its fifteen additions. Those are different pipelines.
 
 This is a **partial feature result**, with a usable conservative missing-line
 prototype. Body size, component spacing/stroke, supported guide contacts, local
@@ -286,3 +291,300 @@ On-demand feature census, milliseconds (median / maximum across the named pages)
 | tables / slow | 286.031 / 746.328 | 313.545 / 834.340 |
 | tables / explicit | 76.933 / 164.141 | 86.375 / 164.607 |
 | tables / heuristic | 37.222 / 79.575 | 40.913 / 83.282 |
+
+## Round 4 — deeper physical renderings and conditional recovery
+
+Round 4 remains **partial**. There are usable native component/row renderers,
+an anonymous glyph atlas with alternate exemplars, explicit dot-run interiors,
+and a wider type-grid scout. These do not establish font identity or semantic
+script guides. Complete table boundaries remain unresolved. The inspected
+experimental corrections recover two additional rows beside drop capitals,
+without losing or changing any round 3 output item.
+
+[Round 4 evidence and legend](../../.astra/fast_lines/out/features_type/round4-README.md)
+and [image index](../../.astra/fast_lines/out/features_type/round4.html) link all
+final page renderings, raw/slow/fast crop boards, failures and numeric records.
+Outputs are outside git. The 195-page allowlist is unchanged; no held-out page,
+PDF text layer, production pages implementation or production pages test changed.
+
+### Font properties, size and spacing relative to the page and book
+
+Round 3's A07 fragmentation was not repaired by renaming its clusters. The new
+`type_identity.extract(gray, items, version=2)` exposes native connected ink,
+physical bounding boxes, all localization owners, observed height, page-relative
+size and aspect. `sample` limits exemplar work per line; `witnesses` returns up
+to three alternatives and their physical size ratios. These are observed ink
+pieces, not recognized characters. The earlier contact/spacing/stroke renderer
+remains available and is not replaced with inferred font names.
+
+The explicit atlas covers the three typography anchors and all four permitted
+`an-1ba3fdb1436b` pages, 9, 12, 15 and 35. Seven within-page and six across-page
+pairings expose repeated shapes against the actual print. This is a small book
+atlas, not a claim to have processed the whole book or identified its fonts.
+Viewed rho, mu, theta, beta and dense dictionary forms recur with different
+impressions. Conversely, Greek and Arabic sticks can be very similar; a stick
+match is weak font evidence.
+
+1. V1 found identical apparatus glyphs with similarity 1.000 under different
+   line IDs. Inspection showed overlapping detector localizations had supplied
+   the **same physical ink twice**. V2 deduplicates coordinates while retaining
+   all owners, and excludes common ownership from within-page matching.
+2. Native route S uses a 64-cell normalized glyph image; route 1 uses 24 cells.
+   Both preserve aspect and compare actual silhouettes. R2 v2 used eight-cell
+   horizontal/vertical marginals. The book-page crops showed theta matched to a
+   slash and a comma matched to beta. High similarity was not correctness.
+3. R2 v3 (`identity_routes.py`) retains a 4×4 spatial occupancy grid as well as
+   marginals, and penalizes differences in observed counters. The same inspected
+   book crops no longer make those two errors. Sigma-like and circular pieces
+   still interchange, and damage can itself change a counter. No font label or
+   recovery decision uses this heuristic.
+
+The audit retains 10,442 glyph/route records with source line IDs, each native
+alternative, and each fast best match. Examples of R1/R2 best-in-native-top-three
+counts are 218/254 versus 178/254 for book page 9→12, 676/790 versus 468/790 for
+the apparatus, and 1,025/1,437 versus 665/1,436 for the dense dictionary.
+These counts measure agreement with a rendering, **not letter recognition or
+font accuracy**. A different real exemplar may be just as valid. All thirteen
+pairings have separate records and crop boards; no pooled score accepts a route.
+
+Extraction dominates the measured atlas cost. Reduced matching does not make
+the entire pipeline cheap: the two repeated complete pairing measurements reach
+roughly two seconds on the dense dictionary. The atlas therefore remains an
+offline component and book diagnostic, not a dependency paid on clean pages.
+B borrowed its stable native extraction snapshot for observability experiments.
+
+### How many lines express font geometry, including joined scripts and accents
+
+`type_rows.render(gray, item, route=..., version=3)` begins with a deskewed strip
+wide enough to expose neighboring rows. It renders connected-body candidates,
+detached marks, density ridges and valleys, component-to-row assignment, contact
+populations, and upper/lower paths containing the central ink mass. A row may
+have several bands or no supported single height. `baseline` stays null.
+The paths are physical envelopes; they are not the six semantic Greek guides,
+and their number does not prove how many semantic guides a script requires.
+
+The five pages contain 533 detector localizations. Each has original pixels,
+native evidence, route 1 at 24 samples per provisional body height, and route 2
+at eight. All 1,066 line/route comparisons are saved, including every supported
+row count, joined flag, and available height discrepancy. Selected raw crops
+from each iteration and the twelve largest final height disagreements were
+inspected. This is not a claim to have manually read every glyph in every crop.
+
+1. V1 independently chose upper and lower contact modes. On the bilingual page,
+   modes from different rows manufactured bodies of 72 or 120 px. V2 requires
+   contacts from the same component population and limits ridge spacing by the
+   prior scale. Greek line 16 becomes 26 px; apparatus 75/78/79 show 15 px bodies.
+2. V2 still included partially clipped neighbors. V3 excludes strip-edge and
+   band-edge clipped bodies, and measures joined support by ink area rather
+   than component count, since detached dots dilute a count.
+3. The late geometry counterexample, `s2-3229200bf47ca465a42d-p00004` source 24,
+   had round 3 height 40.4 px with a false-clear uncertainty flag while nearby
+   same-type rows were about 21–23 px. All three v3 routes now abstain there.
+   This repairs that observation; it does not calibrate the flags generally.
+
+Important remaining failure: bilingual lines 17, 26 and 31 still have
+`joined=False` despite visibly connected script. Line 17 gives native/R1/R2
+28.0/32.38/48.56 px; line 26 gives 23.5/46.05/null. The scalar is consequently
+not a trustworthy x-height. An early board shorthand suggesting line 17 was
+reliably flagged joined was corrected after this audit. Line 19 abstains.
+No other track borrows these new values as runtime heights.
+
+Native ambiguous counts are 170/297 dense dictionary, 18/120 apparatus, 9/34
+bilingual, 11/43 curled source page and 1/39 clean control. R1/R2 supported-row
+count disagreements, page by page, are respectively 13/33, 5/11, 1/3, 2/8 and
+2/3. Reduced sampling can merge adjacent rows; the largest dense R2 height
+discrepancy is 0.630 of the prior height. Physical mass envelopes are useful
+renderings even where a single body height is not justified. These measurements
+remain diagnostic and cause no detector reshaping or line deletion.
+
+### Tables and their complete boundaries
+
+`type_table_extent.analyze` adds explicit terminal dot-run evidence to the
+existing rule/numeric-grid table renderer. It retains each proposed dot, each
+row witness and the regional extent; it never treats an unprotected area as
+non-table. Numeric grids, such as `an-7a2b17a3fb0f-p000200` and the 831443 pages,
+still need the older rule/grid witnesses. The new dot tool is not their replacement.
+
+The native rendering went through six cycles on fourteen table/control pages:
+
+1. Short regular chains occurred in ordinary prose and falsely protected it.
+2. Dot-ink purity above 0.7 did not resolve clipped-letter and accent chains.
+3. Requiring compact, complete components on the lower body rail removed those
+   control errors but rejected most real leaders on `63c4…p4`.
+4. Inspection showed Paddle clipped the leader dots. Sampling expands by 0.7h
+   horizontally and 0.6h vertically; the original box still owns the row extent.
+5. A print-relative core threshold reduced back-page noise and recovered fifteen
+   scattered native leader rows on that page.
+6. Aligned seed groups can bridge at most 12h only when intervening localized
+   row centers leave no gap exceeding 4h. Three seed rows remain necessary, and
+   the region never extends above/below the witnessed seed range.
+
+V6 visibly spans the complete `922e…p5` table; `4b80…p9` stops above the following
+prose. `63c4…p4` remains split and incomplete: native protects 44/77 localizations,
+R1 22/77 and R2 13/77. R1 differs from native on 22 items and R2 on 43 there.
+R1 otherwise agrees with native protected indices across these fourteen pages;
+R2 also differs on 200e p10 (five items) and 831443 p39 (four). These are
+rendering comparisons, not table ground-truth scores. Sideways tables stay parked.
+
+A late audit rendered native and both fast extents on all seven pages that wake
+the new runtime guard, using the actual post-Q8 items. `4959…p5` falsifies the
+apparent control success: straddling prose localizations inflate the height prior,
+so small whole letters qualify as dots. V6 protects large prose regions and
+blocks a real missing row. `0ce9…p1` also yields spurious table hypotheses over
+back-page print. The new protection is conservative for deletion but incomplete
+and overbroad for recovery; it is **not ready as a general table-boundary module**.
+
+The follow-up diagnostic `table_dots7.py` renders filled dot interiors and
+observed counters at every proposed dot, retaining rejected witnesses in red.
+It lives outside the frozen runtime and is tested against all fourteen anchors
+plus seven triggered pages. Its final inspection is recorded in the evidence
+README. No uninspected table change is silently promoted to recovery.
+
+V7 rejects many original prose fragments but does not solve the feature:
+`4959…p5` still has 4/14/23 native/R1/R2 seed rows and 22/40/48 falsely protected
+items. Reduction fills small counters and makes the interior test weaker.
+`922e…p5` remains fully protected on all three routes (39 items), while
+`63c4…p4` remains at 44/22/13. Native and reduced failure images were inspected;
+this cycle was not promoted, and its cost is not presented as a runtime win.
+
+B requested `s2-200e977f2dab5291c42c-p00035` as a conflict with engraving edges.
+The old native/R1/R2 rule-grid renderings are in `cooperation-round4/`. They
+protect 76/156/104 localized items, respectively, but visibly miss parts of the
+table. Both tracks inspected this failure: long edges cannot certify image
+ownership, and an incomplete table mask cannot certify the complement as image.
+
+### Type grids, missed lines and the cheap check
+
+`type_grid_edges.candidates` extends round 3's bracketed constant-phase slots.
+V1 extrapolates one pitch past four consistently spaced rows. The native strips
+on all 41 `ours_more` pages plus 40 agreement controls mostly expose blank margins;
+only `4959…p5` has supported unowned edge ink. On `8686…p7` the extrapolation is
+blank bottom margin, not the still-missed curled text.
+
+V2 also renders uncertain interior intervals spanning two to four pitches where
+the global phase residual exceeds 0.4h. It interpolates candidate positions,
+not accepted lines. Actual current polygons own ink; separate quadrilateral
+views give stable axes for many-vertex ribbons. Native body-contact witnesses
+and independent ownership remain necessary. R1 renders reduced ridge fields
+and sampled components; R2 only checks nominated strips. R1 and R2 share the
+sampled slot test, so their equality is not independent confirmation.
+
+All 195 pages now have native, R1 and R2 page images and 389 per-slot comparisons.
+Eight slots are native-positive; both fast routes have nine, with three
+disagreements. All ten slots positive on any route were visually inspected.
+`31f40…p1` is back-page ink nominated only by reduced sampling; `dfcc…p1` is
+back-page ink nominated only natively. `4959…p1` crosses an existing curved row,
+so native rejection prevents accepting the fast nomination. `0ce9…p1`,
+`6f045…p1` and `fb7364…p1` show real verso print, not missing front lines.
+The reflected-glyph dependency vetoes the runnable ghost candidates.
+
+The ornament on `an-7792a3301892-p000107` looks like a row of repeated bodies.
+B's default motif scout returns negative here; it does **not** veto the candidate
+or certify text. The regional detector declines it. This is an unresolved motif
+failure, with the actual rejecting stage recorded.
+
+`type_extended.recover` shares one block scout between old and new slots, checks
+new positives against native pixels, then charges the B motif veto and table
+extent dependency only when needed. It passes the same evidence to the guarded
+round 3 regional recovery, with excluded footprints preserved through completion.
+`type_extended.run` adds Q8 initially and after accepted additions. No row/font
+census runs on the clean-page path. All final polygons retain `baseline: null`.
+
+Final native-supported additions are `an-466cffad2cba-p000277` (ordinary text
+beside an already separately localized large E) and `an-fd4fa0018ae1-p000035`
+(first row with a large B). Raw/after inspection confirms the lines. The first
+addition does not merge the separately owned initial; neither result proves an
+ideal drop-cap reading-order representation. All fourteen round 3 additions
+and all other old Q8+C output items are preserved exactly. There are sixteen
+additions on fourteen pages, and no changes to agreement outputs.
+
+### Composition, reuse and what is ready
+
+The stable `type_context.recover(gray, current_items, detector,
+excluded_regions=..., grid_items=..., lattice_evidence=...)` performs no initial
+or final Q8. It preserves actual curved polygons for ownership, uses a distinct
+quad view for pitch, and prevents B-rejected regions being reintroduced. The
+old `type_recovery.run` defaults preserve round 3 behavior; its new options
+allow the stack to pay shared separator work once. Precomputed evidence is tied
+to the same current/grid pair and its generation cost belongs to the caller.
+
+Stack independently snapshotted this adapter and verified its composed outputs.
+Its A-before-C interaction recovers the genuine `4959…p5` row. I inspected that
+raw crop and confirmed it ends before the central separator. Stack's fifteen
+additions and reported 97 tests are **not** this experimental extension's sixteen
+additions or this branch's test count. Stack intentionally excludes the new
+extent guard and extended-grid module. No integration of the extension is claimed.
+
+Reused B's stable motif/recurrence/pixel witnesses as import-renamed snapshots
+with source and snapshot hashes in `reuse_round4.json`; all dependent work is
+included in timings. Front/unknown are never recovery certification. Gave B
+the native deduplicated component atlas and table-conflict images. Gave A the
+false-clear height audit; A borrowed `type_barriers.protect` for native rule
+checks around fragment joins. A's geometry scouts/joins are complementary and
+were not silently introduced into the standalone C measurement.
+
+Ready as explicit APIs: context/ownership composition, native glyph extraction
+with alternate exemplars, physical row-band/mass-path rendering, and grid
+nominations with the existing native ownership verifier. The extended correction
+is a reproducible experimental option. General font identity, script-specific
+guide counts, complete table boundaries and calibrated confidence remain open.
+
+Next work should begin with original-pixel **component-to-row ownership** under
+straddling localizations, since the same failure corrupts body size and dot
+classification. Then distinguish joined-word contact paths from letter bodies,
+and compare glyph constellations across book pages rather than assigning font
+identity to one silhouette. Curved local grids need A's contact paths; one global
+phase misses the remaining severe curl. Table extents must follow observed row
+ends and rules without treating compact prose fragments as leader dots.
+
+### Round 4 verification and measured receipts
+
+Three fresh complete passes (585 page executions) recompute detector output,
+Q8, scouting, every conditional dependency, regional inference and completion.
+Every input detector polygon exactly reproduces the cached baseline and every
+final output matches across passes. `round4-validation.json` records 29,549
+schema, source, retained-item, agreement and repeat checks. The 69 prototype
+tests cover the new no-Q8 adapter, many-vertex grid view, concave exclusions,
+rejection before inference, row ambiguity, physical deduplication, old-gap
+non-duplication and blank-page behavior, along with the existing prototype tests.
+
+Times include all C runtime dependencies. Q8+C and full detector+Q8+C are separate
+columns; decode, model startup and rendering are excluded from those columns.
+OpenCV and ONNX use one thread; short foreground runs share the Mac with other
+tracks. Repeats 2 and 3 had no competing feature census from this track. These
+are observations, not held-out guarantees. All observed C correction costs fit
+below one second, with agreement C medians below 1.5 ms and maxima below 3 ms.
+The diagnostic atlas is much slower and remains outside this runtime path.
+
+<!-- ROUND4 MEASURED TABLES -->
+
+Milliseconds, raw per-page receipts in `round4-final-1c9641d65801/`.
+
+| Cohort/repeat | n | C median / p95 / max | Q8+C median / p95 / max | Full median / max |
+|---|---:|---|---|---|
+| agreement r2 | 40 | 1.479 / 2.290 / 2.726 | 13.295 / 17.965 / 25.806 | 143.721 / 199.361 |
+| new_discrepancy r2 | 101 | 2.709 / 197.980 / 333.807 | 17.100 / 210.443 / 359.359 | 154.727 / 500.827 |
+| correction_pages r2 | 14 | 89.269 / 219.250 / 258.752 | 96.955 / 233.081 / 275.122 | 232.574 / 408.019 |
+| all r2 | 195 | 2.000 / 143.743 / 505.121 | 14.601 / 159.926 / 532.897 | 148.421 / 680.308 |
+| agreement r3 | 40 | 1.241 / 2.301 / 2.942 | 12.449 / 15.331 / 25.212 | 130.488 / 170.357 |
+| new_discrepancy r3 | 101 | 2.534 / 199.145 / 325.623 | 16.697 / 211.823 / 352.581 | 148.813 / 491.429 |
+| correction_pages r3 | 14 | 83.848 / 217.214 / 250.772 | 91.084 / 230.899 / 266.325 | 222.395 / 399.408 |
+| all r3 | 195 | 1.972 / 131.082 / 492.865 | 14.387 / 142.845 / 519.670 | 146.280 / 665.941 |
+
+The worst C page across all195 is `s2-0ce9d1025b3f23c7119e-p00001`: reflected-print rejection, not an accepted correction. The new discrepancy maximum is `s2-6f045b952f909b38d4db-p00001`, also a rejection. Paying ownership to reject a false wake is still charged.
+
+On-demand census (median / maximum ms; all extraction included, image I/O excluded):
+
+| Feature / route | n per repeat | repeat1 | repeat2 |
+|---|---:|---|---|
+| rows / slow | 5 | 250.253 / 318.616 | 241.112 / 338.140 |
+| rows / explicit | 5 | 167.703 / 296.248 | 162.806 / 291.153 |
+| rows / heuristic | 5 | 149.344 / 217.473 | 133.651 / 215.526 |
+| table_extents / slow | 14 | 99.451 / 155.996 | 91.524 / 144.082 |
+| table_extents / explicit | 14 | 67.167 / 118.965 | 62.615 / 106.999 |
+| table_extents / heuristic | 14 | 40.207 / 67.502 | 38.751 / 61.528 |
+| glyph_atlas / slow | 13 | 750.318 / 2115.734 | 788.624 / 2003.454 |
+| glyph_atlas / explicit | 13 | 750.817 / 1968.749 | 777.689 / 1985.351 |
+| glyph_atlas / heuristic | 13 | 746.127 / 1949.494 | 773.008 / 2033.231 |
+
+The atlas charges fresh native extraction for both pages of each pairing (once for a within-page pairing). It is not a fast clean-page feature. The row census also remains outside the runtime. The numbers above measure v3 rows, v6 table extents and v3 atlas routes; the late v7 dot-interior diagnostic was not substituted into these timings.
