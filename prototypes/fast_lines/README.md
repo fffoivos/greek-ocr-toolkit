@@ -70,3 +70,18 @@ was recovered and its aggregate hash verified against the recorded experiment;
 see `out/shared/source/A02-v1-run.py` and its receipt. Running the current entire
 DAG from scratch would propagate v2 and constitute a new dependency configuration,
 not reproduce the older frozen fallback results. Preserve those receipts.
+
+## Q8 materialised path
+
+`layout_barriers.fast.run(gray, paddle_items)` is the conditional printed-rule
+separator candidate. It uses shared primitives and verifies original pixels only
+after a cheap witness nominates a corridor. It does not run the old unconditional
+composition. The [round-two report](../../docs/research/FAST_LINES_ROUND2_RESULTS.md)
+contains the predictions, measurements, page-by-page review ledger and limits.
+
+The `prototypes.fast_lines.round2` harness has `references`, `study`, `review`,
+`benchmark` and `publish` phases. Its 195-page gallery is
+`.astra/fast_lines/out/round2/rule_separators/index.html`. Three predeclared fresh
+runtime repetitions belong to the Q8 R2.6 receipt; completed studies are reused.
+`prototypes.fast_lines.validate_round2` checks saved artifacts without inference.
+Use the same Python and bytecode environment as above. Q7 outputs remain intact.

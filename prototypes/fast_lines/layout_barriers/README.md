@@ -113,3 +113,175 @@ Measured marginal study cost: agreement: p50 0.229653 s, p95 0.868470 s, max 0.9
 Next: Prioritise explicit separators, then validate spanning headings, local cell/leaf identity and every new split. Do not call the provisional block list a physical leaf model.
 
 [Output gallery](../../../.astra/fast_lines/out/layout_barriers/index.html) · [All failures and unknowns](../../../.astra/fast_lines/out/layout_barriers/page_failures.json) · [Round-1 report](../../../docs/research/FAST_LINES_ROUND1_RESULTS.md).
+
+## Q8 — materialise rule-backed separators
+
+Choice, before experiments: materialise A02, with a genuinely conditional runtime.
+It has the clearest Q7 visible success and an explicit physical witness: a printed
+rule between columns. Keep Q7's code and saved evidence as the dense reference.
+Retire the unconditional A02/A03 composition from this new path: Hough over every
+page is wasteful, and A03's endpoint/ownership regression remains unresolved.
+Do not repeat native-contour sweeps or recovery studies. Unused book/duplex dreams
+still lack verified identity/pairing; mirrored histograms lack spatial ownership.
+Neither warrants replacing a concrete separator experiment.
+
+### R2.1 prediction — scope and explicit rendering first
+
+Freeze exactly the 54 development and 141 direction-labelled supplied images,
+including the 21 added pages. Reuse the 174 Q7 baselines and dense A02 products;
+materialise only missing baseline/reference products. Render raw pixels beside
+Q7's supported rules, each crossing, and every line decision before implementing
+the fast gate. Expect the two `an-a73d` pages and `s2-661ddf…p00005` to expose real
+column splits; expect whitespace-only Q7 splits to be less safe on centred text,
+lists and verse. Check all directions, not just detector count disagreements.
+
+Next: inspect the dense rule/crossing images; implement a sparse run/segment
+witness with letter-height lengths, then refine only witnessed crossings. Preserve
+the original slanted polygon by clipping it; never turn a tilted box into its
+axis-aligned bounding rectangle. A full table/cell/physical-leaf solver is not
+presupposed. Claims of no changes will be checked by exact polygon identity.
+
+### Planned verification and receipts
+
+Each phase uses the shared registry and fresh source/input hashes, and refuses
+duplicate successful experiments. Final timing will include preprocessing,
+inference, DB postprocessing, every gate dependency and conditional correction;
+three intentional warm repetitions in a seeded order, decode and review I/O
+separate, startup separate. Review every page and every changed line, with
+direction-specific wins/failures in a tracked ledger. Output lives only under
+`.astra/fast_lines/out/round2/rule_separators/`. Green is added geometry, red
+removed ink, and changed polygons are drawn over their old box. Discounted
+old-model lines are never loaded into these overlays. Ours is not a reference.
+
+### R2.1 result → R2.2 prediction
+
+The supplied set is exactly 195 pages (194 upright): directions 41 ours_more,
+46 paddle_more, 8 both, 46 neither on the 141 new pages; 40 are agreement controls.
+The rule on `an-a73d…p000301` and `s2-661ddf…p00005` visibly runs between separate
+columns. The dense table reference `an-7a2b…p000200` has many intersecting rules;
+clean `s2-77d1…p00001` has no vertical separator. Q7 reference files were reused;
+only the 21 newly supplied pages needed inference and dense layout evidence.
+
+Prediction before R2.2: a short horizontal tolerance followed by a 12-body-height
+vertical opening will nominate near-vertical rules without dense Hough voting.
+Only a rule crossed well inside at least three boxes calls original-pixel
+verification. Fit the rule from its raw support and require an empty corridor
+beside it; repeated text stems should fail that support test. Restrict this path
+to rule-backed splits; whitespace-only layouts and severe curvature abstain.
+Preserve tables with multiple intersecting rows. Expect both `an-a73d` cases and
+the newspaper to split, and all 40 agreement controls to retain exact geometry.
+This is an expectation, not a claimed result. Export every per-line decision,
+compare with the dense reference, and inspect every changed polygon.
+
+### R2.2 result → R2.3 prediction
+
+R2.2 (`study-0af417179e22`) nominates 20 pages and changes ten. Zero agreement
+controls are nominated or changed. It misses the development `an-a73d…p000301`
+rule entirely, only splits 12 boxes on `…p000141`, and rejects the newspaper's
+three nominated segments as discontinuous. It also splits two boxes inside
+`s2-200e…p00035`, a table-preservation failure. Raw median added time is 25.044 ms
+(single diagnostic run, not the final benchmark).
+
+The sampled body height is only six pixels (the a73d page becomes 300×426), so
+thin rules disappear during downsampling; the darkest-pixel verifier can follow
+nearby letters. Prediction: twelve samples per body plus bridging breaks shorter
+than half a body will retain thin rules. Average vertical support over two body
+heights before fitting to prevent individual letters stealing the fit. Preserve
+regions bounded by at least two horizontal rules and two vertical runs, including
+sparse tables with only a header and bottom rule. Use integer area reduction before
+the final resize: it preserves integrated ink while avoiding the slow arbitrary
+large-ratio resize. No parameter is keyed to a page. Expect the named misses to
+improve and the table changes to disappear; rerun only this changed algorithm.
+
+### R2.3 result → R2.4 prediction
+
+R2.3 (`study-4d93d1a18156`) recovers 40 cuts on development `an-a73d…p000301`
+and 39 on `…p000141`. The visible separator is correct, but original vertical
+straddles remain in some boxes: splitting columns is not a complete line repair.
+The clean controls still incur no corrections. The newspaper's rule verifier
+still abstains. The proposed enclosing-grid test fails on sparse currency tables:
+`s2-200e…p00035` now has eight unwanted cuts through drachma/lepta groups, and
+`s2-831…p00020` nine. The correct action here is to preserve Paddle's cell unit.
+
+Prediction: restrict this materialised path to wide text on both sides of the
+rule (six body heights per side instead of two). This is an explicit scope
+restriction to prose-width column crossings; short entries/marginalia remain
+unresolved. It should reject these currency divisions before any correction work
+while retaining the long prose and name-list column splits. Retire the ineffective
+enclosing-grid branch; retain the existing three-intersection preservation check.
+Do not weaken raw rule verification to rescue the newspaper. Verify every changed
+line, including any sparse-table header that still gets through; then freeze.
+
+### R2.4 result → R2.5 prediction
+
+The width restriction removes all changes on both named currency tables; 18 pages
+still change, with the same main prose-column gains. A new physical invariant test
+fails (42/43 pass): a solid heading crossing the rule fills the narrow comparison
+strip and is mistakenly treated as its own paper. This is a photometry bug, not
+permission to ignore the test. Prediction: estimate paper from a neighbourhood
+extended by one body height above/below the line, keeping the same corridor and
+threshold, so the spanning ink veto can see that solid ink. This should preserve
+the synthetic heading and may reject additional questionable real crossings.
+Next: run the changed tests, materialise this new source once, inspect final lines,
+then measure three intentional fresh-page repetitions.
+
+### R2.5 result → R2.6 prediction
+
+All 43 isolated prototype tests now pass. The changed paper estimate vetoes one
+additional crossing each on `s2-a0e…p00002` and `s2-c0b…p00005`; 18 pages still
+change. All 195 explicit reference overviews have been inspected, including the
+21 extra pages. Many dense Hough hypotheses visibly follow aligned letters,
+stamps and borders: these are comparison evidence, not a truth annotation.
+
+R2.6 freezes algorithm `f186b9c26f02` for final review and measurement. Render
+each changed seam twice (raw pixels and changed geometry), retain its original
+line ID, and compare every baseline line with the dense rule hypotheses. Expect
+clear column-boundary improvements, but inherited vertical straddles on the
+wide merged boxes. Review all 195 output overviews and all 332 changed source
+boxes (the renderer will count exactly), then adjudicate without the ours model.
+
+Benchmark prediction: zero corrections on the 40 agreement controls, less than
+34 ms median added time there, and every activated correction below one second.
+Three intentional, registry-keyed repetitions use freshly decoded pixels, fresh
+small-model inference and fresh DB postprocessing; no cached maps or boxes enter
+the timed path. Measure decode, session startup and warmup separately. Publish
+the first measured output and all raw times, comparing it with the frozen study.
+
+### R2.6 result — final source frozen
+
+The exact count is 308 changed source boxes, not the rough 332 in the prediction:
+18 changed pages, 24 nominated pages, 177 exactly unchanged pages. Inspected all
+195 final page overviews and all 25 raw/overlay seam boards (every changed seam).
+Every inspected cut follows a printed separator between independent text, with
+no new glyph cut observed. This is a boundary improvement count, **not** 308 fully
+correct lines: inherited multirow boxes and top/bottom overlaps remain.
+
+Fresh benchmark: 585 measured executions (195 pages × three declared repeats),
+exactly matching cached baselines and the frozen study in every pass. Agreement:
+10.937604 ms median added, 13.500564 ms p95, 23.169292 ms maximum; zero correction
+calls and zero changes. Activated corrections: 7.311666 ms median, 14.671167 ms
+maximum. Maximum total addition including scout is 41.655791 ms. This meets the
+subsecond budget comfortably; approximately 9% agreement overhead is an honest
+improvement over Q7, not a claim of zero/negligible cost for every application.
+
+There are clear failures outside and inside this scope. `s2-661ddf…p00005`,
+`s2-49598…p00005` and `s2-d12a…p00008` retain column joins after verification
+abstains. `an-1ba3…p000009` retains a plainly missing body line. `an-ef481…p000151`
+retains mirrored bleed-through boxes. The same unresolved omission/ownership
+problems appear in the both-direction group. No missing-text recovery or whole
+false-box rejection is claimed. All failures seen, all changed pages and the
+limits of overview inspection are recorded in the round-two report and review
+ledger. The earlier currency-table and synthetic heading regressions were fixed.
+
+Next work: validate this narrow optional module on owner-held unseen pages; then
+build an independent, inexpensive residual-ink witness for missing text and a
+spatial foreground-ownership verifier for false boxes. Repair vertical straddles
+locally after a verified column split. Do not simply relax the faint-rule gate or
+restore unconditional A03. No additional algorithm experiment is planned here.
+
+Entry point: `layout_barriers.fast.run(gray, paddle_items)`. The Q7 `run.py` remains
+the explicit reference; the old unconditional composition is not used by Q8.
+The harness is `python -m prototypes.fast_lines.round2` with phases `references`,
+`study`, `review`, `benchmark`, `publish`. Completed experiments are registry
+protected. `python -m prototypes.fast_lines.validate_round2` validates artifacts
+without detector execution. All use the charter's Python and bytecode setting.

@@ -74,3 +74,38 @@ def gallery(directory,rows,title):
         p=r['page']; image=f'{p}_6_result.jpg'
         parts.append(f'<article><b>{html.escape(p)}</b><p>{html.escape(r["group"])}</p><a href="{image}"><img loading="lazy" src="{image}"></a><a href="{p}_4_evidence.jpg">Evidence</a> · <a href="{p}.json">Lines</a> · <a href="{p}.evidence.json">Ledger</a> · <a href="../shared/references/{p}.html">Reference</a></article>')
     (directory/'index.html').write_text('\n'.join(parts))
+
+
+def change_overlay(gray, before, after, changes, title='', width=1500):
+    """Q8 directional changes against the starting detector, never discounted lines.
+
+    Unchanged boxes are blue-grey; changed old boxes grey, new polygons green.
+    Red marks only ink removed from the old envelope. No rejected old-model
+    candidate geometry is loaded or drawn.
+    """
+    scale=min(1.,width/gray.shape[1])
+    raw=cv2.resize(gray,None,fx=scale,fy=scale,interpolation=cv2.INTER_AREA)
+    base=cv2.cvtColor(raw,cv2.COLOR_GRAY2BGR)
+    changed={q['line'] for q in changes}
+    for i,item in enumerate(before):
+        if item.get('discounted'):
+            continue
+        p=np.rint(np.asarray(item['polygon'])*scale).astype(np.int32)
+        color=(165,150,125) if i not in changed else (150,150,150)
+        cv2.polylines(base,[p],True,color,1,cv2.LINE_AA)
+    for change in changes:
+        if before[change['line']].get('discounted'):
+            continue
+        old=np.zeros(raw.shape,np.uint8); new=np.zeros_like(old)
+        cv2.fillPoly(old,[np.rint(np.asarray(change['old'])*scale).astype(np.int32)],1)
+        for p in change['new']:
+            polygon=np.rint(np.asarray(p)*scale).astype(np.int32)
+            cv2.fillPoly(new,[polygon],1)
+            cv2.polylines(base,[polygon],True,(20,160,20),1,cv2.LINE_AA)
+        removed=(old>0)&(new==0)&(raw<200)
+        base[removed]=(30,30,220)
+    if title:
+        bar=np.full((38,base.shape[1],3),255,np.uint8)
+        cv2.putText(bar,title[:170],(6,25),cv2.FONT_HERSHEY_SIMPLEX,.43,(0,0,0),1,cv2.LINE_AA)
+        base=np.vstack([bar,base])
+    return base
