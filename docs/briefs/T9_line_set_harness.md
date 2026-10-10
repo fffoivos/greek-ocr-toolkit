@@ -16,7 +16,7 @@ does not pick the recogniser and does not do OCR.
   ledger.jsonl there for paths). Pick 4 pages: two plain prose, one with a table/navigation page, one two-column. Internal-only data (CC BY-NC-ND).
 - Docling is importable in `.venv` (`import docling` ok). For the "Docling native cells" candidate, run Docling's PDF pipeline with OCR OFF on the six
   Vouli PDF pages and dump the textline cells it produces (this is exactly what the plugin receives in Mode A); record the Docling version.
-- Existing code to reuse, not rewrite: `scripts/glyphs/segment_page_lines.py` (owner's pixel procedure, first version), `scripts/glyphs/page_segments_report.py`,
+- Existing code to reuse, not rewrite: `scripts/glyphs/segment_page_lines.py` (owner's pixel procedure, first version), `scripts/glyphs/archive/page_segments_report.py`,
   `greekocr/glyphs/page_lines.py`, `greekocr/glyphs/recut.py` (fix_page), `docs/PAGE_LINES_ALGORITHM.md` (the 7-step owner procedure — follow it literally
   for candidate A), `scripts/glyphs/build_page_review_data.py` + `pages_review.html` (the owner's review page generator — REUSE its format for the output page).
 - DBNet detector (ours): `~/Projects/greek-page-ocr/out/detector/gpu_final/best.pt` (+ checkpoint_meta.json); loader lives in greek-page-ocr `train/detector_*.py` /

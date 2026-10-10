@@ -96,7 +96,7 @@ def test_discovery_precedes_horizontal_fitting(monkeypatch):
     monkeypatch.setattr(mod,'discover_directions',lambda im:events.append('discover') or [])
     monkeypatch.setattr(mod,'measure_orientation',lambda *a,**kw:Orientation(axis='horizontal',orientation_cw=0))
     monkeypatch.setattr(mod,'segment_page',lambda im:events.append('fit') or NS())
-    monkeypatch.setattr(mod,'prepare_delivery',lambda im,s,r:(s,[],[]))
+    monkeypatch.setattr(mod,'prepare_delivery',lambda im,s,r,**kw:(s,[],[]))
     mod.oriented_page(Image.new('L',(100,100),255))
     assert events == ['discover','fit']
 
@@ -122,7 +122,7 @@ def test_normalized_fitter_words_and_guides_reversible(angle):
 @pytest.mark.parametrize('angle',[0,90,180,270])
 def test_rotated_artifact_reframing_preserves_pixel_and_page_units(angle):
     from greekocr.glyphs.oriented_page import OrientedWord
-    from scripts.glyphs.render_orientation_round4 import source_records
+    from scripts.glyphs.archive.render_orientation_round4 import source_records
     image=Image.new('L',(500,600),255);outer=QuarterTurn(*image.size,angle)
     frame=QuarterTurn(100,60,180,(100,200))
     word=OrientedWord(0,'g',0,(10,10,80,40),frame,

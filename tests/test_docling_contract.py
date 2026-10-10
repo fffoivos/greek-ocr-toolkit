@@ -104,8 +104,8 @@ def test_detector_recovers_raster_lines_before_layout(tmp_path, monkeypatch):
     # A failed geometric fit must preserve the page and must not send an
     # inverted crop to recognition. This does not alter detector evaluation.
     import greekocr.glyphs.page_text_lines as detector
-    monkeypatch.setattr(detector, 'page_line_segments', lambda *a: [SimpleNamespace(
-        top=np.array([10.]), bottom=np.array([9.]))])
+    monkeypatch.setattr(detector, 'segment_page', lambda *a: SimpleNamespace(lines=[SimpleNamespace(
+        top=np.array([10.]), bottom=np.array([9.]), discounted=None)]))
     before = parsed.textline_cells
     list(model(SimpleNamespace(input=SimpleNamespace(file=Path('scan.pdf'))), [page]))
     assert parsed.textline_cells is before and len(seen) == 3

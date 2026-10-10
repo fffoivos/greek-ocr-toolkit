@@ -22,19 +22,8 @@ from greekocr.glyphs.statistics import (
     page_statistics, book_statistics, corpus_statistics, write_statistics,
     render_glyph_statistics, render_book_statistics,
 )
-
-
-def read_page(out, key):
-    stats = json.loads((out/f'{key}.stats.json').read_text())
-    path = out/stats['glyph_table']
-    if path.suffix == '.parquet':
-        import pyarrow.parquet as pq
-        glyphs = pq.read_table(path).to_pylist()
-        for row in glyphs:
-            row['attached_marks'] = json.loads(row['attached_marks'])
-    else:
-        glyphs = [json.loads(s) for s in path.read_text().splitlines()]
-    return dict(stats=stats, glyphs=glyphs)
+from greekocr.pages.outputs import read_statistics as read_page
+from greekocr.pages import statistics as statistics_module
 
 
 def main():
@@ -44,7 +33,7 @@ def main():
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--keys', nargs='*')
     args = parser.parse_args()
-    implementation = hashlib.sha256((Path(__file__).resolve().parents[2]/'greekocr/glyphs/statistics.py').read_bytes()).hexdigest()
+    implementation = hashlib.sha256(Path(statistics_module.__file__).read_bytes()).hexdigest()
     locations = {}
     grouped = defaultdict(list)
     for inputs, outputs in args.collection:

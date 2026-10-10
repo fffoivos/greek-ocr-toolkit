@@ -8,6 +8,42 @@ Requested `docs/ocr_program_2026-10-06/data_contracts.md` was absent; the curren
 
 Machine-readable file hashes and logic hashes: `greekocr/_vendor/origins.json`.
 
+## Current page and crop modules (Q3)
+
+New callers use `greekocr.pages.process_page` / `process_book` and `PageOptions`.
+The original crop API, including `greekocr.glyphs.components`, is preserved.
+Page-stage implementations moved with compatibility import aliases:
+
+| Original module | Current implementation | Responsibility |
+| --- | --- | --- |
+| `greekocr.glyphs.pixel_segments` | `greekocr.pages.pixels` | Pixel masks, rule/gutter proposals and rough segments. |
+| `greekocr.glyphs.page_text_lines` | `greekocr.pages.lines` | Crop-driven fitting, curved bounds, strips and diagnostics. |
+| `greekocr.glyphs.page_font` | `greekocr.pages.font` | Class evidence and six font/accent guides. |
+| `greekocr.glyphs.boundary_evidence` | `greekocr.pages.boundaries` | Validate stops against original ink. |
+| `greekocr.glyphs.line_structure` | `greekocr.pages.structure` | Leaves, columns, blocks, rows, addresses and guarded joining. |
+| `greekocr.glyphs.table_lines` | `greekocr.pages.tables` | Table/prose delivery and recognition pieces. |
+| `greekocr.glyphs.statistics` | `greekocr.pages.statistics` | Glyph/page/book/corpus measurement and existing Arrow schema. |
+
+`pages.api`, `options`, `records`, `layout`, `delivery`, `outputs`, `render`,
+`provenance`, and `cli` compose these stages and serialize their results.
+`glyphs.orientation`, `orientation_regions`, `orientation_guides`, `oriented_page`
+and the Docling orientation adapter remain parked implementations.
+`glyphs.page_lines` is the older box-guided API, retained for crop compatibility;
+it is not the entry point for image-first detection.
+
+The [script inventory](../scripts/glyphs/README.md) lists every glyph script and
+template. Historical round/audit/report generators and box-guided experiments
+moved to [scripts/glyphs/archive](../scripts/glyphs/archive/README.md), with report
+paths repaired. Current crop review tooling and `eval/book_pages.py` remain in
+place. Q3's exact comparison and stage-equivalence runners are in `scripts/pages`.
+
+The original capture inventory below records source provenance. Later intentional
+transformations have updated captured-file hashes in `origins.json`; the Q3
+plugin maps its detector options onto the shared page API. See
+[PAGES_GUIDE.md](PAGES_GUIDE.md), [PAGES_PIPELINE.md](PAGES_PIPELINE.md),
+[PAGES_OUTPUT_FORMAT.md](PAGES_OUTPUT_FORMAT.md), and
+[the Q3 review](reviews/PAGE_LINES_Q3_CLEANUP_API.md).
+
 | Vendored path | Absolute origin | Origin commit | Source state | Transform |
 | --- | --- | --- | --- | --- |
 | `docs/origins/checkpoint/SKILL.md` | `/Users/foivoskarounos-zamparloukos/.claude/skills/checkpoint/SKILL.md` | none (unversioned) | unversioned | byte-identical |
@@ -128,8 +164,8 @@ Machine-readable file hashes and logic hashes: `greekocr/_vendor/origins.json`.
 | `greekocr/_vendor/train/train.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/train/train.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | Python import paths and hook strings relocated |
 | `greekocr/deploy/docling_plugin/__init__.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/__init__.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | byte-identical |
 | `greekocr/deploy/docling_plugin/docling_plugin.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/docling_plugin.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | byte-identical |
-| `greekocr/deploy/docling_plugin/model.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/model.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | ported + table-aware pixel detector, oriented OCR, TOPLEFT replacement and separate orientation timing (round 4 part 3c) |
-| `greekocr/deploy/docling_plugin/options.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/options.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | renamed recognition_mode; inherited Docling mode retained (round 4) |
+| `greekocr/deploy/docling_plugin/model.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/model.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | ported; Q3 shared page API and equivalent invalid-geometry injection contract |
+| `greekocr/deploy/docling_plugin/options.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/options.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | ported; Q3 shared page API and equivalent invalid-geometry injection contract |
 | `greekocr/deploy/docling_plugin/recognizer/VENDORED_FROM.json` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/recognizer/VENDORED_FROM.json` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | byte-identical |
 | `greekocr/deploy/docling_plugin/recognizer/__init__.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/recognizer/__init__.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | byte-identical |
 | `greekocr/deploy/docling_plugin/recognizer/ckpt_io.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/src/glossapi/ocr/plugin/recognizer/ckpt_io.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | HEAD | byte-identical |
@@ -178,7 +214,7 @@ Machine-readable file hashes and logic hashes: `greekocr/_vendor/origins.json`.
 | `tests/fixtures/o4c/review_pages/bub_gb_aysYAAAAYAAJ_n20.jpg` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/docs/evidence/o4c/print_probes/bub_gb_aysYAAAAYAAJ_n20.jpg` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | byte-identical |
 | `tests/fixtures/o4c/review_pages/bub_gb_ra0EsAXYVaYC_n20.jpg` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/docs/evidence/o4c/print_probes/bub_gb_ra0EsAXYVaYC_n20.jpg` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | byte-identical |
 | `tests/fixtures/o4c/wellcome_results.json` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/docs/evidence/o4c/fixtures/wellcome_results.json` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | byte-identical |
-| `tests/test_docling_contract.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/tests/test_docling_plugin_c1.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | selected offline contract tests | ported + table-aware pixel detector, TOPLEFT delivery and stale-cache replacement (round 4) |
+| `tests/test_docling_contract.py` | `/Users/foivoskarounos-zamparloukos/Projects/glossapi-development/tests/test_docling_plugin_c1.py` | 724e7012b9dfd5c644f853b9ace64e87be6d7265 | selected offline contract tests | ported; Q3 shared page API and equivalent invalid-geometry injection contract |
 | `tests/test_vendor_o4c.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/bench/tests/test_o4c.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | Imports/hooks and fixture resource root relocated |
 | `tests/test_vendor_o4c_anemi.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/bench/tests/test_o4c_anemi.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | untracked | Imports/hooks and fixture resource root relocated |
 | `tests/test_vendor_r2_cllg.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/bench/tests/test_r2_cllg.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | Python import paths and hook strings relocated |

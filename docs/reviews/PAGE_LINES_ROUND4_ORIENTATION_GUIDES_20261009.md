@@ -629,14 +629,14 @@ Run from the worktree with `PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORM
 ```sh
 export PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 GUIDES_PYTHON=/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.venv/bin/python
-"$GUIDES_PYTHON" scripts/glyphs/generate_orientation_guides.py
-"$GUIDES_PYTHON" scripts/glyphs/evaluate_orientation_guides.py
-"$GUIDES_PYTHON" scripts/glyphs/audit_orientation_guides.py
-"$GUIDES_PYTHON" scripts/glyphs/time_orientation_guides.py
-"$GUIDES_PYTHON" scripts/glyphs/render_orientation_guides.py
+"$GUIDES_PYTHON" scripts/glyphs/archive/generate_orientation_guides.py
+"$GUIDES_PYTHON" scripts/glyphs/archive/evaluate_orientation_guides.py
+"$GUIDES_PYTHON" scripts/glyphs/archive/audit_orientation_guides.py
+"$GUIDES_PYTHON" scripts/glyphs/archive/time_orientation_guides.py
+"$GUIDES_PYTHON" scripts/glyphs/archive/render_orientation_guides.py
 "$GUIDES_PYTHON" scripts/generate_api_docs.py
 "$GUIDES_PYTHON" -m pytest -p no:cacheprovider --junitxml=.astra/out/orientation_eval/tests.xml
-"$GUIDES_PYTHON" scripts/glyphs/report_orientation_guides.py
+"$GUIDES_PYTHON" scripts/glyphs/archive/report_orientation_guides.py
 ```
 
 No push, download, background shell job, training run, or held-out-page access was performed.

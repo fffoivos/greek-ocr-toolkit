@@ -5,6 +5,16 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 CALLS={
+'process_page':'result = process_page(image, options=PageOptions(statistics=True))',
+'process_book':'result = process_book(page_images, book_id="book-1", options=PageOptions(statistics=True))',
+'PageOptions':'options = PageOptions(tables=True, join_lines=True, granularity="rows", statistics=True)',
+'OutputOptions':'outputs = OutputOptions("page-output", frozenset({"lines", "structure", "cells"}))',
+'PageResult':'result = PageResult(**measured_page_result)',
+'BookResult':'result = BookResult(book_id="book-1", pages=page_results)',
+'PageResult.to_records':'records = result.to_records()',
+'BookResult.to_records':'records = result.to_records()',
+'to_records':'records = result.to_records()',
+
 'page_statistics':'result = page_statistics(image, q1_line_records, page_key="page-1", book_id="book-1", structure=q1_structure)',
 'book_statistics':'book = book_statistics(measured_pages, book_id="book-1")',
 'corpus_statistics':'corpus = corpus_statistics(measured_pages)',
@@ -279,7 +289,7 @@ def api_entries():
 
 
 def generate():
-    lines=['# Public API', '', 'The public surface is the typed functions/classes explicitly exported by the API modules below. `_vendor`, the discovery runner and recognizer internals are private. Re-exported functions are documented once at their defining module. The preserved Docling entry point is also documented.', '',
+    lines=['# Public API', '', 'For the page entry point and examples, start with [PAGES_GUIDE.md](PAGES_GUIDE.md). Page stages now live in `greekocr.pages`; the corresponding `greekocr.glyphs` imports remain compatibility aliases. Crop APIs are unchanged.', '', 'The public surface is the typed functions/classes explicitly exported by the API modules below. `_vendor`, the discovery runner and recognizer internals are private. Re-exported functions are documented once at their defining module. The preserved Docling entry point is also documented.', '',
            'Every example has two lines. Lowercase names such as `candidate_rows`, `client`, `image`, `recorded_metadata`, and `donor_spec` denote caller-supplied, locally staged inputs; they do not acquire data. Operational examples are node-side invocations, not actions performed during this phase.', '',
            'Shared types: `PathLike = str | Path`, `Record = dict[str, Any]`; reader, batch-reader, native-reference and HTTP return values have structural protocols in `greekocr/types.py`.', '',
            'Recipe registry is immutable snapshot identity; mix custody additionally requires exact committed HEAD blobs in the explicit `repo`. Extraction page indices are zero-based. Word-tag absence returns `None` and must be disclosed. Native import document maps are TSV (`path`, `source_doc_id`).', '',

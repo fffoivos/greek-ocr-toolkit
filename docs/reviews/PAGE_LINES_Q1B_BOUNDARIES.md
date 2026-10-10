@@ -906,5 +906,5 @@ The audit reads back all 54 line/cell/structure/row outputs, compares all origin
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 "$PY" -m pytest -p no:cacheprovider --junitxml=.astra/q1b-tests.xml -q
-PYTHONDONTWRITEBYTECODE=1 "$PY" scripts/glyphs/review_line_boundaries.py
+PYTHONDONTWRITEBYTECODE=1 "$PY" scripts/glyphs/archive/review_line_boundaries.py
 ```

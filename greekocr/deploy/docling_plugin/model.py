@@ -10,7 +10,7 @@ from time import perf_counter
 
 import numpy as np
 from docling.models.base_ocr_model import BaseOcrModel
-from docling_core.types.doc import BoundingBox, CoordOrigin, DocItemLabel
+from docling_core.types.doc import BoundingBox, CoordOrigin
 from docling_core.types.doc.page import BoundingRectangle, TextCell
 
 from .options import GlossapiOcrOptions
@@ -100,8 +100,9 @@ class GlossapiOcrModel(BaseOcrModel):
             parsed.has_words = parsed.has_chars = False
 
     def _detect(self, page, record):
-        from greekocr.glyphs.page_text_lines import page_line_segments, extract_line_image
-        from greekocr.glyphs.table_lines import recognition_pieces
+        from greekocr.pages import process_page
+        from greekocr.pages.lines import extract_line_image
+        from greekocr.pages.layout import docling_regions
 
         parsed = page.parsed_page
         if parsed is None:
@@ -116,27 +117,32 @@ class GlossapiOcrModel(BaseOcrModel):
         if image is None:
             record['reason'] = 'no_page_image'
             return
-        start = perf_counter()
-        lines = page_line_segments(image)
-        record['timings_s']['detect'] = perf_counter() - start
-        if any(not np.isfinite(l.top).all() or not np.isfinite(l.bottom).all()
-               or np.any(l.bottom <= l.top) for l in lines):
-            record['reason'] = 'invalid_line_geometry'
-            return
         # Renderers may round dimensions or return a raster at another scale.
         # Use measured ratios, not the requested scale or a strip coordinate.
         sx = image.width / getattr(page.size, 'width', image.width / scale)
         sy = image.height / page.size.height
         layout = getattr(getattr(page, 'predictions', None), 'layout', None)
-        regions = []
-        for cluster in getattr(layout, 'clusters', []):
-            if cluster.label in (DocItemLabel.TABLE, DocItemLabel.DOCUMENT_INDEX):
-                threshold = .5 if cluster.label == DocItemLabel.TABLE else .45
-                if cluster.confidence < threshold:
-                    continue
-                bb = cluster.bbox.to_top_left_origin(page_height=page.size.height)
-                regions.append((str(cluster.id), (bb.l*sx, bb.t*sy, bb.r*sx, bb.b*sy)))
-        pieces, regions, _ = recognition_pieces(image, lines, regions)
+        size = (image.width/sx, image.height/sy)
+        options = self.options.page_options()
+        regions = docling_regions(layout, image.size, size) if options.tables else None
+        start = perf_counter()
+        try:
+            analysis = process_page(image, options=options, table_regions=regions, page_size=size,
+                                    page_key=f"{Path(record.get('filename', 'page')).stem}-p{record.get('page', 1):05d}")
+        except ValueError as error:
+            if str(error) != 'invalid_line_geometry':
+                raise
+            record['reason'] = 'invalid_line_geometry'
+            return
+        record['timings_s']['detect'] = perf_counter() - start
+        pieces = analysis.pieces
+        if options.join_lines:
+            from greekocr.pages.delivery import joined_text_pieces
+            pieces = joined_text_pieces(analysis)
+        if analysis.statistics is not None:
+            record['statistics'] = analysis.statistics['stats']
+        if analysis.files:
+            record['page_files'] = analysis.files
         strips, rects = [], []
         start = perf_counter()
         for piece in pieces:
@@ -180,7 +186,8 @@ class GlossapiOcrModel(BaseOcrModel):
                                   geometry_source=p.line.geometry_source) for c, p in zip(ours, pieces)])
 
     def _detect_oriented(self, page, record):
-        from greekocr.glyphs.oriented_page import oriented_page
+        from greekocr.pages import process_page
+        from greekocr.pages.layout import docling_regions
         from greekocr.glyphs.orientation import _recognition_strip
         from docling_core.types.doc.page import TextDirection
 
@@ -193,14 +200,16 @@ class GlossapiOcrModel(BaseOcrModel):
             record['reason'] = 'no_page_image'
             return
         sx, sy = image.width/page.size.width, image.height/page.size.height
-        regions = []
         layout = getattr(page.predictions,'layout',None)
-        for c in getattr(layout,'clusters',[]):
-            if c.label in (DocItemLabel.TABLE,DocItemLabel.DOCUMENT_INDEX) and c.confidence >= .5:
-                b = c.bbox.to_top_left_origin(page_height=page.size.height)
-                regions.append((str(c.id),(b.l*sx,b.t*sy,b.r*sx,b.b*sy)))
+        options = self.options.page_options()
+        regions = docling_regions(layout, image.size, (page.size.width, page.size.height), oriented=True) if options.tables else None
         recognizer = self._get_recognizer()
-        result = oriented_page(image,regions,recognizer=recognizer)
+        analysis = process_page(image, options=options, table_regions=regions,
+                                page_size=(page.size.width, page.size.height), recognizer=recognizer,
+                                page_key=f"{Path(record.get('filename', 'page')).stem}-p{record.get('page', 1):05d}")
+        result = analysis.orientation
+        if analysis.statistics is not None:
+            record['statistics'] = analysis.statistics['stats']
         strips = []
         for w in result.words:
             strip = _recognition_strip(w.crop)
@@ -219,6 +228,12 @@ class GlossapiOcrModel(BaseOcrModel):
             ours.append(TextCell(index=w.index,from_ocr=True,rect=rect,text=text,orig=text,
                                  confidence=confidence,text_direction=TextDirection.LEFT_TO_RIGHT))
             records.append(r)
+        if options.outputs.directory is not None and 'orientation' in options.outputs.files:
+            from greekocr.pages.options import OutputOptions
+            from greekocr.pages.outputs import write_page
+            analysis.files.update(write_page(analysis, image, OutputOptions(options.outputs.directory, frozenset({'orientation'}))))
+        if analysis.files:
+            record['page_files'] = analysis.files
         self._install(ours,page)
         if getattr(page,'_backend',None) is not None:
             page._backend._greekocr_word_orientations = {w.index:w.orientation.orientation_cw for w in result.words}

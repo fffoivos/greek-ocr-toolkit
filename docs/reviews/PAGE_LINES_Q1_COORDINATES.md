@@ -270,7 +270,7 @@ All 54 structure JPEGs decoded at their source dimensions. Three 18-page contact
 ```sh
 PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 "$PY" -m pytest -p no:cacheprovider --junitxml=.astra/q1-tests.xml -q
 PYTHONDONTWRITEBYTECODE=1 "$PY" scripts/generate_api_docs.py
-PYTHONDONTWRITEBYTECODE=1 "$PY" scripts/glyphs/review_line_structure.py
+PYTHONDONTWRITEBYTECODE=1 "$PY" scripts/glyphs/archive/review_line_structure.py
 # Fresh detections also emit structure (not used to overwrite the frozen baseline):
 PYTHONDONTWRITEBYTECODE=1 "$PY" scripts/glyphs/render_page_line_segments.py --layout .astra/layout --out /tmp/q1-fresh
 ```

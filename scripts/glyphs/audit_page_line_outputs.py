@@ -10,9 +10,12 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 from PIL import Image
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
 FIELDS = ('baseline', 'font_top', 'meanline', 'font_bottom', 'top', 'bottom', 'accent_top', 'accent_bottom')
@@ -84,11 +87,8 @@ def audit(pages, out):
             failures.append(dict(key=key, invalid_lines=invalid, overlap_pairs=overlapping))
     versions = {json.loads(p.read_text()).get('implementation_sha256') for p in out.glob('*.checks.json')}
     assert len(versions) == 1 and None not in versions, 'mixed implementation versions'
-    root = Path(__file__).resolve().parents[2]
-    sources = ['greekocr/glyphs/pixel_segments.py', 'greekocr/glyphs/page_text_lines.py',
-               'greekocr/glyphs/page_font.py', 'greekocr/glyphs/components.py', 'greekocr/glyphs/baseline.py',
-               'scripts/glyphs/render_page_line_segments.py']
-    assert versions == {hashlib.sha256(b''.join((root/p).read_bytes() for p in sources)).hexdigest()}, 'stale implementation'
+    from greekocr.pages.provenance import implementation_sha256
+    assert versions == {implementation_sha256()}, 'stale implementation'
     report = dict(pages=len(records), implementation_sha256=versions.pop(), failures=failures, records=records)
     (out / 'artifact_audit.json').write_text(json.dumps(report, indent=2))
     print(json.dumps(dict(pages=len(records), failures=failures), indent=2))

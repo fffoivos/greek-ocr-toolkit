@@ -98,7 +98,7 @@ def test_real_pipeline_wiring_uses_adapters_before_layout_and_at_tables():
 
 
 def test_actual_tableformer_control_under_all_quarter_turns(tmp_path):
-    from scripts.glyphs.evaluate_orientation_round4 import tables,RESEARCH
+    from scripts.glyphs.archive.evaluate_orientation_round4 import tables,RESEARCH
     if not (RESEARCH/'testset/manifest.json').exists():
         pytest.skip('optional offline research fixture bundle is not installed')
     rows=tables(tmp_path)
@@ -107,7 +107,7 @@ def test_actual_tableformer_control_under_all_quarter_turns(tmp_path):
 
 
 def test_both_real_pdf_backends_metadata_and_no_double_rotation(tmp_path):
-    from scripts.glyphs.evaluate_orientation_round4 import metadata,RESEARCH
+    from scripts.glyphs.archive.evaluate_orientation_round4 import metadata,RESEARCH
     if not (RESEARCH/'testset/manifest.json').exists():
         pytest.skip('optional offline research fixture bundle is not installed')
     rows=metadata(tmp_path)

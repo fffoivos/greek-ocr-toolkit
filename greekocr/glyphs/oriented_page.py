@@ -99,7 +99,7 @@ def _word_boxes(image, piece, gray=None):
     return out
 
 
-def _fit_group(image, frame, decision, gid, regions, start, *, segmentation=None, pieces=None):
+def _fit_group(image, frame, decision, gid, regions, start, *, segmentation=None, pieces=None, supplement=True):
     local = frame.image(image)
     mapped_regions = []
     for key, box in regions:
@@ -107,7 +107,7 @@ def _fit_group(image, frame, decision, gid, regions, start, *, segmentation=None
         mapped_regions.append((key,[*points.min(0),*points.max(0)]))
     if segmentation is None:
         segmentation = segment_page(local)
-        segmentation,pieces,_ = prepare_delivery(local,segmentation,mapped_regions)
+        segmentation,pieces,_ = prepare_delivery(local,segmentation,mapped_regions,supplement=supplement)
     words = []; gray = np.asarray(local)
     for piece in pieces:
         if piece.line.discounted is not None:
@@ -134,7 +134,8 @@ def _fit_group(image, frame, decision, gid, regions, start, *, segmentation=None
 def oriented_page(image: Image.Image, table_regions: Sequence[tuple[str, Sequence[float]]] = (), *,
                   recognizer: _Recognizer | None = None, use_osd: bool = False,
                   segmentation: Any = None, pieces: list | None = None,
-                  dominant: Orientation | None = None, discover: bool = True) -> OrientedPage:
+                  dominant: Orientation | None = None, discover: bool = True,
+                  supplement: bool = True) -> OrientedPage:
     """Discover directions, normalize groups, fit, split and inverse-map words.
 
     Passing a precomputed segmentation reuses only the unchanged upright base;
@@ -157,7 +158,7 @@ def oriented_page(image: Image.Image, table_regions: Sequence[tuple[str, Sequenc
     if working != 0:
         segmentation = pieces = None
     words,result,pieces = _fit_group(image,frame,dominant,'page',table_regions,0,
-                                    segmentation=segmentation,pieces=pieces)
+                                    segmentation=segmentation,pieces=pieces,supplement=supplement)
     groups = [dict(id='page',box=[0,0,*image.size],frame=frame.matrix.tolist(),**dominant.to_record())]
     # Pixel-detected tables have the same boundary-safe delivery contract as
     # layout-supplied tables. Their pieces are in the main fit's local frame;
@@ -229,7 +230,7 @@ def oriented_page(image: Image.Image, table_regions: Sequence[tuple[str, Sequenc
         pad = max(1,round(5*region['xheight']))
         crop = ImageOps.expand(crop,border=pad,fill=int(np.percentile(np.asarray(crop),90)))
         local_frame = QuarterTurn(crop.width,crop.height,local_angle,(box[0]-pad,box[1]-pad))
-        local_words,_,_ = _fit_group(crop,local_frame,decision,region['id'],local_tables,0)
+        local_words,_,_ = _fit_group(crop,local_frame,decision,region['id'],local_tables,0,supplement=supplement)
         if not local_words:
             decision = replace(decision, orientation_cw=None, polarity_confidence=0.,
                                evidence={**decision.evidence, 'unapplied_candidate':decision.orientation_cw,

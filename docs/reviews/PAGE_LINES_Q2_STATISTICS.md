@@ -238,7 +238,7 @@ python scripts/glyphs/render_page_line_segments.py --pages .astra/book_pages --o
 python scripts/glyphs/build_statistics.py --collection .astra/pages .astra/out --collection .astra/book_pages .astra/out/book_pages --resume
 python scripts/generate_api_docs.py
 python -m pytest -q -p no:cacheprovider --junitxml=.astra/q2-tests.xml
-python scripts/glyphs/review_statistics.py
+python scripts/glyphs/archive/review_statistics.py
 ```
 
 The existing development Q1 records were consumed in place; they were already generated with `.astra/layout`. Re-running the statistics command verifies source-image, line-file and implementation hashes before reusing measurements. Parquet tables carry schema version and threshold metadata. The review script needs the frozen `.astra/q2-q1-before.json` and `.astra/q2-book-q1-before.json` receipts for its byte-identity gates. It inventories the 95 input PNG keys, excluding pre-existing optional orientation artifacts.
@@ -246,7 +246,7 @@ The existing development Q1 records were consumed in place; they were already ge
 ### Deliverables
 
 - `greekocr/glyphs/statistics.py`: per-page, per-book and per-corpus functions; persistence and review renderers.
-- `scripts/glyphs/build_statistics.py` and `scripts/glyphs/review_statistics.py`: reproduction and audit.
+- `scripts/glyphs/build_statistics.py` and `scripts/glyphs/archive/review_statistics.py`: reproduction and audit.
 - `tests/glyphs/test_statistics.py` and regenerated `docs/API.md`.
 - `.astra/out/<key>.glyphs.parquet`, `.stats.json`, `.glyphs.jpg` for 54 development pages; the same under `.astra/out/book_pages/` for 41 book pages.
 - `.astra/out/books/<book>.stats.json` and `.summary.jpg`; a separate six-book/41-page cohort under `.astra/out/book_pages/books/`.

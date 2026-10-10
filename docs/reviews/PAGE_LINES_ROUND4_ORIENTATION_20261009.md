@@ -151,14 +151,14 @@ Evidence: [compact review JSON](PAGE_LINES_ROUND4_ORIENTATION_20261009.json), [9
 Use the Python in `.astra/BRIEF.md` with `PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`. The recognizer checkpoint is an explicit argument; the codec hash is verified by its loader.
 
 ```sh
-python scripts/glyphs/evaluate_orientation_round4.py --checkpoint "$CKPT" --require-gate
-python scripts/glyphs/render_orientation_round4.py --checkpoint "$CKPT"
-python scripts/glyphs/render_orientation_round4.py --checkpoint "$CKPT" --rotated --out .astra/out/rotated
-python scripts/glyphs/integrate_orientation_round4.py --checkpoint "$CKPT"
+python scripts/glyphs/archive/evaluate_orientation_round4.py --checkpoint "$CKPT" --require-gate
+python scripts/glyphs/archive/render_orientation_round4.py --checkpoint "$CKPT"
+python scripts/glyphs/archive/render_orientation_round4.py --checkpoint "$CKPT" --rotated --out .astra/out/rotated
+python scripts/glyphs/archive/integrate_orientation_round4.py --checkpoint "$CKPT"
 python scripts/generate_api_docs.py
 python -m pytest -p no:cacheprovider -q --junitxml=.astra/orientation-tests-final.xml
-python scripts/glyphs/audit_orientation_round4.py
-python scripts/glyphs/report_orientation_round4.py
+python scripts/glyphs/archive/audit_orientation_round4.py
+python scripts/glyphs/archive/report_orientation_round4.py
 ```
 
 ## Commit handoff

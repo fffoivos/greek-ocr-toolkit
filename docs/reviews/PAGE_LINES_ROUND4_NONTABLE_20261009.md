@@ -166,11 +166,11 @@ Use `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.venv/bin/pyt
 python scripts/generate_api_docs.py
 python -m pytest -p no:cacheprovider --junitxml=.astra/out/tests-nontable.xml
 python scripts/glyphs/render_page_line_segments.py --layout .astra/layout
-python scripts/glyphs/evaluate_tables_round4.py
-python scripts/glyphs/integrate_docling_tables_round4.py
-python scripts/glyphs/score_tables_round4.py
-python scripts/glyphs/check_tables_part2.py
-python scripts/glyphs/review_page_lines_round4_nontable.py
+python scripts/glyphs/archive/evaluate_tables_round4.py
+python scripts/glyphs/archive/integrate_docling_tables_round4.py
+python scripts/glyphs/archive/score_tables_round4.py
+python scripts/glyphs/archive/check_tables_part2.py
+python scripts/glyphs/archive/review_page_lines_round4_nontable.py
 ```
 
 API regeneration produced 211 public entries and no API diff. No public signature changed. Foreground execution only; no push or model download. Machine-readable results: [case records](../../.astra/out/cases-nontable.json), [all-page regression](../../.astra/out/regression-nontable.json).

@@ -196,12 +196,12 @@ python scripts/generate_api_docs.py
 python -m pytest -p no:cacheprovider
 python .astra/layout_inventory.py
 python scripts/glyphs/render_page_line_segments.py --layout .astra/layout
-python scripts/glyphs/annotate_tables_round4.py
-python scripts/glyphs/evaluate_tables_round4.py
-python scripts/glyphs/integrate_docling_tables_round4.py
-python scripts/glyphs/score_tables_round4.py
-python scripts/glyphs/audit_tables_round4.py
-python scripts/glyphs/report_tables_round4.py
+python scripts/glyphs/archive/annotate_tables_round4.py
+python scripts/glyphs/archive/evaluate_tables_round4.py
+python scripts/glyphs/archive/integrate_docling_tables_round4.py
+python scripts/glyphs/archive/score_tables_round4.py
+python scripts/glyphs/archive/audit_tables_round4.py
+python scripts/glyphs/archive/report_tables_round4.py
 ```
 
 The acceptance harness reuses `.astra/docling_research/research_tables.py` and `research_layout.py`; matcher unit tests follow `probe_matching.py`, and frozen tests follow the real-stage method of `probe_actual_stage.py`. Accurate and Fast each execute 11 real table-image forwards, reusing tensors only for identical fused controls. The layout stage executes 54 fresh full-page forwards (six variants × eight pages plus six border controls).

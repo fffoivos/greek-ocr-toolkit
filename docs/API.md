@@ -1,5 +1,7 @@
 # Public API
 
+For the page entry point and examples, start with [PAGES_GUIDE.md](PAGES_GUIDE.md). Page stages now live in `greekocr.pages`; the corresponding `greekocr.glyphs` imports remain compatibility aliases. Crop APIs are unchanged.
+
 The public surface is the typed functions/classes explicitly exported by the API modules below. `_vendor`, the discovery runner and recognizer internals are private. Re-exported functions are documented once at their defining module. The preserved Docling entry point is also documented.
 
 Every example has two lines. Lowercase names such as `candidate_rows`, `client`, `image`, `recorded_metadata`, and `donor_spec` denote caller-supplied, locally staged inputs; they do not acquire data. Operational examples are node-side invocations, not actions performed during this phase.
@@ -609,50 +611,6 @@ from greekocr.glyphs.letters import letter_boxes
 boxes = letter_boxes(line_glyphs(Image.open("crop.png")))
 ```
 
-### `greekocr.glyphs.line_structure.build_structure`
-
-`def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[int], *, gutters: Sequence=(), rules: Sequence[dict]=(), boundaries: Sequence[dict]=(), fold: dict | bool | None=None, page: Image.Image | np.ndarray | None=None) -> dict`
-
-Add addresses to line/cell records in place without changing geometry.
-
-```python
-from greekocr.glyphs.line_structure import build_structure
-structure = build_structure(line_records, cell_records, image.size, gutters=detected_gutters, rules=detected_rules, page=image)
-```
-
-### `greekocr.glyphs.line_structure.join_pieces`
-
-`def join_pieces(pieces: Sequence[dict], *, structure: dict) -> dict`
-
-Join one addressed row, rejecting mixed addresses and boundary crossings.
-
-```python
-from greekocr.glyphs.line_structure import join_pieces
-row = join_pieces(addressed_row_pieces, structure=structure)
-```
-
-### `greekocr.glyphs.line_structure.delivery_records`
-
-`def delivery_records(lines: Sequence[dict], *, structure: dict, granularity: str='default') -> list[dict]`
-
-Return whole ordinary rows and table pieces; optionally all rows or pieces.
-
-```python
-from greekocr.glyphs.line_structure import delivery_records
-records = delivery_records(line_records, structure=structure, granularity="default")
-```
-
-### `greekocr.glyphs.line_structure.render_structure`
-
-`def render_structure(page: Image.Image, lines: Sequence[dict], structure: dict) -> Image.Image`
-
-Draw row colours, piece order, finite column boundaries and the fold.
-
-```python
-from greekocr.glyphs.line_structure import render_structure
-overlay = render_structure(image, line_records, structure)
-```
-
 ### `greekocr.glyphs.lines_api.LineImage`
 
 ```python
@@ -863,7 +821,7 @@ page = OrientedPage(**measured_oriented_page)
 
 ### `greekocr.glyphs.oriented_page.oriented_page`
 
-`def oriented_page(image: Image.Image, table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, recognizer: _Recognizer | None=None, use_osd: bool=False, segmentation: Any=None, pieces: list | None=None, dominant: Orientation | None=None, discover: bool=True) -> OrientedPage`
+`def oriented_page(image: Image.Image, table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, recognizer: _Recognizer | None=None, use_osd: bool=False, segmentation: Any=None, pieces: list | None=None, dominant: Orientation | None=None, discover: bool=True, supplement: bool=True) -> OrientedPage`
 
 Discover directions, normalize groups, fit, split and inverse-map words.
 
@@ -886,79 +844,6 @@ lines = page_lines(page, boxes)  # list[PageTextLine]
 ```python
 from greekocr.glyphs.page_lines import page_lines
 lines = page_lines(page, boxes, margin=0.25)
-```
-
-### `greekocr.glyphs.page_text_lines.LineSegment`
-
-One printed line; all curves use page pixel coordinates, x1 exclusive.
-
-```python
-from greekocr.glyphs.page_text_lines import LineSegment
-line = LineSegment(**measured_line_geometry)
-```
-
-### `greekocr.glyphs.page_text_lines.LineSegment.unroll`
-
-`def unroll(self, page: Image.Image | NDArray[Any], *, xheight: int=32) -> Image.Image`
-
-Return a grayscale strip with meanline at 1.5 and baseline at 2.5 x-heights.
-
-```python
-from greekocr.glyphs.page_text_lines import LineSegment
-image = line.unroll(page_image, xheight=32)
-```
-
-### `greekocr.glyphs.page_text_lines.LineSegment.to_record`
-
-`def to_record(self) -> dict`
-
-JSON-ready review record, including the once-built neighbour graph.
-
-```python
-from greekocr.glyphs.page_text_lines import LineSegment
-record = line.to_record()
-```
-
-### `greekocr.glyphs.page_text_lines.PageSegmentation`
-
-Final lines and their pixel-segment provenance, with measurable diagnostics.
-
-```python
-from greekocr.glyphs.page_text_lines import PageSegmentation
-result = PageSegmentation(**measured_page_geometry)
-```
-
-### `greekocr.glyphs.page_text_lines.segment_page`
-
-`def segment_page(page: Image.Image | NDArray[Any], hints: Sequence[Sequence[float]] | None=None) -> PageSegmentation`
-
-Analyse pixels and return rough segments, final lines, and diagnostic counts.
-
-```python
-from greekocr.glyphs.page_text_lines import segment_page
-result = segment_page(page_image, hints=None)
-```
-
-### `greekocr.glyphs.page_text_lines.page_line_segments`
-
-`def page_line_segments(page: Image.Image | NDArray[Any], hints: Sequence[Sequence[float]] | None=None) -> list[LineSegment]`
-
-Return one curved segment per detected printed line, starting from pixels.
-
-```python
-from greekocr.glyphs.page_text_lines import page_line_segments
-lines = page_line_segments(page_image, hints=None)
-```
-
-### `greekocr.glyphs.page_text_lines.extract_line_image`
-
-`def extract_line_image(page: Image.Image | NDArray[Any], line: LineSegment, *, xheight: int=32) -> Image.Image`
-
-Unroll raw pixels within the tessellated boundary at a fixed x-height position.
-
-```python
-from greekocr.glyphs.page_text_lines import extract_line_image
-image = extract_line_image(page_image, line, xheight=32)
 ```
 
 ### `greekocr.glyphs.readability.Readability`
@@ -1101,72 +986,6 @@ from greekocr.glyphs.report import line_record
 record = line_record("crop.png", priors=priors)
 ```
 
-### `greekocr.glyphs.statistics.page_statistics`
-
-`def page_statistics(image: Image.Image | np.ndarray, lines: Sequence[dict[str, Any]], *, page_key: str, book_id: str | None=None, structure: dict[str, Any] | None=None) -> dict[str, Any]`
-
-Measure a page using Q1 line records, returning `glyphs` and JSON-ready `stats`; inputs are never mutated.
-
-```python
-from greekocr.glyphs.statistics import page_statistics
-result = page_statistics(image, q1_line_records, page_key="page-1", book_id="book-1", structure=q1_structure)
-```
-
-### `greekocr.glyphs.statistics.book_statistics`
-
-`def book_statistics(pages: Sequence[dict[str, Any]], *, book_id: str) -> dict[str, Any]`
-
-Return book aggregates and copied page tables enriched with independent, leave-one-page-out references.
-
-```python
-from greekocr.glyphs.statistics import book_statistics
-book = book_statistics(measured_pages, book_id="book-1")
-```
-
-### `greekocr.glyphs.statistics.corpus_statistics`
-
-`def corpus_statistics(pages: Sequence[dict[str, Any]]) -> dict[str, Any]`
-
-Return the page summary table and explicitly page- and glyph-weighted descriptive readability scores.
-
-```python
-from greekocr.glyphs.statistics import corpus_statistics
-corpus = corpus_statistics(measured_pages)
-```
-
-### `greekocr.glyphs.statistics.write_statistics`
-
-`def write_statistics(result: dict[str, Any], directory: str | Path) -> dict[str, str]`
-
-Write a page's glyph Parquet (JSONL without pyarrow) and stats JSON; never write Q1 geometry.
-
-```python
-from greekocr.glyphs.statistics import write_statistics
-paths = write_statistics(result, "statistics-output")
-```
-
-### `greekocr.glyphs.statistics.render_glyph_statistics`
-
-`def render_glyph_statistics(image: Image.Image, result: dict[str, Any]) -> Image.Image`
-
-Return a source-size glyph overlay: green intact, orange under, red over, cyan show-through, violet stamp.
-
-```python
-from greekocr.glyphs.statistics import render_glyph_statistics
-overlay = render_glyph_statistics(image, result)
-```
-
-### `greekocr.glyphs.statistics.render_book_statistics`
-
-`def render_book_statistics(stats: dict[str, Any]) -> Image.Image`
-
-Draw per-page size, contrast, coverage, candidate ink and readability traces with explicit scales.
-
-```python
-from greekocr.glyphs.statistics import render_book_statistics
-figure = render_book_statistics(book["stats"])
-```
-
 ### `greekocr.glyphs.synthetic.UnsupportedText`
 
 The font cannot draw every character of the requested text.
@@ -1241,59 +1060,6 @@ rendered = render_truth_line("ἀνδρώας κύστεως", "GFSDidot-Regular
 ```python
 from greekocr.glyphs.synthetic import usable_fonts
 fonts, rejected = usable_fonts(["GFSDidot-Regular.ttf", "XCharter-Regular.otf"])
-```
-
-### `greekocr.glyphs.table_lines.TextPiece`
-
-A recognition crop and its tight TOPLEFT envelope in original pixels.
-
-```python
-from greekocr.glyphs.table_lines import TextPiece
-piece = TextPiece((10, 20, 80, 45), 0, detected_line, "table-0", "piece-0")
-```
-
-### `greekocr.glyphs.table_lines.TextPiece.to_record`
-
-`def to_record(self, index: int, image_size: Sequence[int], page_size: Sequence[float]) -> dict`
-
-Serialize pixel and page-unit boxes using the actual image/page ratios.
-
-```python
-from greekocr.glyphs.table_lines import TextPiece
-record = piece.to_record(0, image.size, (page_width, page_height))
-```
-
-### `greekocr.glyphs.table_lines.table_text_pieces`
-
-`def table_text_pieces(page: Image.Image | NDArray[Any], region: Sequence[float], table_id: str='table-0', table_index: int=0) -> list[TextPiece]`
-
-Return pixel-derived within-row pieces for an image-layout table region.
-
-```python
-from greekocr.glyphs.table_lines import table_text_pieces
-pieces = table_text_pieces(image, (10, 20, 800, 900))
-```
-
-### `greekocr.glyphs.table_lines.recognition_pieces`
-
-`def recognition_pieces(page: Image.Image | NDArray[Any], lines: list[LineSegment], table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, supplement: bool=True) -> tuple[list[TextPiece], list, PageSegmentation | None]`
-
-Shared delivery path for the plugin and offline review harness.
-
-```python
-from greekocr.glyphs.table_lines import recognition_pieces
-pieces, regions, prefix = recognition_pieces(image, detected_lines, image_layout_regions)
-```
-
-### `greekocr.glyphs.table_lines.prepare_delivery`
-
-`def prepare_delivery(page: Image.Image | NDArray[Any], result: PageSegmentation, table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, supplement: bool=True) -> tuple[PageSegmentation, list[TextPiece], list]`
-
-Attach table recovery to a normal segmentation, retaining audit candidates.
-
-```python
-from greekocr.glyphs.table_lines import prepare_delivery
-result, pieces, regions = prepare_delivery(image, segmentation, image_layout_regions)
 ```
 
 ### `greekocr.ops.rate_limit.rate_limited_client`
@@ -1375,6 +1141,311 @@ Batch SSH with connection bound, keepalive and a local process timeout.
 ```python
 from greekocr.ops.watch import bounded_ssh
 completed = bounded_ssh("worker", ["tail","-n","1","job.log"], timeout=45)
+```
+
+### `greekocr.pages.api.process_page`
+
+`def process_page(image: PageImage, *, options: PageOptions=PageOptions(), page_key: str | None=None, book_id: str | None=None, table_regions: TableRegions | None=None, layout_provider: LayoutProvider | None=None, page_size: Sequence[float] | None=None, recognizer: Any=None) -> PageResult`
+
+Analyse one raster; optional layout, orientation, joining, statistics and files.
+
+```python
+from greekocr.pages.api import process_page
+result = process_page(image, options=PageOptions(statistics=True))
+```
+
+### `greekocr.pages.api.process_book`
+
+`def process_book(pages: Iterable[PageImage | PageResult], *, book_id: str, options: PageOptions=PageOptions(), table_regions: Mapping[str, TableRegions] | None=None, layout_provider: LayoutProvider | None=None, page_size: Sequence[float] | None=None, recognizer: Any=None) -> BookResult`
+
+Process ordered pages, then apply Q2 leave-one-page-out book statistics.
+
+```python
+from greekocr.pages.api import process_book
+result = process_book(page_images, book_id="book-1", options=PageOptions(statistics=True))
+```
+
+### `greekocr.pages.lines.LineSegment`
+
+One printed line; all curves use page pixel coordinates, x1 exclusive.
+
+```python
+from greekocr.pages.lines import LineSegment
+line = LineSegment(**measured_line_geometry)
+```
+
+### `greekocr.pages.lines.LineSegment.unroll`
+
+`def unroll(self, page: Image.Image | NDArray[Any], *, xheight: int=32) -> Image.Image`
+
+Return a grayscale strip with meanline at 1.5 and baseline at 2.5 x-heights.
+
+```python
+from greekocr.pages.lines import LineSegment
+image = line.unroll(page_image, xheight=32)
+```
+
+### `greekocr.pages.lines.LineSegment.to_record`
+
+`def to_record(self) -> dict`
+
+JSON-ready review record, including the once-built neighbour graph.
+
+```python
+from greekocr.pages.lines import LineSegment
+record = line.to_record()
+```
+
+### `greekocr.pages.lines.PageSegmentation`
+
+Final lines and their pixel-segment provenance, with measurable diagnostics.
+
+```python
+from greekocr.pages.lines import PageSegmentation
+result = PageSegmentation(**measured_page_geometry)
+```
+
+### `greekocr.pages.lines.segment_page`
+
+`def segment_page(page: Image.Image | NDArray[Any], hints: Sequence[Sequence[float]] | None=None) -> PageSegmentation`
+
+Analyse pixels and return rough segments, final lines, and diagnostic counts.
+
+```python
+from greekocr.pages.lines import segment_page
+result = segment_page(page_image, hints=None)
+```
+
+### `greekocr.pages.lines.page_line_segments`
+
+`def page_line_segments(page: Image.Image | NDArray[Any], hints: Sequence[Sequence[float]] | None=None) -> list[LineSegment]`
+
+Return one curved segment per detected printed line, starting from pixels.
+
+```python
+from greekocr.pages.lines import page_line_segments
+lines = page_line_segments(page_image, hints=None)
+```
+
+### `greekocr.pages.lines.extract_line_image`
+
+`def extract_line_image(page: Image.Image | NDArray[Any], line: LineSegment, *, xheight: int=32) -> Image.Image`
+
+Unroll raw pixels within the tessellated boundary at a fixed x-height position.
+
+```python
+from greekocr.pages.lines import extract_line_image
+image = extract_line_image(page_image, line, xheight=32)
+```
+
+### `greekocr.pages.options.OutputOptions`
+
+Files to write; no directory means an in-memory call with no file writes.
+
+```python
+from greekocr.pages.options import OutputOptions
+outputs = OutputOptions("page-output", frozenset({"lines", "structure", "cells"}))
+```
+
+### `greekocr.pages.options.PageOptions`
+
+Pipeline switches; defaults preserve ordinary Q2 page delivery.
+
+```python
+from greekocr.pages.options import PageOptions
+options = PageOptions(tables=True, join_lines=True, granularity="rows", statistics=True)
+```
+
+### `greekocr.pages.records.PageResult`
+
+One input image, its physical leaves, addresses, delivery and measurements.
+
+```python
+from greekocr.pages.records import PageResult
+result = PageResult(**measured_page_result)
+```
+
+### `greekocr.pages.records.PageResult.to_records`
+
+`def to_records(self) -> dict[str, Any]`
+
+Return the current geometry file payloads without rounding or refitting.
+
+```python
+from greekocr.pages.records import PageResult
+records = result.to_records()
+```
+
+### `greekocr.pages.records.BookResult`
+
+Ordered page results plus Q2 book and corpus summaries when requested.
+
+```python
+from greekocr.pages.records import BookResult
+result = BookResult(book_id="book-1", pages=page_results)
+```
+
+### `greekocr.pages.statistics.page_statistics`
+
+`def page_statistics(image: Image.Image | np.ndarray, lines: Sequence[dict[str, Any]], *, page_key: str, book_id: str | None=None, structure: dict[str, Any] | None=None) -> dict[str, Any]`
+
+Measure a page using Q1 line records, returning `glyphs` and JSON-ready `stats`; inputs are never mutated.
+
+```python
+from greekocr.pages.statistics import page_statistics
+result = page_statistics(image, q1_line_records, page_key="page-1", book_id="book-1", structure=q1_structure)
+```
+
+### `greekocr.pages.statistics.book_statistics`
+
+`def book_statistics(pages: Sequence[dict[str, Any]], *, book_id: str) -> dict[str, Any]`
+
+Return book aggregates and copied page tables enriched with independent, leave-one-page-out references.
+
+```python
+from greekocr.pages.statistics import book_statistics
+book = book_statistics(measured_pages, book_id="book-1")
+```
+
+### `greekocr.pages.statistics.corpus_statistics`
+
+`def corpus_statistics(pages: Sequence[dict[str, Any]]) -> dict[str, Any]`
+
+Return the page summary table and explicitly page- and glyph-weighted descriptive readability scores.
+
+```python
+from greekocr.pages.statistics import corpus_statistics
+corpus = corpus_statistics(measured_pages)
+```
+
+### `greekocr.pages.statistics.write_statistics`
+
+`def write_statistics(result: dict[str, Any], directory: str | Path) -> dict[str, str]`
+
+Write a page's glyph Parquet (JSONL without pyarrow) and stats JSON; never write Q1 geometry.
+
+```python
+from greekocr.pages.statistics import write_statistics
+paths = write_statistics(result, "statistics-output")
+```
+
+### `greekocr.pages.statistics.render_glyph_statistics`
+
+`def render_glyph_statistics(image: Image.Image, result: dict[str, Any]) -> Image.Image`
+
+Return a source-size glyph overlay: green intact, orange under, red over, cyan show-through, violet stamp.
+
+```python
+from greekocr.pages.statistics import render_glyph_statistics
+overlay = render_glyph_statistics(image, result)
+```
+
+### `greekocr.pages.statistics.render_book_statistics`
+
+`def render_book_statistics(stats: dict[str, Any]) -> Image.Image`
+
+Draw per-page size, contrast, coverage, candidate ink and readability traces with explicit scales.
+
+```python
+from greekocr.pages.statistics import render_book_statistics
+figure = render_book_statistics(book["stats"])
+```
+
+### `greekocr.pages.structure.build_structure`
+
+`def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[int], *, gutters: Sequence=(), rules: Sequence[dict]=(), boundaries: Sequence[dict]=(), fold: dict | bool | None=None, page: Image.Image | np.ndarray | None=None) -> dict`
+
+Add addresses to line/cell records in place without changing geometry.
+
+```python
+from greekocr.pages.structure import build_structure
+structure = build_structure(line_records, cell_records, image.size, gutters=detected_gutters, rules=detected_rules, page=image)
+```
+
+### `greekocr.pages.structure.join_pieces`
+
+`def join_pieces(pieces: Sequence[dict], *, structure: dict) -> dict`
+
+Join one addressed row, rejecting mixed addresses and boundary crossings.
+
+```python
+from greekocr.pages.structure import join_pieces
+row = join_pieces(addressed_row_pieces, structure=structure)
+```
+
+### `greekocr.pages.structure.delivery_records`
+
+`def delivery_records(lines: Sequence[dict], *, structure: dict, granularity: str='default') -> list[dict]`
+
+Return whole ordinary rows and table pieces; optionally all rows or pieces.
+
+```python
+from greekocr.pages.structure import delivery_records
+records = delivery_records(line_records, structure=structure, granularity="default")
+```
+
+### `greekocr.pages.structure.render_structure`
+
+`def render_structure(page: Image.Image, lines: Sequence[dict], structure: dict) -> Image.Image`
+
+Draw row colours, piece order, finite column boundaries and the fold.
+
+```python
+from greekocr.pages.structure import render_structure
+overlay = render_structure(image, line_records, structure)
+```
+
+### `greekocr.pages.tables.TextPiece`
+
+A recognition crop and its tight TOPLEFT envelope in original pixels.
+
+```python
+from greekocr.pages.tables import TextPiece
+piece = TextPiece((10, 20, 80, 45), 0, detected_line, "table-0", "piece-0")
+```
+
+### `greekocr.pages.tables.TextPiece.to_record`
+
+`def to_record(self, index: int, image_size: Sequence[int], page_size: Sequence[float]) -> dict`
+
+Serialize pixel and page-unit boxes using the actual image/page ratios.
+
+```python
+from greekocr.pages.tables import TextPiece
+record = piece.to_record(0, image.size, (page_width, page_height))
+```
+
+### `greekocr.pages.tables.table_text_pieces`
+
+`def table_text_pieces(page: Image.Image | NDArray[Any], region: Sequence[float], table_id: str='table-0', table_index: int=0) -> list[TextPiece]`
+
+Return pixel-derived within-row pieces for an image-layout table region.
+
+```python
+from greekocr.pages.tables import table_text_pieces
+pieces = table_text_pieces(image, (10, 20, 800, 900))
+```
+
+### `greekocr.pages.tables.recognition_pieces`
+
+`def recognition_pieces(page: Image.Image | NDArray[Any], lines: list[LineSegment], table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, supplement: bool=True) -> tuple[list[TextPiece], list, PageSegmentation | None]`
+
+Shared delivery path for the plugin and offline review harness.
+
+```python
+from greekocr.pages.tables import recognition_pieces
+pieces, regions, prefix = recognition_pieces(image, detected_lines, image_layout_regions)
+```
+
+### `greekocr.pages.tables.prepare_delivery`
+
+`def prepare_delivery(page: Image.Image | NDArray[Any], result: PageSegmentation, table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, supplement: bool=True) -> tuple[PageSegmentation, list[TextPiece], list]`
+
+Attach table recovery to a normal segmentation, retaining audit candidates.
+
+```python
+from greekocr.pages.tables import prepare_delivery
+result, pieces, regions = prepare_delivery(image, segmentation, image_layout_regions)
 ```
 
 ### `greekocr.readers.cllg.load_cllg`

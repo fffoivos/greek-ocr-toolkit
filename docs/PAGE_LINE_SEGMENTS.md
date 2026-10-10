@@ -126,10 +126,10 @@ implementer brief (set `PYTHONDONTWRITEBYTECODE=1` for each invocation):
 python scripts/generate_api_docs.py
 python -m pytest -q -p no:cacheprovider tests/glyphs tests/test_provenance_cli_api.py tests/test_docling_contract.py > .astra/tests-round3.log 2>&1
 python scripts/glyphs/render_page_line_segments.py --compare-hints
-python scripts/glyphs/review_page_lines_round3.py
+python scripts/glyphs/archive/review_page_lines_round3.py
 python scripts/glyphs/audit_page_line_outputs.py
 python scripts/glyphs/audit_page_line_curl.py
-python scripts/glyphs/review_page_lines_round3.py
+python scripts/glyphs/archive/review_page_lines_round3.py
 ```
 
 The first report pass supplements check 8 with rough-box/graphic intersections.
@@ -157,7 +157,7 @@ through each delivered cell's `line_index`, since cell records contain boxes but
 not guide curves. `delivery_records(..., granularity="default")` returns ordinary
 whole lines and table pieces; `"rows"` and `"pieces"` expose both granularities.
 Unsafe joins raise `ValueError`; callers must not silently treat them as accepted.
-The frozen-review command `scripts/glyphs/review_line_structure.py` also writes
+The frozen-review command `scripts/glyphs/archive/review_line_structure.py` also writes
 `.rows.json` with safe rows and an explicit `blocked_rows` list. It reads table
 annotations only for evaluation, after production structure has been built.
 
@@ -204,7 +204,7 @@ uses PNG pixels / 3 as its documented page-unit convention; the plugin uses
 the actual Docling page dimensions. Discounted lines are retained in JSON
 but never drawn in either review image.
 
-`scripts/glyphs/annotate_tables_round4.py` reproduces provisional pixel-based
+`scripts/glyphs/archive/annotate_tables_round4.py` reproduces provisional pixel-based
 annotations, including header spans and empty cells. They are evaluation
 inputs only. `evaluate_tables_round4.py` reuses the owner's installed-stage
 research probes and records failure IDs, while
