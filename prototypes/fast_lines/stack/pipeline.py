@@ -1,5 +1,6 @@
 """Single image-file to final line entry point, warm reusable Paddle session."""
 from pathlib import Path
+from inspect import signature
 from time import perf_counter
 import cv2
 from ..shared.detector import Detector, postprocess
@@ -7,6 +8,11 @@ from ..layout_barriers.fast import scout, correct
 from ..features_ink.pipeline import ink_run
 from .geometry import run as geometry_run
 from ..shared.type_extended import recover
+from ..shared.geometry_envelopes import correct as smooth_envelopes
+
+# R5 C accepts this certificate. Keep the geometry branch executable with the
+# merged R4 C module until the coordinator merges the independent R5 C changes.
+_TYPE_ACCEPTS_COLUMNS='column_evidence' in signature(recover).parameters
 
 
 class Stack:
@@ -49,13 +55,18 @@ def compose(gray,pm,original,detector):
     stages['ink_s']=perf_counter()-t;stages['ink_scout_s']=ink['scout_s'];stages['ink_refinement_s']=ink['refinement_s']
     t=perf_counter();geo=geometry_run(gray,pm,original,ink['items'],witness,primitive,forbidden_regions=removed)
     stages['geometry_all_s']=perf_counter()-t
-    stages.update({k:geo[k] for k in ('scout_s','geometry_s','curved_s','fragment_s')})
-    t=perf_counter();typ=recover(gray,geo['items'],detector,excluded_regions=removed)
+    stages.update({k:geo[k] for k in ('scout_s','geometry_s','curved_s','fragment_s','column_s')})
+    type_kwargs={'column_evidence':geo['columns']} if _TYPE_ACCEPTS_COLUMNS else {}
+    t=perf_counter();typ=recover(gray,geo['items'],detector,excluded_regions=removed,**type_kwargs)
     stages['type_s']=perf_counter()-t;stages['type_scout_s']=typ['scout_s'];stages['type_correction_s']=typ['correction_s']
+    t=perf_counter();shapes=smooth_envelopes(gray,pm,typ['items'],original,scout=geo['witness'],forbidden_regions=removed,map_bands=geo.get('map_bands'),column_evidence=geo.get('columns'))
+    stages['shape_s']=perf_counter()-t
     counts=dict(q8=len(q8['changes']),back=len(ink['ownership']['suppress_indices']),
                 ornaments=len(removed)-len(ink['ownership']['suppress_indices']),geometry=len(geo['changes']),
                 curved=len((geo['curved'] or {}).get('applied',[])),joins=len(geo['fragments']['joins']),
-                joined_reduction=geo['joined_reduction'],added=len(typ['added']))
-    return dict(items=typ['items'],removed=removed,added=typ['added'],counts=counts,stages=stages,
+                joined_reduction=geo['joined_reduction'],added=len(typ['added']),
+                columns=len(geo['columns']['changes']),smooth=len(shapes['changes']))
+    return dict(items=shapes['items'],removed=removed,added=typ['added'],counts=counts,stages=stages,
+                shapes={k:v for k,v in shapes.items() if k!='items'},
                 q8={k:v for k,v in q8.items() if k!='items'},geometry={k:v for k,v in geo.items() if k!='items'},
                 ink={k:v for k,v in ink.items() if k!='items'},type={k:v for k,v in typ.items() if k!='items'},seconds=perf_counter()-start)

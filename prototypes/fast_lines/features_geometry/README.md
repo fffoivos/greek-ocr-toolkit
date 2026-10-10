@@ -168,3 +168,26 @@ Review images/JSON serialization are outside measured inference/correction time.
 Physical page-leaf separation, severely fragmented curled ends and a semantic
 baseline from the small detector remain unfinished. See the report for named
 failures and the exact limits of visual review.
+
+## Round 5
+
+Runtime changes are imported by the existing `prototypes.fast_lines.stack.Stack`.
+`shared.geometry_columns.analyze/apply` provide native rule and bilateral
+termination evidence; `shared.geometry_envelopes.guided/correct` provide native
+contact envelopes and guarded final shaping. No separate runtime stack is used.
+
+The experiment record is [FAST_LINES_ROUND5_GEOMETRY.md](../../../docs/research/FAST_LINES_ROUND5_GEOMETRY.md).
+Outputs, per-line comparisons, owner comments and numbered images are under
+`.astra/fast_lines/out/round5/geometry/`. `round5_shapes`, `round5_columns`,
+`round5_routes`, `round5_fast_audit`, `round5_new_model` and `round5_endpoints`
+produce the component studies; `round5_benchmark` runs the actual public Stack,
+and `round5_artifacts` validates saved exports without rerunning inference.
+These scripts refuse to overwrite completed experiments/receipts.
+
+The input cohort is the fixed 195-page manifest plus five explicitly supplied
+review pages. Offline comparisons require the existing R4b output directory and
+`out/round5/geometry/baseline/` for the five new pages, created using the R4b
+Stack before R5 changes. Missing pinned baselines raise an error; the current
+Stack must never silently generate its own comparison reference. Current code
+preserves historical versioned artifacts; old correction versions are recorded
+experiments, not a promise that their acceptance code is selectable in this revision.

@@ -14,7 +14,7 @@ from .contracts import bbox
 from .geometry_fragments import candidates,hermite
 
 
-def prepare(gray, height, target_height=None, fast_filter=False):
+def prepare(gray, height, target_height=None, fast_filter=False, *, with_labels=False, with_density=True):
     scale = min(1., target_height/height) if target_height else 1.
     H,W = gray.shape
     small = cv2.resize(gray,(quantize(W*scale),quantize(H*scale)),interpolation=cv2.INTER_AREA) if scale<1 else gray
@@ -30,13 +30,15 @@ def prepare(gray, height, target_height=None, fast_filter=False):
         x,y,w,hh,area=stats[i]
         records.append(dict(id=int(i),bbox=[float(x/sx),float(y/sy),float((x+w)/sx),float((y+hh)/sy)],
             centre=(centres[i]/[sx,sy]).tolist(),area=float(area/(sx*sy)),height_h=float(hh/h)))
-    body=valid[labels].astype(np.float32)
-    if fast_filter:
+    body=valid[labels].astype(np.float32) if with_density else None
+    if not with_density:density=None
+    elif fast_filter:
         ky=cv2.getGaussianKernel(2*int(4*.20*h+.5)+1,.20*h)
         kx=cv2.getGaussianKernel(2*int(4*.75*h+.5)+1,.75*h)
         density=cv2.sepFilter2D(body,cv2.CV_32F,kx,ky,borderType=cv2.BORDER_REFLECT)
     else:density=gaussian_filter(body,(.20*h,.75*h))
-    return dict(density=density,components=records,scale=[sx,sy],height=height)
+    return dict(density=density,components=records,scale=[sx,sy],height=height,
+                **({'labels': labels} if with_labels else {}))
 
 
 def walk(signal, seed, step):
@@ -58,7 +60,7 @@ def walk(signal, seed, step):
     return path
 
 
-def follow_contacts(sample, xs, ys, offsets, anchor, seed, h):
+def follow_contacts(sample, xs, ys, offsets, anchor, seed, h, *, fast_fit=False):
     """Local ridge continuation with no reward for a different, distant row.
 
     Word gaps retain the last direction briefly. Long gaps stop observation;
@@ -73,7 +75,10 @@ def follow_contacts(sample, xs, ys, offsets, anchor, seed, h):
             previous=col-direction;dx=xs[col]-xs[previous]
             if len(history)>=4:
                 hx,hy=np.asarray(history[-12:]).T
-                slope=float(np.clip(np.polyfit(hx-hx.mean(),hy,1)[0],-.65,.65))
+                centered=hx-hx.mean()
+                slope=(float(np.dot(centered,hy-hy.mean())/np.dot(centered,centered))
+                       if fast_fit else np.polyfit(centered,hy,1)[0])
+                slope=float(np.clip(slope,-.65,.65))
             else:slope=0.
             expected=ys[previous]+offsets[indices[previous]]+slope*dx
             candidates,_=find_peaks(sample[:,col])
@@ -96,7 +101,7 @@ def follow_contacts(sample, xs, ys, offsets, anchor, seed, h):
     return indices,observed
 
 
-def trace(prepared,item,version=1,end_seeds=()):
+def trace(prepared,item,version=1,end_seeds=(),*,fast_fit=False):
     h=prepared['height'];sx,sy=prepared['scale'];density=prepared['density']
     b=bbox(item);axis=line_axis(item);W=density.shape[1]/sx;H=density.shape[0]/sy
     extension=min(8*h,.25*(b[2]-b[0]))
@@ -124,7 +129,7 @@ def trace(prepared,item,version=1,end_seeds=()):
         objective[(abs(offsets[:,None])>.75*h)&(core[None,:]>=.999)]=-1e6
     observed=None
     if version>=3:
-        indices,observed=follow_contacts(sample,xs,ys,offsets,anchor,seed,h)
+        indices,observed=follow_contacts(sample,xs,ys,offsets,anchor,seed,h,fast_fit=fast_fit)
     else:
         forward=walk(objective[:,anchor:],seed,4)
         backward=walk(objective[:,:anchor+1][:,::-1],seed,4)[::-1]
@@ -137,7 +142,7 @@ def trace(prepared,item,version=1,end_seeds=()):
             if version>=5:
                 near=abs(ys[acol]+offsets-ey)<.75*h
                 eseed=int(np.argmax(np.where(near,sample[:,acol],-1)))
-            other,seen=follow_contacts(sample,xs,ys,offsets,acol,eseed,h)
+            other,seen=follow_contacts(sample,xs,ys,offsets,acol,eseed,h,fast_fit=fast_fit)
             common=observed&seen
             error=abs(offsets[indices]-offsets[other])/h
             # Need an extended shared ink interval, not one fortuitous crossing.
@@ -165,7 +170,7 @@ def trace(prepared,item,version=1,end_seeds=()):
         warning='Ink contacts may be accents, neighbors or verso; path is not a semantic baseline.')
 
 
-def render_contacts(gray,items,route='slow',version=1,selected=None):
+def render_contacts(gray,items,route='slow',version=1,selected=None,*,fast_fit=True):
     t=perf_counter();h=height_proxy(items,(gray.shape[1],gray.shape[0]))
     prepared=prepare(gray,h,10 if route=='explicit_fast' and version<6 else None,
                      fast_filter=route=='explicit_fast' and version>=6)
@@ -180,7 +185,7 @@ def render_contacts(gray,items,route='slow',version=1,selected=None):
             if pair['line']!=i or (version<7 and pair['owners']!=1):continue
             f=bbox(items[pair['fragment']]);a,s=line_axis(items[pair['fragment']]);x=(f[0]+f[2])/2
             endpoints.append(dict(fragment=pair['fragment'],point=[x,float(a+s*x)]))
-        lines.append(dict(trace(prepared,q,version,endpoints),line=i))
+        lines.append(dict(trace(prepared,q,version,endpoints,fast_fit=fast_fit and route=='explicit_fast'),line=i))
     return dict(height=h,components=prepared['components'],lines=lines,
         seconds=perf_counter()-t,route=route,version=version,
         fragment_witness=dict(pairs,paths=[dict(q,path=hermite(items,q,h)) for q in pairs['pairs']]))

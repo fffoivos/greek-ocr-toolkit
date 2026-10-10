@@ -5,6 +5,7 @@ from ..shared.geometry_scout import sparse_fast as sparse
 from ..shared.geometry_context import correct_geometry
 from ..shared.geometry_feature_rules import refine, split_items
 from ..shared.geometry_fragment_correct import run as join_fragments
+from ..shared.geometry_columns import analyze as column_evidence, apply as column_split
 
 
 def run(gray, pm, original, current, witness, primitive, *, forbidden_regions=()):
@@ -30,9 +31,13 @@ def run(gray, pm, original, current, witness, primitive, *, forbidden_regions=()
         split=split_items(gray,out,curved['rules'],witness['height']) if curved['rules'] else dict(items=out,changes=[],decisions=[])
         curved.update(applied=split['changes'],applied_decisions=split['decisions']);out=split['items']
     curved_s=perf_counter()-t
+    t=perf_counter()
+    columns=column_evidence(gray,original,witness,primitive,retained_source_indices=set(counts))
+    extra=column_split(out,columns);out=extra['items'];columns['changes']=extra['changes'];column_s=perf_counter()-t
     fragments=join_fragments(gray,original,out,forbidden_regions=forbidden_regions)
     return dict(items=fragments['items'],changes=changes,decisions=a['geometry_decisions'],
-                witness=s,curved=curved,fragments={k:v for k,v in fragments.items() if k!='items'},
+                map_bands=a.get('map_bands'),
+                witness=s,curved=curved,columns=columns,column_s=column_s,fragments={k:v for k,v in fragments.items() if k!='items'},
                 joined_reduction=len(out)-len(fragments['items']),
                 scout_s=scout_s,geometry_s=a['geometry_s'],curved_s=curved_s,
                 fragment_s=fragments['seconds'],seconds=perf_counter()-start)

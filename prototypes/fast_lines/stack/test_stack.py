@@ -65,14 +65,21 @@ def test_compose_single_rule_scout_and_stable_sources(monkeypatch):
         assert orig is original and len(current)==1 and current[0]['source_ids']==[1]
         assert kwargs['forbidden_regions'][0]['source_ids']==[0]
         calls.append('geometry')
-        return dict(items=current,changes=[],curved=None,fragments=dict(joins=[]),joined_reduction=0,scout_s=0,geometry_s=0,curved_s=0,fragment_s=0)
-    def typ(g,current,d,excluded_regions):
+        return dict(items=current,changes=[],curved=None,fragments=dict(joins=[]),joined_reduction=0,scout_s=0,geometry_s=0,curved_s=0,fragment_s=0,column_s=0,columns=dict(changes=[]),witness=dict(trigger=False))
+    def typ(g,current,d,excluded_regions,column_evidence=None):
         assert excluded_regions[0]['source_ids']==[0] and current[0]['source_ids']==[1]
+        if column_evidence is not None:assert column_evidence==dict(changes=[])
         calls.append('type')
         return dict(items=current,added=[],scout_s=0,correction_s=0)
     monkeypatch.setattr(pipeline,'ink_run',ink);monkeypatch.setattr(pipeline,'geometry_run',geo);monkeypatch.setattr(pipeline,'recover',typ)
+    def smooth(g,pm,current,orig,**kwargs):
+        assert kwargs['scout']==dict(trigger=False)
+        assert kwargs['forbidden_regions'][0]['source_ids']==[0]
+        calls.append('smooth')
+        return dict(items=current,changes=[])
+    monkeypatch.setattr(pipeline,'smooth_envelopes',smooth)
     r=pipeline.compose(np.ones((100,100),np.uint8),np.zeros((10,10)),original,object())
-    assert calls==['scout','ink','geometry','type']
+    assert calls==['scout','ink','geometry','type','smooth']
     assert r['counts']['back']==1 and r['items'][0]['source_ids']==[1]
 
 
