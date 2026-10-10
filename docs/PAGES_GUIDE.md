@@ -114,9 +114,20 @@ recognition pieces. `result.delivery` is the requested view:
 
 Joined records preserve every original sample and interpolate only gaps. Their
 `pieces` field keeps the source records. A boundary crossing or incompatible
-address raises `ValueError`, as the original Q1 joining function does. Request
-`pieces` to inspect a page whose whole-row delivery is rejected. Joining changes
-delivery; it does not refit geometry or change the statistics input.
+address blocks that row without aborting the page. Safe rows remain in
+`result.delivery`; `result.blocked_rows` lists every refusal, its reason and
+crossing evidence. `result.complete` is false when any row cannot be joined.
+With `granularity="rows"`, `result.to_records()["rows"]` is the complete partial
+row envelope, also written by the `rows` output switch. The CLI writes this file
+by default at rows granularity and reports refusals in its JSON response.
+
+The joining stage audits all active rows and retains `rows[].joinable` and Q1b's
+accepted boundary/column/crossing links in `structure.json`. At `default` or
+`pieces` granularity, unjoined table pieces or all pieces can still be delivered;
+refusals remain visible and `complete` describes whole-row joinability. Joining
+off preserves Q2's unaudited structure. The low-level `join_pieces` guard still
+raises when directly asked to combine an unsafe row; the public page API catches
+those refusals. Joining does not refit geometry or change the statistics input.
 
 ### Statistics
 
@@ -169,6 +180,22 @@ Use a new output directory when retaining an earlier run.
 `page_size=(width, height)` gives the physical/page-unit extent used in cell
 serialization. Omit it to use source pixels. X and Y are converted separately;
 never assume a requested PDF render scale equals the actual image dimensions.
+
+**Default frame:** page units are source pixels. This needs no assumed DPI and
+works for arbitrary rasters. To reproduce the Q1/Q2 research frame (one logical
+unit per three PNG pixels), select the legacy frame explicitly:
+
+```python
+result = process_page(image, page_size=(image.width / 3, image.height / 3),
+    options=PageOptions(tables=True, join_lines=True, granularity="rows"),
+    table_regions=regions)
+```
+
+The equality runner uses this option for every page. It checks both `page_size`
+and every `box_page` value exactly; the descriptive `page_units` string is metadata.
+For a directory of 1800×2400-pixel images, the CLI equivalent is
+`--page-size 600 800`. Source geometry always stays in pixels.
+
 
 ## A book
 

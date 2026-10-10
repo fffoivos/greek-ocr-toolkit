@@ -21,3 +21,20 @@ The page and book runners write detailed JSON receipts under `.astra/q3-equality
 Both equality runners return nonzero if either comparison fails. Inspect
 `runtime_equal` and `frozen_equal`, and retain every difference file. Historical artifact fields
 count as differences; these scripts do not filter them out.
+
+Q3b's strict behaviour gate is `check_q3b_equality.py`, followed by
+`check_q3b_books.py --out .astra/q3b-equality` and `write_q3b_receipt.py`.
+The final receipt requires complete page/file coverage, source identity and the
+full test receipt; it retains every non-allowlisted failure. The gate uses only the field-by-field
+metadata allowlist documented in `docs/PAGES_OUTPUT_FORMAT.md`; every other
+difference fails. The historical Q3 scripts above retain their original rules.
+
+The Q3b runner calls the public API 16 times per page (table recovery on/off,
+statistics on/off, joining off/default/rows/pieces). Within that page only,
+deterministic detector/delivery/statistics stages cache their complete serialized
+inputs and return independent copies. All cache misses execute the current code;
+no frozen data or prior run supplies a stage output. Independent committed Q2
+stages provide numeric/crop references, and an independent Q1b row audit provides
+the partial delivery reference. Frozen Q1b envelopes are also compared directly.
+`--workers N` runs a foreground process pool. `--resume` requires identical source
+hashes and image hashes; choose a fresh directory after source changes.

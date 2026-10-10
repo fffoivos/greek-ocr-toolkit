@@ -25,6 +25,7 @@ CALLS={
 'build_structure':'structure = build_structure(line_records, cell_records, image.size, gutters=detected_gutters, rules=detected_rules, page=image)',
 'join_pieces':'row = join_pieces(addressed_row_pieces, structure=structure)',
 'delivery_records':'records = delivery_records(line_records, structure=structure, granularity="default")',
+'joining_result':'result = joining_result(line_records, structure=structure, pieces=cell_records, granularity="rows")',
 'render_structure':'overlay = render_structure(image, line_records, structure)',
 'Orientation':'decision = Orientation(axis="horizontal", orientation_cw=None, alternatives=[0, 180])',
 'QuarterTurn':'frame = QuarterTurn(image.width, image.height, 270, offset=(11, 13))',

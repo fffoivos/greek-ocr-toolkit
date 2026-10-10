@@ -217,3 +217,20 @@ def test_table_row_grouping_is_scale_invariant():
         build_structure(lines,[cell(l,i,'t') for i,l in enumerate(lines)],(120*scale,100*scale),fold=False)
         assignments.append([[l[k] for k in ADDRESS] for l in lines])
     assert assignments[0]==assignments[1]
+
+
+@pytest.mark.parametrize('address', ['page_side', 'column_id'])
+def test_page_join_reports_incompatible_addresses_without_losing_safe_rows(address):
+    from greekocr.pages.structure import joining_result
+    lines = [line(30, 70, 50, source='r'), line(90, 130, 50, source='r'),
+             line(30, 130, 100, source='safe')]
+    cells = [cell(l, i, 'table') for i, l in enumerate(lines)]
+    structure = build_structure(lines, cells, (200, 150), fold=False)
+    assert lines[0]['row_id'] == lines[1]['row_id']
+    lines[1][address] = 'other'
+    result = joining_result(lines, structure=structure, pieces=cells, granularity='rows')
+    assert result['complete'] is False
+    assert len(result['rows']) == 1
+    assert result['rows'][0]['row_id'] == lines[2]['row_id']
+    assert result['blocked_rows'] == [dict(row_id=lines[0]['row_id'], line_indices=[0, 1],
+        table_id='table', reason='pieces must share page, column, block and row', crossings=[])]

@@ -1384,6 +1384,17 @@ from greekocr.pages.structure import delivery_records
 records = delivery_records(line_records, structure=structure, granularity="default")
 ```
 
+### `greekocr.pages.structure.joining_result`
+
+`def joining_result(lines: Sequence[dict], *, structure: dict, pieces: Sequence[dict]=(), granularity: str='default') -> dict`
+
+Q1b partial delivery: annotate safety and retain every refused row.
+
+```python
+from greekocr.pages.structure import joining_result
+result = joining_result(line_records, structure=structure, pieces=cell_records, granularity="rows")
+```
+
 ### `greekocr.pages.structure.render_structure`
 
 `def render_structure(page: Image.Image, lines: Sequence[dict], structure: dict) -> Image.Image`

@@ -39,7 +39,8 @@ def run(args):
         raise ValueError('--layout requires --tables')
     files = frozenset(args.outputs) if args.outputs is not None else GEOMETRY_OUTPUTS | (
         {'statistics'} if args.statistics else set()) | ({'delivery'} if args.join_lines else set()) | (
-        {'orientation'} if args.orientation else set())
+        {'orientation'} if args.orientation else set()) | (
+        {'rows'} if args.join_lines and args.granularity == 'rows' else set())
     options = PageOptions(tables=args.tables, orientation=args.orientation, join_lines=args.join_lines,
                           granularity=args.granularity, statistics=args.statistics, discounted=args.discounted,
                           strict_geometry=args.strict_geometry,
@@ -54,10 +55,13 @@ def run(args):
         result = process_book(paths, book_id=args.book_id, options=options, table_regions=regions,
                               page_size=args.page_size)
         return dict(pages=len(result.pages), book_id=result.book_id, files=result.files,
-                    page_files={p.page_key: p.files for p in result.pages})
+                    page_files={p.page_key: p.files for p in result.pages},
+                    joining={p.page_key: dict(complete=p.complete, blocked_rows=p.blocked_rows)
+                             for p in result.pages} if args.join_lines else None)
     completed = []
     for path in paths:
         result = process_page(path, options=options, table_regions=regions[path.stem] if regions is not None else None,
                               page_size=args.page_size)
-        completed.append(dict(page_key=result.page_key, lines=len(result.lines), pieces=len(result.pieces), files=result.files))
+        completed.append(dict(page_key=result.page_key, lines=len(result.lines), pieces=len(result.pieces),
+                              files=result.files, complete=result.complete, blocked_rows=result.blocked_rows))
     return dict(pages=len(completed), results=completed)

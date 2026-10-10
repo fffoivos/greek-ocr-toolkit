@@ -11,7 +11,7 @@ from greekocr.pages import PageOptions, OutputOptions, process_page, process_boo
 from greekocr.pages.lines import segment_page
 from greekocr.pages.tables import prepare_delivery
 from greekocr.pages.statistics import page_statistics, book_statistics
-from greekocr.pages.structure import delivery_records
+from greekocr.pages.structure import delivery_records, joining_result
 
 FONT = Path(__file__).parents[1] / 'fixtures/fonts/GFSDidot-Regular.ttf'
 
@@ -37,6 +37,10 @@ def test_options_compose_exact_existing_stages(page, tables, statistics, granula
     expected, pieces, _ = prepare_delivery(page, segment_page(page), regions or [], supplement=tables)
     lines = [line.to_record() for line in expected.lines]
     assert actual.lines == lines
+    if granularity:
+        joining_result(lines, structure=expected.structure,
+                       pieces=[p.to_record(i, page.size, page.size) for i, p in enumerate(pieces)],
+                       granularity=granularity)
     assert actual.structure == expected.structure
     assert actual.to_records()['cells']['cells'] == [p.to_record(i, page.size, page.size) for i,p in enumerate(pieces)]
     delivered = delivery_records(lines, structure=expected.structure, granularity=granularity) if granularity else [l for l in lines if l['discounted'] is None]
@@ -161,3 +165,55 @@ def test_book_does_not_write_null_rows_for_preexisting_unjoined_results(page, tm
     with pytest.raises(ValueError, match='existing result joined at rows'):
         process_book([original], book_id='book', options=options)
     assert not (tmp_path/'p0.rows.json').exists()
+
+
+@pytest.mark.parametrize('granularity', ['default', 'rows', 'pieces'])
+@pytest.mark.parametrize('discounted', ['keep', 'drop'])
+def test_unsafe_row_is_reported_and_safe_rows_are_written(page, tmp_path, monkeypatch,
+                                                         granularity, discounted):
+    from copy import deepcopy
+    from greekocr.pages import api
+    from greekocr.pages.structure import _crosses
+    prepared, pieces, regions = prepare_delivery(page, segment_page(page), [], supplement=False)
+    active = [l for l in prepared.lines if l.discounted is None]
+    victim = active[0]
+    x = (victim.x0 + victim.x1) / 2
+    top, bottom = np.median(victim.baseline) - 1, np.median(victim.baseline) + 1
+    boundary = dict(id='boundary-0000', proposal_id='proposal-0007', kind='rule',
+                    path=[[x, float(top)], [x, float(bottom)]])
+    prepared.structure['boundaries'].append(boundary)
+    victim_index = prepared.lines.index(victim)
+    prepared.structure['crossing_evidence'].append(dict(
+        line_index=victim_index, boundary_id=boundary['id'], classification='boundary crossing'))
+    assert _crosses(victim.to_record(), boundary)
+    monkeypatch.setattr(api, 'prepare_delivery', lambda *a, **kw: deepcopy((prepared, pieces, regions)))
+    files = {'structure', 'delivery'} | ({'rows'} if granularity == 'rows' else set())
+    result = process_page(page, page_key='partial', options=PageOptions(
+        join_lines=True, granularity=granularity, discounted=discounted,
+        outputs=OutputOptions(tmp_path, files)))
+    assert not result.complete
+    assert len(result.blocked_rows) == 1
+    refused = result.blocked_rows[0]
+    assert refused['row_id'] == victim.address['row_id']
+    assert refused['reason'] == 'joined geometry crosses a boundary'
+    crossing = refused['crossings'][0]
+    assert crossing['row_id'] == refused['row_id']
+    assert crossing['proposal_id'] == 'boundary-0007'
+    assert crossing['piece_indices'] == [i for i, p in enumerate(result.pieces)
+                                         if p.line_index == refused['line_indices'][0]]
+    assert refused['line_indices'] == [next(i for i, l in enumerate(result.lines)
+                                             if l['row_id'] == refused['row_id'])]
+    assert any(r['joinable'] for r in result.rows if not r['discounted'])
+    assert next(r for r in result.rows if r['id'] == refused['row_id'])['joinable'] is False
+    if granularity != 'pieces':
+        assert all(l['row_id'] != refused['row_id'] for l in result.delivery)
+        assert all(not _crosses(l, boundary) for l in result.delivery)
+    if granularity == 'rows':
+        saved = json.loads((tmp_path / 'partial.rows.json').read_text())
+        assert saved == result.to_records()['rows']
+        assert saved['blocked_rows'] == result.blocked_rows
+        assert not saved['complete']
+        assert len(saved['rows']) == len(active) - 1
+    saved_structure = json.loads((tmp_path / 'partial.structure.json').read_text())
+    assert saved_structure == result.structure
+    assert saved_structure['boundaries'][-1]['proposal_id'] == 'boundary-0007'

@@ -201,6 +201,16 @@ class PageResult:
     orientation: OrientedPage | None = None
     regions: list = field(default_factory=list)
     files: dict[str, str] = field(default_factory=dict)
+    joining: dict[str, Any] | None = None
+
+    @property
+    def blocked_rows(self) -> list[dict[str, Any]]:
+        """Every refusal from the optional whole-row safety audit."""
+        return self.joining['blocked_rows'] if self.joining is not None else []
+
+    @property
+    def complete(self) -> bool:
+        return not self.blocked_rows
 
     @property
     def structure(self) -> dict[str, Any]:
@@ -236,8 +246,7 @@ class PageResult:
                                cells=[p.to_record(i, self.image_size, self.page_size)
                                       for i, p in enumerate(self.pieces)]),
                     delivery=self.delivery,
-                    rows=dict(schema_version=1, rows=self.delivery, blocked_rows=[], complete=True,
-                              geometry_policy='Exact original piece samples; interpolate only missing gap samples.')
+                    rows=self.joining
                          if self.options.join_lines and self.options.granularity == 'rows' else None,
                     checks=dict(key=self.page_key, image_size=list(self.image_size),
                                 xheight=self.segmentation.xheight, **self.segmentation.diagnostics))

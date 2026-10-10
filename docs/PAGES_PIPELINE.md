@@ -18,7 +18,7 @@ not change the meaning of x-height, fit a new model or tune a page-specific rule
 | Structure | Lines, pieces and original pixels | Validate rule/gutter evidence; assign physical leaves, columns, blocks, rows, piece order and neighbours | Structure dictionary; `pages.boundaries`, `pages.structure` |
 | Data selection | Addressed candidates | Keep diagnostic lines or remove them and remap indices | Selected data view; `pages.api` |
 | Orientation, opt-in | Original image, table bounds and existing segmentation | Run the parked directional hypotheses and local upright fits | Words, transforms, corners, evidence; `glyphs.oriented_page` |
-| Joining, opt-in | Addressed records and validated boundaries | Copy samples and interpolate only safe gaps inside a row | Requested delivery records; `pages.structure` |
+| Joining, opt-in | Addressed records and validated boundaries | Copy samples and interpolate only safe gaps inside a row | Safe delivery records, explicit refusals and row joinability; `pages.structure` |
 | Statistics, opt-in | Original image and selected, unjoined Q1 records | Measure bodies, marks, residual ink, coverage and candidate provenance | Glyph rows and page summaries; `pages.statistics` |
 | Book aggregation | Ordered page measurements from one book | Group font sizes; build independent references excluding each target page | Enriched pages, book summary and corpus summary; `pages.statistics` |
 | Serialization, opt-in | Typed result and source image | Write selected data files and review images | Paths in `result.files`; `pages.outputs`, `pages.render` |

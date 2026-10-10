@@ -15,7 +15,7 @@ from .options import OutputOptions, PageOptions
 from .pixels import _gray
 from .records import BookResult, PageResult
 from .statistics import book_statistics, corpus_statistics, page_statistics
-from .structure import delivery_records
+from .structure import joining_result
 from .tables import prepare_delivery
 
 __all__ = ['process_page', 'process_book']
@@ -128,13 +128,14 @@ def process_page(image: PageImage, *, options: PageOptions = PageOptions(),
         oriented = oriented_page(raster, regions, recognizer=recognizer,
                                  segmentation=segmentation, pieces=pieces, supplement=options.tables)
     lines = [line.to_record() for line in segmentation.lines]
-    delivered = (delivery_records(lines, structure=segmentation.structure, granularity=options.granularity)
-                 if options.join_lines else [line.to_record() for line in segmentation.lines
-                                             if line.discounted is None])
+    joining = (joining_result(lines, structure=segmentation.structure,
+                              pieces=[p.to_record(i, (width, height), size) for i, p in enumerate(pieces)],
+                              granularity=options.granularity) if options.join_lines else None)
+    delivered = joining['rows'] if joining is not None else [l for l in lines if l['discounted'] is None]
     measured = (page_statistics(source, lines, page_key=page_key, book_id=book_id,
                                 structure=segmentation.structure) if options.statistics else None)
     result = PageResult(page_key, book_id, (width, height), size, options, segmentation,
-                        lines, pieces, delivered, measured, oriented, regions)
+                        lines, pieces, delivered, measured, oriented, regions, joining=joining)
     if options.outputs.directory is not None:
         from .outputs import write_page
         result.files = write_page(result, source, options.outputs)

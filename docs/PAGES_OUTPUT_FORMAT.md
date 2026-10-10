@@ -96,9 +96,12 @@ Each line record has the address above and:
 discounted candidates. In `rows.json`, `schema_version=1`, `rows` contains joined
 records, `blocked_rows` lists rejected rows, `complete` says whether any were
 blocked, and `geometry_policy` describes sample-preserving interpolation. The
-API raises on unsafe joining before writing this file; successful API row files
-have `blocked_rows=[]`. Archived Q1 audits instead saved partial rows with blocked
-entries containing `row_id`, `line_indices`, `table_id`, `reason` and `crossings`.
+API writes partial rows even when joining is unsafe. It preserves the safe rows
+and every blocked entry, containing `row_id`, `line_indices`, `table_id`, `reason`
+and `crossings`, exactly as Q1b did. `complete` is `not blocked_rows`; neither
+blocked rows nor their reasons are silently dropped. All three joining modes
+expose the same audit via `result.joining`, `result.blocked_rows` and
+`result.complete`; only rows granularity writes the `rows.json` envelope.
 
 ## Cells
 
@@ -134,7 +137,7 @@ The envelope fields are:
 | `pages` | Physical-leaf objects: `id`, `page_side`, `boundary_ids`, `polygon`. |
 | `columns` | `id`, `page_side`, `boundary_ids`, `left_boundary`, `right_boundary`, `line_indices`, `reading_order`. |
 | `blocks` | `id`, `column_id`, `page_side`, `table_id`, `kind` (`text`, `table`, `diagnostic`), `line_indices`. |
-| `rows` | `id`, shared side/column/block addresses, `table_id`, `row_source`, `row_sources`, `discounted`, `line_indices`, `piece_indices`, `reading_order`, `box_pixels`. |
+| `rows` | `id`, shared side/column/block addresses, `table_id`, `row_source`, `row_sources`, `discounted`, `line_indices`, `piece_indices`, `reading_order`, `box_pixels`; joining adds `joinable` on each active row. |
 | `boundaries` | Accepted stopping paths; schema below. |
 | `rejected_boundaries` | Rejected proposals with reasons and measured evidence. |
 | `boundary_tracks` | `id` and constituent `boundary_ids` for one separator track. |
@@ -143,7 +146,7 @@ The envelope fields are:
 | `crossing_evidence` | Original-ink examination of crossings, described below. |
 | `provenance` | Historical audit-only source/baseline file hashes. |
 
-Rows in historical audits additionally contain `joinable`; the live low-level
+Rows after the joining audit additionally contain `joinable`; the low-level
 structure builder does not add that audit outcome. `piece_indices` indexes the
 cells file, while `line_indices` indexes the lines file. With `discounted="drop"`
 these indices are compacted; address IDs are retained.
@@ -178,8 +181,8 @@ A crossing evidence object has `line_index`, `boundary_id`, `boundary_kind`,
 `boundary_path`, `line_extent`, `xheight_px`, `classification`, `discounted`,
 `own_ink_pixels_sides`, `common_ink_rows`, `foreground_contrast`,
 `excluded_rule_components`, `rule_exclusion_margin_px`, `required_common_rows`,
-`required_ink_pixels_per_side`. Historical review enrichment adds `piece_indices`,
-`row_id`, and `proposal_id`. Threshold and count fields explain whether ink on
+`required_ink_pixels_per_side`. The joining audit adds `piece_indices`,
+`row_id`, and `proposal_id`, preserving Q1b's review enrichment. Threshold and count fields explain whether ink on
 both sides establishes a real crossing; a geometric overlap alone is insufficient.
 
 Historical structure provenance records `source_sha256`, `baseline_lines_sha256`,
@@ -412,3 +415,50 @@ recognition is separate from orientation confidence.
 Historical word-review envelopes additionally record source/frame and recognizer
 provenance. Refer to the preserved [orientation report](reviews/PAGE_LINES_ROUND4_ORIENTATION_20261009.md)
 and its archived generator when replaying those exact receipts.
+
+
+## Strict equality and the metadata allowlist (Q3b)
+
+The gate is `scripts/pages/check_q3b_equality.py` and its book companion.
+Only the following exact JSON paths may differ, including presence/absence.
+`[]` matches one array index, not arbitrary descendants. The `provenance` object
+is exempt as an audit receipt; no boundary `evidence` object is exempt.
+Each row below is a separate allowlist entry in the script.
+
+| File family | Field | Reason |
+| --- | --- | --- |
+| `stats.json` | `$.implementation_sha256` | The implementation identity changes with the source revision. |
+| `stats.json` | `$.lines_file_sha256` | The serialized input file hash changes with JSON formatting. |
+| `stats.json` | `$.source_image` | The input path belongs to the run, not the measured page. |
+| `stats.json` | `$.source_sha256` | The input-file identity is recorded separately in the gate manifest. |
+| `stats.json` | `$.seconds` | Elapsed wall time is not deterministic page behaviour. |
+| `stats.json` | `$.units` | This is a human-readable unit description; numeric coordinates remain exact. |
+| `checks.json` | `$.implementation_sha256` | The implementation identity changes with the source revision. |
+| `checks.json` | `$.source_sha256` | The input-file identity is recorded separately in the gate manifest. |
+| `checks.json` | `$.seconds` | Elapsed wall time is not deterministic page behaviour. |
+| `cells.json` | `$.page_units` | This is a human-readable frame description; page_size and box_page remain exact. |
+| `cells.json` | `$.orientation_mode` | This labels a separately generated historical orientation review. |
+| `cells.json` | `$.orientation_output` | This links a separately generated historical orientation review. |
+| `structure.json` | `$.units` | This is a human-readable unit description; all geometry remains exact. |
+| `structure.json` | `$.provenance` | This is the historical audit input-hash receipt, not boundary evidence. |
+| `structure.json` | `$.rejected_boundaries[].id` | An internal name of a rejected candidate is not an accepted boundary. |
+| `structure.json` | `$.rejected_boundaries[].proposal_id` | An internal proposal name of a rejected candidate is not a delivered link. |
+| `structure.json` | `$.rejected_boundaries[].track_id` | An internal track name of a rejected candidate is not an accepted track. |
+
+Everything else must match: field presence, JSON value types, array order, exact
+floating-point values, glyph Parquet schema/rows, and crop dimensions/pixels.
+Accepted `boundaries[].id`, `proposal_id`, `track_id`, fold and column copies,
+`boundary_tracks`, crossing row/piece/proposal links, `rows[].joinable`, all
+blocked-row reasons/evidence and `complete` are **not** allowlisted. Rejected
+candidate geometry, rejection reasons and numeric evidence also remain exact.
+No tolerated error, numeric rounding, array sorting or output-driven patching is
+allowed. Run/source hashes are recorded independently in validation manifests.
+
+Frozen development files include the Q1b joining audit: replay with tables and
+joining at rows granularity. Frozen book geometry was written before that audit:
+replay with `tables=False` and `join_lines=False`. This is an explicit stage selection, not a
+field exemption. The runner also executes both table modes, statistics on/off,
+and joining off/default/rows/pieces on every page (16 calls per page), comparing
+the joining audit independently against the Q1b writer's row-by-row contract.
+All calls use `page_size=(image.width / 3, image.height / 3)`; ordinary API calls
+continue to default to source-pixel page units.

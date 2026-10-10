@@ -243,3 +243,176 @@ Whitespace checks accept CRLF endings in main's historical CSV files while still
 rejecting actual trailing whitespace; the CSV bytes are preserved.
 It deliberately exits nonzero after a successful handoff because Q3 remains
 **NOT DONE**, so the queue cannot advance to Q4 on this failed gate.
+
+
+## Q3b
+
+Q3b restores the Q1b partial-joining contract without changing fitted geometry,
+crops or descriptive statistics. Q3 is committed as `bb06ee4`; the branch now
+contains main through merge `e123b9b`. The earlier Q3 status above is historical.
+
+### Restored contract
+
+`process_page(..., options=PageOptions(join_lines=True, granularity="rows"))`
+returns and writes the safe joined rows even when other rows are unsafe.
+`rows.json` retains `schema_version`, `rows`, `blocked_rows`, `complete` and
+`geometry_policy`. Every refusal has the original `row_id`, `line_indices`,
+`table_id`, reason and crossing evidence. `complete` is false whenever any row
+is blocked. `PageResult.blocked_rows`, `PageResult.complete` and `PageResult.joining`
+also expose the audit in memory; the CLI reports refusals and writes the row
+envelope by default at rows granularity.
+
+The strict one-row `join_pieces` guard is unchanged: it rejects mixed page/column/
+block/row addresses, duplicate piece ordinals, inconsistent overlap and boundary
+crossings. The page-level joining stage catches those refusals and continues.
+All active structure rows keep `joinable`; accepted boundary, fold and column
+proposal links use Q1b's names, and crossings keep row, piece and proposal links.
+`default` still delivers ordinary rows and separate table pieces; `pieces` keeps
+all individual pieces. Both expose the whole-row safety audit and its refusals.
+Joining off keeps the unaudited Q2 structure, as in the frozen book files.
+
+Source pixels remain the public default page units: arbitrary rasters do not
+imply a DPI. The documented legacy option is
+`page_size=(image.width / 3, image.height / 3)`. Every equality call uses it;
+`page_size` and `box_page` remain strictly compared numeric fields.
+
+### Allowlist
+
+These are exact paths within the named file family. `[]` matches an array index.
+Only the named audit `provenance` object exempts descendants. There is no blanket
+ID, timestamp, unit, evidence or numeric-field filter.
+
+| File family | Field | Reason |
+| --- | --- | --- |
+| `stats.json` | `$.implementation_sha256` | The implementation identity changes with the source revision. |
+| `stats.json` | `$.lines_file_sha256` | The serialized input file hash changes with JSON formatting. |
+| `stats.json` | `$.source_image` | The input path belongs to the run, not the measured page. |
+| `stats.json` | `$.source_sha256` | The input-file identity is recorded separately in the gate manifest. |
+| `stats.json` | `$.seconds` | Elapsed wall time is not deterministic page behaviour. |
+| `stats.json` | `$.units` | This is a human-readable unit description; numeric coordinates remain exact. |
+| `checks.json` | `$.implementation_sha256` | The implementation identity changes with the source revision. |
+| `checks.json` | `$.source_sha256` | The input-file identity is recorded separately in the gate manifest. |
+| `checks.json` | `$.seconds` | Elapsed wall time is not deterministic page behaviour. |
+| `cells.json` | `$.page_units` | This is a human-readable frame description; page_size and box_page remain exact. |
+| `cells.json` | `$.orientation_mode` | This labels a separately generated historical orientation review. |
+| `cells.json` | `$.orientation_output` | This links a separately generated historical orientation review. |
+| `structure.json` | `$.units` | This is a human-readable unit description; all geometry remains exact. |
+| `structure.json` | `$.provenance` | This is the historical audit input-hash receipt, not boundary evidence. |
+| `structure.json` | `$.rejected_boundaries[].id` | An internal name of a rejected candidate is not an accepted boundary. |
+| `structure.json` | `$.rejected_boundaries[].proposal_id` | An internal proposal name of a rejected candidate is not a delivered link. |
+| `structure.json` | `$.rejected_boundaries[].track_id` | An internal track name of a rejected candidate is not an accepted track. |
+
+Accepted IDs and links, rejected-candidate geometry/reasons/evidence, row
+joinability, blocked-row records and every numeric measurement remain in the
+comparison. See [the format contract](../PAGES_OUTPUT_FORMAT.md#strict-equality-and-the-metadata-allowlist-q3b).
+
+### Equality method
+
+`check_q3b_equality.py` calls the public API 16 times per page: tables on/off ×
+statistics on/off × joining off/default/rows/pieces. Deterministic stages cache
+only their complete serialized inputs within that page and return independent
+copies. All cache misses execute current code; no frozen artifact or earlier
+run supplies a detector, delivery or statistics result. Committed Q2 stages are
+loaded separately from `git archive 10eda96` and rerun. An independent Q1b audit
+uses that reference's strict row guard; the 54 frozen Q1b row/structure payloads
+are additionally compared directly. The frozen development stage uses tables
+and joining at rows granularity; frozen books use both switches off.
+
+The comparison preserves JSON types, exact floats (including signed zero),
+array order, Parquet rows/schema and crop dimensions/pixels. It checks segments
+and detector diagnostics as well as lines, structures, cells, delivery and
+statistics. Book aggregation preserves the original input orders: development
+filenames followed by book filenames for the combined collection, and selection
+manifest order for the separate book-only snapshot. Orientation stays parked;
+its existing tests remain in the passing full suite.
+
+### Equality table
+
+**Q3b is NOT DONE:** the partial-joining contract and its frozen artifacts are
+restored, but 95 historical `checks.json` files still differ in 215 fields outside
+the approved allowlist. The gate exits nonzero and retains every difference.
+
+| Comparison | Result |
+| --- | --- |
+| Development pages, all 16 API combinations | **54/54 exact** against fresh Q2 stages plus the Q1b joining audit. |
+| Book pages, all 16 API combinations | **41/41 exact** against fresh Q2 stages plus the Q1b joining audit. |
+| Public page API calls | **1,520/1,520 exact** lines, structure, cells, segments, detector diagnostics, delivery, joining and statistics. |
+| Delivered recognition crops, both table modes | **32,144/32,144 pixel-exact**, including dimensions. |
+| Raw glyph Parquet outputs | **190/190 exact** schemas and rows. |
+| Joining outcomes | **570/570 exact** table-mode/granularity outcomes, each verified with statistics off and on. |
+| Frozen lines, structures, cells and segments | **95/95 exact outside the allowlist for each family**. Accepted links and all numeric geometry match. |
+| Frozen Q1b row envelopes | **54/54 exact**, including **5/5 partial envelopes and all 127 blocked rows**; 5,580 safe rows are delivered. |
+| Active development row joinability | **5,707/5,707 restored**, including the 127 refusals. |
+| Original Q1b row/structure snapshots | **108/108 byte-identical** to the Q2 copies used for direct comparison. |
+| Frozen enriched page statistics and glyph Parquet rows | **95/95 exact for each family**, with only the declared statistics metadata exempt. |
+| Book aggregation | **168/168 exact** variants over 54 book identities. |
+| Frozen book summaries | **54/54 combined-collection and 6/6 book-only files exact**. |
+| Corpus summaries | **2/2 exact**, for the 95-page combined collection and 41-page book-only collection. |
+| Frozen historical checks | **0/95 exact**: 215 missing fields outside the allowlist, listed below. |
+| Full test suite | **2,317 passed, 0 failed, 0 errors, 16 skipped**, out of 2,333 cases. |
+
+The five partial envelopes reproduce the original row order, geometry, refusal
+reasons and crossing evidence, not just the blocked-row counts:
+
+| Page | Expected blocked rows | Actual | Entire envelope exact |
+| --- | ---: | ---: | --- |
+| `an-7a2b17a3fb0f-p000200` | 25 | 25 | Yes |
+| `s2-200e977f2dab5291c42c-p00035` | 30 | 30 | Yes |
+| `s2-6419488b7f8e69fd20da-p00001` | 15 | 15 | Yes |
+| `an-d3237d690aa0-p000138` | 2 | 2 | Yes |
+| `s2-831443dc5e6f1ccfbaf5-p00020` | 55 | 55 | Yes |
+
+The test receipt is `.astra/q3b-final-tests.xml`; the 16 skips are the existing
+web-render tests whose Chromium executable is unavailable in this sandbox.
+All production Python sources and the page equality runner retain their hashes
+from the start of the 95-page run. The gate also binds source images, layout
+inputs, book selection/order and the compared frozen artifacts by SHA-256.
+
+The committed [equality receipt](PAGE_LINES_Q3B_EQUALITY.json) contains counts,
+input/source identities, all 168 book results and the five partial-envelope
+results. The [complete differences](PAGE_LINES_Q3B_DIFFERENCES.json.gz) retain
+both the 215 failing fields and every allowed metadata difference. Reproduce
+with `scripts/pages/check_q3b_equality.py`, then `check_q3b_books.py`, then
+`write_q3b_receipt.py`, using the queue's Python and offline environment.
+The page checker and final receipt writer currently exit **1**; the book checker
+exits **0**.
+
+### Remaining strict-gate failures
+
+These are missing fields, not numeric mismatches in the detector's current
+diagnostics. Q3 did not compare frozen checks; Q3b compares them explicitly and
+does not silently exclude the historical review additions.
+
+| Path in `checks.json` | Files differing | Historical source |
+| --- | ---: | --- |
+| `$.hint_comparison` | 95 | The research renderer wrote `null` when hint comparison was not requested. |
+| `$.nontable_review_sha256` | 54 | The non-table review writer recorded its own implementation identity. |
+| `$.checks.8_nontext_ink.candidate_segments_on_detected_graphics` | 54 | The non-table review writer added segment/graphic overlap results. |
+| `$.checks.6_column_crossings.owner_slanted_reference` | 3 | The owner review added manually supplied slanted-divider parameters and old/new crossing results. |
+| `$.checks.6_column_crossings.review_crossing_lines` | 3 | The review measured crossings against its separately supplied divider reference. |
+| `$.checks.6_column_crossings.review_reference` | 3 | The review retained the explanation of that manual reference. |
+| `$.checks.6_column_crossings.review_reference_x` | 3 | The review retained the manual divider coordinate. |
+
+These fields have not been added to the metadata allowlist. The API has no
+historical review-input stage, and this change does not inject page-specific
+annotations or copy old review results into it. Replaying those review outputs,
+or an explicit owner decision that they are outside this gate, remains necessary
+before claiming DONE. The full frozen JPEG review-image set and historical
+orientation receipts are also not certified here; crop pixel identity is the
+image comparison performed by this run. Orientation remains opt-in and its
+existing tests pass.
+
+### Q3b commit handoff
+
+`git add` was refused by the sandbox when it tried to create the worktree's
+`index.lock` (`Operation not permitted`). No Q3b commit was created, and HEAD
+remains `e123b9b2613f4036932dc8b4cb432b2c57f668ba`.
+
+The queue fallback is `.astra/Q3b-joining-contract.patch` and
+`.astra/commit-Q3b.sh`, with the required trailers and a file-hash manifest.
+The patch is checked in reverse against the working tree and applied forward to
+a temporary reconstruction of the HEAD files; every resulting file hash is
+verified. The commit script binds the branch and HEAD, checks all 19 file hashes,
+and refuses pre-existing staged changes. Its final exit status is deliberately
+**1 even after a successful commit**, because the strict equality gate remains
+NOT DONE and the queue must stop.

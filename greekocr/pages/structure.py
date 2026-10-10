@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw
 
 from .lines import CURVES
 
-__all__ = ['build_structure', 'join_pieces', 'delivery_records', 'render_structure']
+__all__ = ['build_structure', 'join_pieces', 'delivery_records', 'joining_result', 'render_structure']
 ADDRESS = ('page_side', 'column_id', 'block_id', 'row_id', 'piece_index', 'reading_order')
 
 
@@ -538,6 +538,61 @@ def delivery_records(lines: Sequence[dict], *, structure: dict,
         else:
             result.append(join_pieces(records,structure=structure))
     return result
+
+
+def joining_result(lines: Sequence[dict], *, structure: dict, pieces: Sequence[dict] = (),
+                   granularity: str = 'default') -> dict:
+    """Q1b partial delivery: annotate safety and retain every refused row.
+
+    ``join_pieces`` remains the strict single-row guard. This page-level stage
+    catches its refusals, so one unsafe row cannot discard the safe rows.
+    Joining off does not run this audit; its structure remains the Q2 schema.
+    """
+    if granularity not in ('default', 'rows', 'pieces'):
+        raise ValueError('granularity must be default, rows or pieces')
+    # Q1b named proposals before validation, then numbered accepted boundaries
+    # independently. Preserve those accepted proposal links at the audit stage.
+    def proposal_link(boundary):
+        proposal = boundary.get('proposal_id', '')
+        if proposal.startswith('proposal-') and proposal[9:].isdigit():
+            boundary['proposal_id'] = 'boundary-' + proposal[9:]
+
+    for boundary in structure['boundaries']:
+        proposal_link(boundary)
+    if structure.get('fold'):
+        proposal_link(structure['fold'])
+    for column in structure['columns']:
+        for side in ('left_boundary', 'right_boundary'):
+            proposal_link(column[side])
+    boundaries = {b['id']: b for b in structure['boundaries']}
+    evidence = structure['crossing_evidence']
+    for crossing in evidence:
+        index = crossing['line_index']
+        crossing['piece_indices'] = [p.get('index', i) for i, p in enumerate(pieces)
+                                     if p['line_index'] == index]
+        crossing['row_id'] = lines[index]['row_id']
+        crossing['proposal_id'] = boundaries[crossing['boundary_id']]['proposal_id']
+
+    delivered, blocked = [], []
+    for row in structure['rows']:
+        if row['discounted']:
+            continue
+        members = [lines[i] for i in row['line_indices']]
+        try:
+            merged = join_pieces(members, structure=structure)
+        except ValueError as exc:
+            row['joinable'] = False
+            blocked.append(dict(row_id=row['id'], line_indices=list(row['line_indices']),
+                                table_id=row['table_id'], reason=str(exc),
+                                crossings=[c for c in evidence if c['line_index'] in row['line_indices']]))
+        else:
+            row['joinable'] = True
+        if granularity == 'pieces' or (granularity == 'default' and row['table_id'] is not None):
+            delivered.extend(deepcopy(members))
+        elif row['joinable']:
+            delivered.append(merged)
+    return dict(schema_version=1, rows=delivered, blocked_rows=blocked, complete=not blocked,
+                geometry_policy='Exact original piece samples; interpolate only missing gap samples.')
 
 
 def render_structure(page: Image.Image, lines: Sequence[dict], structure: dict) -> Image.Image:
