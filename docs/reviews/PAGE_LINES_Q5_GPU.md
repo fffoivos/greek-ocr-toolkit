@@ -293,3 +293,29 @@ on its 95 pages), with the missing GPU service time made explicit. A fast
 isolated fit does not remove CPU discovery, tables, statistics or transfer
 costs. Production adoption requires passing the discrete gate on the target
 GPU and improving the complete chain.
+
+## Coordinator's MPS run (outside the sandbox, 10 October 2026)
+
+MPS was unavailable inside the implementer's sandbox. Outside it, PyTorch 2.14.1 reports MPS built and available. The
+coordinator ran the report's own command, unchanged:
+`benchmark_q5.py --prototype-device mps --repeats 3 --out .astra/q5-mps-recheck`.
+
+It covered all 54 development pages, single thread, batch size 16, warm-up excluded, with host packing, copies and
+readback included. It took 28 minutes of wall time.
+
+| Stage, summed over 54 pages (median of 3) | Q4 CPU reference | MPS batch | Speed-up |
+|---|---:|---:|---:|
+| Morphology (opening/closing) | 1.49 s | 6.52 s | 0.23× (slower) |
+| Inner weighted guide fit | 11.71 s | 1.56 s | 7.50× |
+| Straightening | 10.73 s | 11.59 s | 0.93× |
+| Whole page API, with the prototypes on | 500.1 s | 516.3 s | 0.97× |
+
+- **What this shows:** on this Mac the GPU only pays off for the batched guide fit, and the batching itself already
+  gives 14.93× on the CPU through torch. So the gain comes from batching, not from the GPU.
+- **Where the time goes:** morphology loses to OpenCV, and straightening is bound by transfers.
+- **Equality:** 3 pages failed the experimental decision-equality check, as in the CPU-torch run (the float32 fit
+  changes the statistics). The default path, with the prototypes off, is unaffected.
+- **For a CUDA GPU:** a gain is plausible only for large cross-page batches of the fit and of straightening, plus the
+  neural stages (layout, recogniser, TableFormer), as the design states. Measure it on CUDA before relying on it.
+
+Summary: `q5-gpu-evidence/mps-recheck-summary.json`.
