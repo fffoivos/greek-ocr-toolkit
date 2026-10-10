@@ -1,4 +1,145 @@
-# Fast line finding, round 4: combined stack
+# Fast line finding: combined stack, round 4b
+
+R4b removes all eight owned track snapshots and imports the final merged modules
+from `69db79f`. It adds **15 fragment joins and three real recovered rows** to the
+previous stack. All 195 pages were run twice, with exact output agreement between
+repeats. The measured correction maximum is **978.564 / 976.601 ms**: below one
+second, but with little margin. Clean-page overhead is still not negligible, and
+its maximum worsens to **107.472 / 99.312 ms**. The owner's target remains partial.
+
+Final detector JSON: **`.astra/fast_lines/out/stack/r4b/<page>.json`**.
+Open the [195-page gallery](../../.astra/fast_lines/out/stack/r4b/index.html),
+[all nine changed pages with raw/before/after crops](../../.astra/fast_lines/out/stack/r4b/changes.html),
+[raw timing summary](../../.astra/fast_lines/out/stack/r4b/summary.json), and
+[validation](../../.astra/fast_lines/out/stack/r4b/validation.json).
+The previous `final/` exports remain unchanged for comparison.
+
+## Imports and composition
+
+Deleted the stack copies of `geometry_scout`, `ink_pipeline`, `ink_ownership`,
+`ink_motif_gate`, `ink_recurrence`, `ink_repeat_field`, `recovery` and `type_context`.
+[reuse.json](../../prototypes/fast_lines/stack/reuse.json) now records merged-module
+imports and hashes instead of snapshot destinations. B runs through
+`features_ink.pipeline.ink_run`; C through `shared.type_extended.recover` and its
+shared context/recovery dependencies. Geometry imports `geometry_scout`,
+`geometry_context`, `geometry_feature_rules` and `geometry_fragment_correct`.
+No track modules were edited, and no track acceptance logic remains copied in stack.
+
+The geometry adapter is 38 lines of composition, source-list mapping and receipt
+normalization. The shared context accepts intact original sources; Q8 pieces stay
+in the current output but cannot masquerade as their original contour or own ink
+lost by a reshape. This is conservative when split neighbors exist. All 30 prior
+reshapes and all 400 separator cuts remain in the observed result. Shared scouts
+are supplied, so Q8 is still called once. B removals precede geometry, fragment
+joins and recovery. Their footprints are passed to both new stages.
+
+The resulting order is Paddle → Q8 → B removals → shared geometry → curved-rule
+cuts → native fragment joins → extended type recovery. Native contact and the
+extended grid are the new runtime dependencies; diagnostic leaf, font, inkiness,
+image and stamp censuses remain outside this path. Orientation stays parked.
+
+Type's known v6 table-extent failure was checked explicitly. On
+`s2-49598b2e848ab1f0ee1e-p00005`, the post-geometry layout does not nominate a new
+supported extension slot, so `table_extents` is null. The prior real recovery at
+old slot 15 survives without a bypass or a page-specific exception. The underlying
+table-extent flaw remains a limitation on other layouts.
+
+## R4b timings against the owner's target
+
+Each cell is **median / p95 / max, in milliseconds**. Repeat 2 reverses page order.
+Decode, original Paddle inference/postprocessing and all conditional corrections
+are charged from image file to final items. Model initialization/warmup and review
+rendering/serialization remain outside the per-page timer, as in round 4. Raw
+receipts preserve the separate startup and stage timings.
+
+| Cohort | n | Repeat | Paddle file-to-lines | Added corrections | Final file-to-lines |
+|---|---:|---:|---:|---:|---:|
+| Agreement | 40 | 1 | 148.260 / 171.012 / 199.397 | 18.396 / 40.637 / 107.472 | 167.050 / 214.138 / 230.767 |
+| Agreement | 40 | 2 | 145.865 / 171.570 / 199.926 | 19.479 / 37.129 / 99.312 | 165.379 / 208.700 / 231.607 |
+| Discrepancy | 101 | 1 | 144.759 / 232.447 / 283.099 | 40.311 / 422.769 / 978.564 | 201.741 / 599.435 / 1179.828 |
+| Discrepancy | 101 | 2 | 143.504 / 229.803 / 280.637 | 39.048 / 420.418 / 976.601 | 202.943 / 593.836 / 1177.813 |
+| All supplied | 195 | 1 | 147.546 / 228.194 / 283.099 | 31.078 / 390.104 / 978.564 | 184.203 / 566.938 / 1179.828 |
+| All supplied | 195 | 2 | 145.581 / 227.895 / 280.637 | 32.261 / 388.142 / 976.601 | 182.468 / 566.433 / 1177.813 |
+
+All 390 correction timings are below one second; full file-to-lines time is not:
+the maximum is 1179.828 / 1177.813 ms. These are two measured runs on the shared Mac,
+not a held-out latency guarantee or a worst-case bound.
+
+There are **latency regressions**. Agreement max was 51.689 / 50.744 ms in the prior
+stack and is now 107.472 / 99.312 ms on `an-dbd045ccd84c-p000249`. The new fragment
+verifier spends 72.851 / 72.813 ms rejecting a stamp-related candidate; output is
+unchanged. Discrepancy max was 688.609 / 653.701 ms and is now 978.564 / 976.601 ms
+on `s2-49598b2e848ab1f0ee1e-p00004`: fragment verification costs 590.191 / 603.254 ms
+without accepting a join, alongside 290.979 / 287.663 ms in type. These measured
+outliers were relayed to geometry and recorded on the shared board. No new gate
+was invented here to hide their cost. Lower aggregate medians do not establish a
+speedup: Paddle's own timings also changed between rounds on this shared Mac.
+
+The old ink tail stays resolved: `an-778126cc8c2b-p000011` now costs
+22.867 / 22.453 ms in combined corrections, including 13.937 / 13.620 ms in B.
+The new clean tail has a different cause, native fragment rejection.
+
+## Changed-page review and remaining failures
+
+Exactly **186 complete item lists are unchanged**. All nine changed page overviews
+and all **21 raw / previous / R4b crops** were inspected. No new visual regression
+was observed in that scope. The two older recoveries on 8686 p7 change their
+polygon boundaries, so preservation is not claimed as polygon equality there.
+The same visible rows remain covered. Full page observations, including remaining
+failures on unchanged pages, are in the updated
+[195-page ledger](../../prototypes/fast_lines/stack/review.json); the
+[nine-page change ledger](../../prototypes/fast_lines/stack/review_r4b_changes.json)
+records this round separately.
+
+| Page | Improvement and remaining limitation |
+|---|---|
+| `an-466cffad2cba-p000323` | One native-validated join reconnects the curved final syllable to its real body row near the stamp. Prior polygon areas stay covered; the stamp overlap and other uneven row boundaries remain. No new visual regression observed. |
+| `an-778126cc8c2b-p000010` | One join reconnects the left quotation mark to the same printed dialogue row. Its old rotated envelope leaves an angular corner; nearby quote fragments and central stamp interference remain. No new visual regression observed. |
+| `an-a3c2bdf81256-p000112` | One join reconnects a separated ending in the prose heading between grammar tables. Table cells remain separate. The heading still has other fragmented endings; no new visual regression observed. |
+| `s2-3229200bf47ca465a42d-p00004` | One join reconnects the left curved fragment with the matching body row. The five previous reshapes persist. Broad old envelopes and many other left-curl straddles remain; no new visual regression observed. |
+| `s2-86865c33eef5932c013b-p00005` | Seven joins reconnect real curved right ends, preserving all fourteen old source polygons. Their changed grid also enables a real missing row beginning τους δε, μετα το κοπανισμα, with its right end following the curl. This is a pre-existing bracketed-slot method firing after joins, not a new edge slot. Remaining unjoined ends, incomplete rightmost words and block-edge missing text are visible. No new visual regression observed. |
+| `an-466cffad2cba-p000277` | Extended type recovery adds the real first body row below the title beside the large E. The large initial remains outside the main recovered envelope; its full reading-unit geometry is not solved. No new visual regression observed. |
+| `an-9ea1564fcf4f-p000202` | One join reconnects the left word continuation with its real dictionary row. Both earlier recovered entries and five reshapes remain. Dense short fragments and adjacent-column boundary difficulties persist; no new visual regression observed. |
+| `an-fd4fa0018ae1-p000035` | Extended type recovery adds the real first prose row and includes its large B. It stays above the next body row. The top ornament remains boxed as before; no new visual regression observed. |
+| `s2-86865c33eef5932c013b-p00007` | Three joins reconnect two pairs and one three-piece curved row. The two earlier recovered rows remain, but both envelopes shift slightly after the joins change the grid and regional crop. Raw comparisons show the same visible text covered; the last rightmost parts and an unbracketed missing row remain unresolved. No new visual regression observed. |
+
+Totals are **308 Q8 cuts, 92 curved cuts, 30 reshapes, 61 back-print removals,
+11 ornament removals, 15 joins and 18 recoveries**. The joins unite 31 prior source
+polygons into 15, reducing the count by 16; three extra recoveries bring the final
+count to **13,969 items**, down from 13,982. This is not an accuracy score. 58 pages
+change relative to Paddle. The new row on 8686 p5 uses an old bracketed-gap slot
+that becomes available after the seven joins; it is a combined interaction, beyond
+the two new standalone type recoveries. Severe curl, missing ends, broad envelopes,
+stamp interference and other failures in the previous ledger remain unresolved.
+
+## Validation and handoff
+
+**142/142 prototype tests pass**, including direct-function identity checks,
+no duplicate Q8, rejection-footprint propagation and the raster-boundary audit.
+The export validator passes **16,808 checks** over all 195 pages and both repeats:
+fresh Paddle equality, source ancestry, Q8 pieces, zero accepted reshape ink loss,
+all original joined polygon pixels retained within the actual image, no recovered
+polygon intersecting a B removal, valid exports and reviewed outputs.
+
+The first join audit mistakenly counted 22 pixels in the nonexistent column at
+`x == image_width`. The audit canvas now clips to the actual half-open image
+raster; a regression test distinguishes that boundary from real lost pixels.
+No runtime or output changed. Both benchmark source snapshots remain identical;
+the two validation-only file changes are separately hashed in
+[post-timing-validation-source.json](../../.astra/fast_lines/out/stack/r4b/post-timing-validation-source.json).
+No held-out pages, PDF text layer, production page modules or tests were used.
+
+The imported composition is ready as a prototype; native negative-tail cost and
+type's imperfect extent protection remain reasons not to claim the owner's whole
+target achieved. The original stack patch was applied by the coordinator as
+`f903ec5`; the material below is the historical round-4 record, not current imports
+or current measurements.
+
+Git staging was blocked by the sandbox (`index.lock: Operation not permitted`); no new commit or push was made. The requested fallback is [commit-Fstack-r4b.sh](../../.astra/commit-Fstack-r4b.sh) with its [validated patch](../../.astra/commit-Fstack-r4b.patch), exact file/deletion manifest and both required trailers.
+
+---
+
+## Historical round 4: owned snapshot version `final`
 
 The combined prototype preserves all round-3 corrections: 308 printed-rule cuts,
 92 curved-rule cuts, 30 reshapes, 61 back-print removals and 11 ornament removals.

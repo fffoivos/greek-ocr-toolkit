@@ -3,10 +3,22 @@ import argparse
 import json
 from pathlib import Path
 import numpy as np
+import cv2
 from ..round2 import manifest,get_baseline
 from ..shared.manifest import ROOT,digest
 from ..shared.timing import dump
-from .type_context import overlaps_exclusion
+from ..shared.type_context import overlaps_exclusion
+
+
+def retained_pixel_loss(original_polygons,polygon,image_size):
+    """Count lost source pixels inside the image's half-open raster domain."""
+    points=np.vstack([np.asarray(polygon)]+[np.asarray(p) for p in original_polygons])
+    lo=np.maximum(0,np.floor(points.min(0)).astype(int))
+    hi=np.minimum(np.asarray(image_size)-1,np.ceil(points.max(0)).astype(int))
+    masks=[np.zeros((hi[1]-lo[1]+1,hi[0]-lo[0]+1),np.uint8) for _ in range(2)]
+    cv2.fillPoly(masks[1],[np.rint(np.asarray(polygon)-lo).astype(np.int32)],1)
+    for p in original_polygons:cv2.fillPoly(masks[0],[np.rint(np.asarray(p)-lo).astype(np.int32)],1)
+    return int(np.count_nonzero(masks[0]&~masks[1]))
 
 
 def validate(directory,repeats=(1,2)):
@@ -28,9 +40,14 @@ def validate(directory,repeats=(1,2)):
         for q in e.get('geometry',{}).get('changes',[]):assert q['retention']['lost_ink']==0;checks+=1
         for ext in ('.jpg','.paddle.jpg'):
             assert (directory/(p+ext)).stat().st_size>0;checks+=1
+        # Every fragment join must retain every original source polygon pixel.
+        for join in e.get('geometry',{}).get('fragments',{}).get('joins',[]):
+            ids=join['source_ids']
+            assert retained_pixel_loss([e['original'][i]['polygon'] for i in ids],join['polygon'],row['image_size'])==0;checks+=1
+            assert any(q.get('source_ids')==ids and q['polygon']==join['polygon'] for q in record['items']);checks+=1
         c=e['counts']
         if not row['parked']:
-            assert len(record['items'])==len(e['original'])+c['q8']+c['curved']-c['back']-c['ornaments']+c['added'];checks+=1
+            assert len(record['items'])==len(e['original'])+c['q8']+c['curved']-c['back']-c['ornaments']+c['added']-c.get('joined_reduction',0);checks+=1
             # Original sources are accounted for by retained source IDs or removal.
             present={i for q in record['items'] for i in q.get('source_ids',[])}
             removed={i for q in e['removed'] for i in q['source_ids']}

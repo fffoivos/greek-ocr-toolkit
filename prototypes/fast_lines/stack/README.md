@@ -22,9 +22,12 @@ decode, inference, detector postprocessing and all corrections. JSON writing and
 review rendering are outside the timer. Model startup is reported separately.
 
 Order: Paddle → one Q8 scout/correction → ink removals → geometry on surviving
-sources → curved-rule cuts → type recovery with permanent rejected-region vetoes.
-Geometry retains original contour ancestry. Its retention guard sees only current
-survivors. Recovery uses quadrilaterals for grid nomination and real polygons for
+sources → curved-rule cuts → native fragment joins → extended type recovery,
+with permanent rejected-region vetoes in both new stages.
+Geometry retains original contour ancestry. Its shared context receives only intact
+surviving sources; separated pieces stay in the output and cannot own lost ink.
+The adapter maps shared results back to the existing order without copying any
+acceptance logic. Joins retain original source IDs and receive B removal footprints. Recovery uses quadrilaterals for grid nomination and real polygons for
 ink ownership. Regional separator protection checks additions without another Q8
 full-page pass. Features not implemented by the tracks remain unresolved here.
 
@@ -35,6 +38,7 @@ python -m prototypes.fast_lines.stack benchmark --version new-run --repeat 1
 python -m prototypes.fast_lines.stack benchmark --version new-run --repeat 2
 python -m prototypes.fast_lines.stack summary --version new-run
 python -m prototypes.fast_lines.stack review --version new-run
+python -m prototypes.fast_lines.stack.compare --previous final --version new-run
 ```
 
 Use the Python/environment above for every invocation. Repeats reverse page order,
@@ -45,5 +49,15 @@ inspection before `python -m prototypes.fast_lines.stack.validate --version new-
 
 The tracked `review.json` is the 195-page human inspection ledger. Output galleries,
 raw timings, all detector JSON and validation live under `.astra/fast_lines/out/stack/`.
-`reuse.json` records exact upstream snapshots; those owned copies only adapt imports.
+Current exports are in `.astra/fast_lines/out/stack/r4b/`; `final/` is the earlier
+round-4 snapshot, preserved for comparison. `changes.json` and change crops compare
+R4b to it; unchanged pages retain their prior visual observations.
+
+`reuse.json` records imports and hashes of the merged track modules. All eight
+owned snapshots were deleted. Stack calls `features_ink.pipeline.ink_run`, shared
+`geometry_scout`, `geometry_context`, `geometry_feature_rules`,
+`geometry_fragment_correct`, and `type_extended.recover` (which imports
+`type_context` / `type_recovery`). No track algorithm is copied into stack.
+The merged tree's diagnostic features do not become runtime dependencies merely
+because they exist; the native fragment and extended-grid runtime operators do.
 No production page API imports, PDF text, held-out inputs or page-keyed runtime gates.
