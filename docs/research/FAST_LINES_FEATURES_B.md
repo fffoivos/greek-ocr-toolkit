@@ -1,4 +1,13 @@
-# Fast line finding, round 3 — B: faintness, inkiness, images
+# Fast line finding, rounds 3–4 — B: faintness, inkiness, images
+
+**Round4:** the expensive negative ornament search is replaced by a cheap local
+recurrence nomination ahead of the unchanged verifier. The former305ms agreement
+tail is now14.126/14.098ms for B in two fresh runs. All195 outputs remain exact.
+Local component observability, image/text intersections and unrolled stamp rings
+now have explicit and fast renderings, but do not justify new suppression or
+semantic unreadability labels. See [round4 evidence](../../.astra/fast_lines/out/features_ink/round4/index.html)
+and the detailed continuation below. The round3 results remain as historical
+measurements; they are not the new timing results.
 
 The study now renders darkness separately from stroke condition, reflected glyph
 support separately from darkness, and repeated ornaments separately from area
@@ -304,12 +313,228 @@ avoids template enumeration on curved clean print; and explicit caption/initial/
 stamp intersections before any generic image eraser. Broad masks and numerical
 wins on this cohort are insufficient. No held-out generalisation claim is made.
 
-## Git handoff
+## Round3 Git handoff (historical)
 
 Staging was blocked by the sandbox at
 `.git/worktrees/greek-ocr-toolkit-fl-falsepos/index.lock` (Operation not permitted).
-The branch remains `astra/ff-ink` at `b5199ad`. The requested fallback is
+At that handoff the branch remained `astra/ff-ink` at `b5199ad`. The requested fallback was
 [commit-Fink.patch](../../.astra/commit-Fink.patch) and
-[commit-Fink.sh](../../.astra/commit-Fink.sh), with file hashes and both required
+[commit-Fink-round3.sh](../../.astra/commit-Fink-round3.sh), with file hashes and both required
 trailers. No commit or push is claimed. The patch is validated forward in an
-empty temporary repository and in reverse against this worktree.
+empty temporary repository and in reverse against this worktree. The coordinator
+subsequently committed it as `3b9ffe3` and merged all three tracks. Round4 starts
+from that committed state in the same owned worktree.
+
+## Round4: recurrence and the clean-page tail
+
+The tail was computation with no correction: on `an-778126cc8c2b-p000011`,
+1,802 `matchTemplate` calls accounted for201ms of a305ms profiled B run.
+Ownership took less than1ms. Stack independently measured the same negative
+searches on source rows10–14 at roughly34–47ms each, before A/C processing.
+The cause was repeated reduced-resolution template enumeration in curved prose
+and stamp overlap. It was not a need for more mirror evidence.
+
+The rendering iterations are retained under `round4/`:
+
+1. `repeat-field-v1/`: native and8/body two-dimensional autocorrelation, with
+   horizontal and vertical displacement shown as a field. Whole-context evidence
+   dilutes a short frame and the leaf headpiece with adjacent decoration. A
+   projection-only proxy responds strongly to stamp/prose texture.
+2. `repeat-field-v2/`, `repeat-field-v3/`: local horizontal bands and their share
+   of the actual target ink. All11 ornaments survive, but recurrent letter stems
+   also nominate three expensive rows. A high overall repetition score does not
+   establish that the repeating part owns the detector box.
+3. `targeted-v1/`: using period-sized windows to place templates misses six
+   reviewed ornaments. The1436 frame needs local fragments; the1f8e headpiece
+   contains two neighboring periods. A period is not a sufficient template width.
+4. `recurrence-v1/`: render normalized patch-pair agreement at each displacement,
+   then chains of four copies with small positional tolerance. Box-filter means,
+   variances and products replace enumerated template search. Border reflection
+   fabricated some matches; v2 requires every patch to be observed inside the crop.
+5. `recurrence-v3/` and final `recurrence-v4-*`: the review image now shows support
+   for the **winning period**, not a union of unrelated periods. That earlier
+   display overstated the evidence on prose. Final per-page images retain raw
+   pixels and green supported regions. Native evidence covers18 strips: all11
+   reviewed motifs and the seven costly p11 negatives. Both fast routes cover all
+   93 full-search nominations from round3, with per-line JSON comparisons.
+
+`shared/ink_recurrence.render(gray,item,height, samples=8, route=..., detail=...)`
+is the reusable feature. Slow uses native pixels and all displacements. Route1
+renders the same local chains at8 samples/body. Route2 tests only the five
+strongest two-dimensional FFT peaks and adjacent sample offsets. A nomination
+requires a four-copy chain covering at least a quarter of target ink over half
+the contextual span. This is deliberately weaker than the old final ornament
+support requirement. Neither recurrence route authorizes a deletion.
+
+Native views show broad recurring support on1436's frame,1f8e's leaves andc99's
+wide decorative units, while p11 prose has small recurrent fragments. Both fast
+routes retain all11 reviewed ornaments; route2 rejects all seven costly p11
+negatives. Differences on the other strips remain in `recurrence-comparisons.json`;
+they were not reduced to one score. This is observed recall preservation on the
+supplied material, not a proof for unseen motifs. Irregular or sparse ornaments
+remain a miss: C's new `an-7792…p000107` candidate has separated flower units and
+fails the default continuous-band scout. C retained it through another abstention.
+
+The accepted runtime order is coarse connected-band scout → continuity check →
+new recurrence nomination → old8/body spatial witness → unchanged16/body spatial
+witness and residual-glyph veto. Full195 final-item equality was checked before
+handoff; both fresh195 repeats also match. The61 ghost and11 ornament removals,
+and all308 Q8 source-box clips, remain exactly the reviewed round3 corrections.
+
+## Round4: faintness versus inkiness and readability
+
+The previous whole-line stroke census cannot answer which letter is unreadable.
+This round renders **1,364 localized physical component candidates on seven
+pages**, selected from8,237 extracted components: pale1be6p215, mirrored0ce9p1,
+stamp/curved778p11, ghost-contaminatedef4816p150, and clean77d1p1/p2/p3. These are
+component candidates, not known characters; missing ink can prevent extraction
+entirely. C's native atlas extractor is copied with its source hash in
+`reuse_round4.json`; its physical-coordinate deduplication prevents an overlapping
+box from supplying the same letter twice as supposedly independent evidence.
+
+`shared/ink_observability.measure(gray,box,height,route=...,detail=...,version=4)`
+renders local paper-relative depth and noise separately from width, components,
+holes and fill at relative thresholds. It also asks whether topology survives
+threshold changes of ±2 measured noise units. Every result retains
+`readability='unknown'` and an unknown cause. Slow uses native pixels; route1
+retains at most32 samples per component height; route2 uses12 and one principal
+threshold. None runs in `ink_run`.
+
+`observability-v1/` exposed silhouettes but used a flat paper level. V2 adds a
+local illumination plane and the independent noise-topology sweep. The controlled
+experiment then falsified the noise estimate: selecting bright **raw** pixels
+truncated the distribution whose noise was being measured. Known2DN noise was
+reported near1DN. V3 selects paper on smoothed pixels and measures original
+differences; the controlled estimate is2.10DN. V4 refuses to call three empty
+threshold masks a resolved stable component. All failed generations are retained.
+
+In `observability-controls-v4/`, fixed cells and unchanged added noise separate
+amplitude loss from shape change. Original SNR86.6 falls to13.6 at0.15 amplitude,
+3.2 at0.03, and1.7 at0.01. Thinning, thickening and blur change different stroke
+measurements. Most decisively, removing the lower arm of a known E yields a
+perfectly plausible F at SNR86.1 with stable topology. An image-only quality
+measure cannot infer that the arm once existed. Semantic readability requires
+character alternatives and context; an apparent fragment can also be a legitimate
+small character, diacritic or joined form.
+
+Page inspection keeps that distinction concrete. Pale1be6's strokes remain
+resolvable even when faint;0ce9 candidates contain reflected or overlapping
+silhouettes despite cores above the local noise. On clean77d1, route2 changes
+rho/lambda/counter topology. Native detail is evidence, not a reference label:
+thresholding can open a visible blurred loop. Full component records and56
+largest-disagreement crops are in `observability-review/`. Route1 changes the
+noise-topology stable flag on36/1,364 candidates, route2 on222/1,364. These are
+measurement disagreements, not error rates or unreadable-letter counts.
+
+The repeated full diagnostic costs include C extraction and sampling afresh for
+each route, then every component measurement. Median/max ms across seven pages:
+slow462.109/2414.973 and469.250/2245.198; route1469.601/2245.179 and462.556/2325.050;
+route2465.011/2121.466 and467.148/2137.285. Extraction dominates. The fast local
+measurement is useful on already nominated components, but this full census is
+not a cheap clean-page dependency. No new readability-based correction is enabled.
+
+## Round4: generic pictures and stamps
+
+`image-structure-v1/` renders original-pixel line-segment support longer than two
+body proxies. Route1 repeats the rendering at16/body; route2 uses mixed gradient
+orientations in3h tiles. This shows engraving hatching and frame ink on d600,
+but also selects table rules:395 native segments in the engraving page versus299
+on200ep35. V2 requires observed cross-edge contrast, reducing d600 to337 while
+the table remains299. R1 retains195 and212 respectively. Generic long-edge density
+is not image ownership. Route2 is worse: on778p11 it also paints ordinary words
+and textured blank paper.
+
+V3/v4 add explicit potential-text intersections with the old connected area-ink
+rendering and C's deduplicated component locations. Green means observed component,
+amber means an area-ink/component conflict, magenta means extended edge support.
+On d600 this exposes letters inside the decorated initial, text touching that
+initial, the caption, and front text crossing the stamp. No rectangle or whole
+connected component becomes an exclusion. C supplied independent three-route
+table conflict renderings for200ep35, copied and hashed under `round4/cooperation/`.
+Their regional numeric support helps explain the conflict but is not a complete
+table boundary; outside it is not thereby an image.
+
+`shared/ink_stamp_field.render(gray,ring,height,route=...,version=4)` unrolls an
+observed ellipse hypothesis into angle × radius. Native and reduced images make
+the circular seal lines horizontal and front-text crossings curved. This exposed
+a basic R3 failure: the fitted ellipse on09f5p5 is paper grain, not a stamp.
+The200ep35 small ring hypothesis is also weak in original pixels. Ring fitting
+and nearby edge support were insufficient evidence.
+
+V1 radial mean darkness can be dominated by a dark front word. V2 angular
+persistence at relative darkness still calls paper grain support. V4 therefore
+requires a thin stroke darker than **both radial flanks**, above measured noise.
+R1 renders that field at16/body; R2 uses24 angular spokes at8/body. Native false
+09f5 peak support falls to0.294, R1 to0.221; d600's real outer ring has0.529/0.486.
+But pale1be6's real ring is only0.418/0.307, and sparse spokes fluctuate. A fixed
+ellipse does not follow warped or broken rings accurately enough, and even a
+verified ring does not assign overlapping letters to the stamp. All ring peaks
+and route failures remain visible. No threshold was promoted to a stamp eraser.
+
+These are reusable diagnostic renderers (`ink_image_structure`, `ink_stamp_field`),
+with no runtime dependency or new removal. Generic picture/initial/caption
+ownership, irregular ornaments, stamp-only lettering and overlap separation
+remain partial. The blue/green disagreement images still represent detector
+coverage, not the color or ownership of the original ink.
+
+## Round4 runtime measurements and cooperation
+
+All390 fresh warm executions decode a page, rerun Paddle and postprocessing, then
+Q8+B. Baseline and final lists are checked outside the timed interval. Decode and
+model startup are recorded separately; every B/Q8 dependency is charged. Runs
+were short foreground batches on the shared Mac, with order changes and no jobs
+launched in the background. Variation between repeats is retained.
+
+| Cohort / added computation, ms | Repeat1 median / p95 / max | Repeat2 median / p95 / max |
+|---|---:|---:|
+| 40 agreement, B | 2.982 /16.388 /24.502 | 3.107 /17.225 /24.649 |
+| 40 agreement, Q8+B | 15.286 /27.133 /38.465 | 14.777 /27.051 /37.832 |
+| 101 new discrepancy, B | 8.466 /140.546 /432.738 | 9.103 /143.762 /611.196 |
+| 101 new discrepancy, Q8+B | 23.711 /147.559 /445.894 | 26.612 /154.101 /626.069 |
+| 101 new discrepancy, Paddle+Q8+B | 164.169 /281.374 /586.883 | 175.604 /293.562 /778.988 |
+
+The former p11 tail is14.126/14.098ms B in these runs; strictly negligible
+agreement overhead is still not achieved on every page. Subsecond corrections
+are measured on this cohort, not promised for held-out material. The largest
+positive motif verifications remain costly; this change targets negative work.
+
+`ink_run` now accepts optional `height` and `ownership_evidence`, and returns
+per-line `motif_costs` plus `ownership_reused`. Supplied height must have
+`shared.geometry.height_proxy` semantics for the **current** items; C's body
+height is a different measurement. Reused ownership must be from the same pixels,
+image size and exact bbox list. Size/rectangles/height are checked, pixel identity
+is caller-owned, and an already paid ownership result is not charged twice.
+Default calls still compute and charge everything themselves.
+
+Stack snapshotted the five frozen runtime files and source hashes from
+`round4/runtime-handoff.json`, placing B removal before A/C and preserving removed
+regions as recovery exclusions. It independently reports390 exact combined
+replays and all61+11 removals retained; its p11 combined correction cost is
+26.301/33.770ms and B16.839/24.438ms. Those are stack's separate measurements,
+not mixed into the table above. C also reused the motif veto for candidate regions
+and the older reflected-glyph veto; front/unknown never certifies a recovery.
+
+Current validation:72/72 prototype tests,195 exact reviewed outputs,390 fresh
+baseline/final reproductions,195 finite detector exports with measured seconds,
+and frozen runtime hashes checked. All changes stay in B-owned prototype files
+and this report. Production pages/tests and other tracks' source are untouched.
+
+Next work: trace a locally deformable closed ring with original-pixel support;
+combine component ownership, table boundaries and decorated-initial continuation
+before an image exclusion; use deduplicated repeated-shape alternatives plus
+explicitly modeled degradation/context for ambiguous letter readings. Remaining
+work must preserve raw uncertainty, including completely missing strokes and
+unextracted letters. These diagnostic products should remain conditional on a
+real need; their full census costs already falsify putting them on clean pages.
+
+## Round4 Git handoff
+
+The sandbox again rejects `git add` when it tries to create
+`.git/worktrees/greek-ocr-toolkit-fl-falsepos/index.lock`. No new commit or push
+was made; HEAD remains `3b9ffe3` on `astra/ff-ink`. The requested fallback is
+[the round4 patch](../../.astra/commit-Fink-round4.patch) and
+[commit-Fink.sh](../../.astra/commit-Fink.sh), with the required trailers.
+Forward application against the committed base, applied-file hashes, reverse
+application, the live reverse check and shell syntax are validated. The script
+refuses a wrong branch/base, an already staged index or changed file hashes.
+The former round3 script is preserved separately. Outputs remain outside git.

@@ -61,4 +61,63 @@ it must not be confused with the fresh end-to-end stack benchmark.
 Offline modules may import the existing pages model. Runtime modules do not.
 C's body contacts and grids are consumed by `cooperate.py` from an explicitly
 supplied sibling worktree, copied and hashed in the output. They are not a mutable
-runtime dependency. No existing shared or production modules were edited.
+runtime dependency. Round3 introduced these owned shared modules; round4 changes
+only B-owned shared modules. No production modules are edited.
+
+## Round4 continuation
+
+The latest output is `.astra/fast_lines/out/features_ink/round4/index.html`.
+Final correction images/JSON are `round4/study-v3/`, with two fresh195-page
+benchmarks and exact round3 decisions. Runtime source hashes are frozen in
+`round4/runtime-handoff.json` and independently snapshotted by stack.
+
+The negative motif tail now uses a local four-copy recurrence rendering before
+both old verifiers. This does not change the final72 B removals. Full native,
+8/body explicit and FFT-nominated recurrence images are in `recurrence-v4-*`.
+`ink_run(gray,items,detail=False,height=None,ownership_evidence=None)` can reuse
+already paid ownership evidence; pixel identity belongs to the caller, while
+image size, bbox list and optional height are checked. Height MUST preserve
+`shared.geometry.height_proxy` semantics for the current items. Returned
+`motif_costs` lists every examined line's nomination and cost. Do not feed C body
+heights into this adapter or reuse evidence after separator changes.
+
+New diagnostic APIs, all independent of the correction path:
+
+- `ink_observability.measure(gray,box,height,route='slow',detail=False,version=4)`:
+  native local noise, illumination, relative-threshold strokes and topology under
+  measured noise. `explicit` uses32 samples/component-height; `heuristic`12.
+  `readability` and physical cause remain unknown. Stable empty masks are refused.
+- `ink_image_structure.render(gray,height,route='slow',version=4)`: observed long
+  edges; `explicit` reduced edges; `heuristic` orientation texture. No exclusions.
+- `ink_stamp_field.render(gray,ring,height,route='slow',version=4)`: angle/radius
+  unrolling and contrast against both radial flanks. `explicit` reduced census;
+  `heuristic`24 spokes. Ring fitting is only a hypothesis, never ownership.
+- `ink_type_identity.py` is an unmodified C diagnostic snapshot. Native components
+  are physically deduplicated; source/hash/use recorded in `reuse_round4.json`.
+  It does not supply recognized letters or fonts, and is not a runtime dependency.
+
+Reproduce the final component work using the mandated Python/environment:
+
+```sh
+python -m prototypes.fast_lines.features_ink.recurrence_study --version recurrence-v4-dense --dense --focus
+python -m prototypes.fast_lines.features_ink.recurrence_study --version recurrence-v4-explicit
+python -m prototypes.fast_lines.features_ink.recurrence_study --version recurrence-v4-heuristic --route heuristic
+python -m prototypes.fast_lines.features_ink.observability_study --version observability-v4
+python -c 'from prototypes.fast_lines.features_ink.observability_controls import run; run(4)'
+python -m prototypes.fast_lines.features_ink.round4_review
+python -m prototypes.fast_lines.features_ink.image_structure_study --version 4
+python -m prototypes.fast_lines.features_ink.publish_round4
+```
+
+The final publisher requires the declared390 fresh receipts and exact reviewed
+outputs. It verifies runtime hashes and puts measured warm detector+Q8+B seconds
+in every detector-format JSON. `final study/benchmark --version round4/study-v3`
+uses the previous CLI; keep foreground timing batches at most32 pages and repeat
+before quoting. The one40-page agreement call took under8s here.
+
+Known limits retained in images and report: period-sized templates miss motifs;
+coarse noise/topology disagrees on clear letters; E→F stroke loss can be dark and
+stable; fitted stamp rings can be paper grain; engraving and table rules both
+have long edges; area masks touch decorated initials and real captions. New
+readability/generic image/stamp correction remains unaccepted. The optional full
+component census takes over2s on0ce9 when extraction is paid; it is not a scout.

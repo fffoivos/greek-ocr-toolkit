@@ -10,6 +10,7 @@ from ..shared.ink_images import render
 from ..shared.ink_motif_gate import inspect
 from ..shared.ink_edges import profiles
 from .pipeline import ink_run
+from ..shared.ink_recurrence import render as recurrent
 
 
 def strokes():
@@ -112,3 +113,41 @@ def test_profile_spread_increases_on_known_blur():
     a=strokes();blur=cv2.GaussianBlur(a,(0,0),2);b=[0,0,420,100]
     x,y=profiles(a,b,45),profiles(blur,b,45)
     assert y['edge_width_h']>2*x['edge_width_h']
+
+
+def test_shared_height_and_evidence_preserve_default_decisions():
+    a=strokes();items=[item([5,15,410,80])];default=ink_run(a,items)
+    supplied=ink_run(a,items,height=default['ownership']['height'])
+    reused=ink_run(a,items,ownership_evidence=default['ownership'])
+    assert default['items']==supplied['items']==reused['items']
+    assert reused['ownership_reused'] and not supplied['ownership_reused']
+    assert len(reused['motif_costs'])==len(items)
+
+
+def test_shared_evidence_rejects_changed_regions():
+    a=strokes();items=[item([5,15,410,80])];e=analyze(a,items)
+    with pytest.raises(ValueError):ink_run(a,[item([5,15,409,80])],ownership_evidence=e)
+    with pytest.raises(ValueError):ink_run(a,items,height=e['height']*2,ownership_evidence=e)
+    with pytest.raises(ValueError):ink_run(a[:-1],items,ownership_evidence=e)
+
+
+@pytest.mark.parametrize('height',[0,-1,float('nan')])
+def test_shared_height_rejects_invalid_scale(height):
+    with pytest.raises(ValueError):analyze(strokes(),[],height=height)
+
+
+def test_recurrence_uses_shape_not_darkness_and_never_erases():
+    a=strokes();q=item([0,0,420,100]);f=np.uint8(240-(240-a.astype(float))*.3)
+    x=recurrent(a,q,45,route='explicit');y=recurrent(f,q,45,route='explicit')
+    assert x['nominate'] and y['nominate']
+    assert abs(x['best']['coverage']-y['best']['coverage'])<.01
+    assert 'drop' not in x
+
+
+def test_blank_and_nonperiodic_shapes_do_not_supply_recurrence():
+    a=np.full((100,420),240,np.uint8)
+    assert not recurrent(a,item([0,0,420,100]),45,route='heuristic')['nominate']
+    cv2.rectangle(a,(30,20),(55,75),20,-1)
+    cv2.circle(a,(100,55),15,20,2)
+    cv2.line(a,(190,20),(230,75),20,5)
+    assert not recurrent(a,item([0,0,420,100]),45,route='heuristic')['nominate']
