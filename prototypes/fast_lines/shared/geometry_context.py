@@ -34,6 +34,7 @@ def correct_geometry(gray, pm, original_items, *, retained_source_indices=None,
     working = [dict(original_items[i], source_ids=[int(i)]) for i in retained]
     positions = {source: i for i, source in enumerate(retained)}
     decisions, changes = [], []
+    explicit = None
     t = perf_counter()
     if geometry_scout['trigger'] and retained:
         explicit = bands(pm, original_items, (gray.shape[1], gray.shape[0]), 4)
@@ -87,6 +88,7 @@ def correct_geometry(gray, pm, original_items, *, retained_source_indices=None,
             decisions.append(dict(line=source, decision='native geometry', retention=audit))
     geometry_s = perf_counter() - t
     return dict(items=working, geometry_changes=changes, geometry_decisions=decisions,
+        map_bands=explicit,
         retained_source_indices=retained, witness=geometry_scout, rule_witness=rule_witness,
         scout_s=scout_s, geometry_s=geometry_s, added_s=perf_counter()-start,
         reused=dict(rule_scout=provided_rule, geometry_scout=provided_geometry),
