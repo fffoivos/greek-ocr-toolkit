@@ -6,6 +6,13 @@ separators, then a type-grid scout, conditional original-pixel confirmation,
 regional table evidence, reflected-glyph veto and a local Paddle rerun. It adds
 lines only. Guide and font-property censuses are separate on-demand features.
 
+Round4 continuation: `shared.type_context.recover` composes with current B/A
+items, optional precomputed evidence, stable grid quadrilaterals and excluded
+regions, without repeating Q8. `shared.type_extended.run` is a separate
+experimental Q8+C pipeline: sixteen inspected additions on fourteen pages,
+including two new drop-cap rows. It is not the stack's frozen fifteen-addition
+pipeline. Full receipts: `out/features_type/round4-README.md` and `round4.html`.
+
 Use the repository's specified Python from the worktree root, with
 `PYTHONDONTWRITEBYTECODE=1`. Commands are foreground and single-threaded OpenCV.
 
@@ -54,3 +61,33 @@ On 3229 p4 source24, contact size40.4px disagrees with neighbouring21–23px
 print. See output `cooperation/body-scale-00.jpg`; do not automatically borrow
 these heights without independent evidence. The final recovery does not use
 this full-line height census.
+
+## Round4 component work
+
+- `rows4`: native,24/body and8/body component/row assignment and ink-mass paths.
+  V1 mixed contacts from neighboring rows; V2 pairs contact populations; V3
+  excludes clipped neighbors.3229source24 now abstains, but Arabic17/26/31 remain
+  falsely clear. No semantic baseline or reliable joined-script classifier.
+- `identity4`: physical glyph masks and alternate native64/R124/R2spatial
+  witnesses within seven pages and across four supplied pages of one book.
+  Physical dedup fixes overlapping-localization self matches. Simple marginals
+  confused theta/slash; spatial occupancy/counter witnesses reduce that failure.
+  Font identity remains unknown, and native extraction dominates cost.
+- `extents4`: seven-cycle leader-dot/table-boundary work, native/20h/8h.
+  V6 protects complete922e and stops above4b80prose, but63c4 remains incomplete.
+  Triggered4959 exposes false prose protection. `table_dots7` renders filled
+  interiors/counters; it still fails and is not a runtime replacement.
+- `edges4`: one-pitch continuations and uncertain interior phase intervals.
+  All195 pages have native/R1/R2,389slot comparisons. Ghosts and an ornament
+  also satisfy body-grid evidence; independent ownership and regional inference
+  remain essential. No font/row census is paid on the clean runtime path.
+- `extended4`: three fresh195-page runs,585 exact reproductions; original
+  Q8+C items preserved, only two reviewed additions. `validate4` checks29,549
+  invariants and records page/line/slot disagreements. `measure4` separately
+  times complete on-demand censuses, including extraction. `publish4` adds the
+  round4 tables/index without rewriting round3 receipts.
+
+Final reproduction commands are in the output README. Each feature runner uses
+`slow` then `fast`; inspect original-pixel renderings before accepting fast work.
+`reuse_round4.json` attributes all new B snapshot dependencies. The complete
+report is `docs/research/FAST_LINES_FEATURES_C.md`.

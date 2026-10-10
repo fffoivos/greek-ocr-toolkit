@@ -82,6 +82,64 @@ class TypeFeatureTests(unittest.TestCase):
         from ..shared.type_book import summarize
         r=summarize([dict(page='a',width=100,lines=[dict(xheight=20,uncertain=True)])])['pages'][0]
         self.assertEqual(r['support'],0);self.assertIsNone(r['relative_to_other_pages'])
+    def test_stack_skips_both_separators(self):
+        from ..shared.type_context import recover
+        g,it=page(missing=-1)
+        with patch('prototypes.fast_lines.shared.type_recovery.separators',side_effect=AssertionError('duplicate separator')):
+            r=recover(g,it,None)
+        self.assertEqual(r['items'],it);self.assertIsNone(r['separator'])
+    def test_rejected_ink_never_recovered(self):
+        from ..shared.type_context import recover
+        g,it=page()
+        class NoDetector:
+            def infer(self,*a,**kw):raise AssertionError('rejected region inferred')
+        r=recover(g,it,NoDetector(),excluded_regions=[[30,130,470,160]])
+        self.assertEqual(r['added'],[]);self.assertIn('previously rejected',r['decisions'][0]['reason'])
+    def test_ribbon_grid_view_preserves_actual_polygons(self):
+        from ..shared.type_context import grid_view
+        q=dict(polygon=[[0,20],[20,18],[40,20],[40,30],[20,28],[0,30]])
+        before=copy.deepcopy(q);view=grid_view([q])
+        self.assertEqual(q,before);self.assertEqual(len(view[0]['polygon']),4)
+    def test_exclusion_uses_concave_polygon(self):
+        from ..shared.type_context import overlaps_exclusion
+        region=dict(polygon=[[0,0],[20,0],[20,5],[5,5],[5,20],[0,20]])
+        self.assertFalse(overlaps_exclusion(rect([10,10,18,18]),[region]))
+        self.assertTrue(overlaps_exclusion(rect([2,10,4,18]),[region]))
+    def test_rows_do_not_average_adjacent_bodies(self):
+        from ..shared.type_rows import render
+        g,it=page(missing=-1)
+        q=dict(polygon=rect([35,65,465,120]))
+        r=render(g,q,version=3)
+        self.assertTrue(r['ambiguous'] or r['body_height']<25)
+        self.assertIsNone(r['baseline'])
+    def test_native_shape_locations_are_deduplicated(self):
+        from ..shared.type_identity import extract
+        g,it=page(missing=-1);one,_=extract(g,it[:1],version=2);two,_=extract(g,it[:1]*2,version=2)
+        self.assertEqual(len(one),len(two));self.assertTrue(all(z['owners']==[0,1] for z in two))
+    def test_grid_edges_do_not_reinterpret_regular_interior(self):
+        from ..shared.type_grid_edges import candidates
+        from ..shared.type_lattice import blocks
+        g,it=page();r=candidates(blocks(it,(500,300)),it,(500,300),version=2)
+        self.assertFalse(any(s['edge']==0 for s in r))
+    def test_ornament_negative_does_not_certify_recovery(self):
+        from ..shared.type_extended import recover
+        g,it=page(ink=False)
+        class NoDetector:
+            def infer(self,*a,**kw):raise AssertionError('blank slot inferred')
+        r=recover(g,it,NoDetector());self.assertEqual(r['added'],[])
+    def test_terminal_dots_protect_but_accents_do_not(self):
+        from ..shared.type_table_extent import analyze
+        g=np.full((280,500),255,np.uint8);it=[]
+        for y in [50,90,130,170]:
+            for x in range(40,210,18):cv2.rectangle(g,(x,y-10),(x+8,y+8),0,-1)
+            for x in range(270,420,30):cv2.circle(g,(x,y+5),3,0,-1)
+            it.append(dict(polygon=rect([30,y-18,440,y+18])))
+        self.assertTrue(analyze(g,it,version=6)['regions'])
+        g2=np.full_like(g,255)
+        for y in [50,90,130,170]:
+            for x in range(40,430,18):
+                cv2.rectangle(g2,(x,y-10),(x+8,y+8),0,-1);cv2.circle(g2,(x+3,y-14),2,0,-1)
+        self.assertEqual(analyze(g2,it,version=6)['regions'],[])
     def test_export_omits_discounted_and_keeps_null_baseline(self):
         r=detector_record(dict(page='fixture',image_size=[20,20]),[dict(polygon=rect([0,0,10,10]),baseline=None,score=.9),dict(polygon=rect([1,1,3,3]),discounted=True)],.1)
         self.assertEqual(len(r['items']),1);self.assertIsNone(r['items'][0]['baseline']);self.assertEqual(r['unit'],'line')

@@ -29,11 +29,35 @@ def ink_ownership(gray,polygon,items,h):
     return float(old[support].mean()) if support.any() else 1.
 
 
-def run(gray,items,detector,*,version=1):
-    start=perf_counter();sep=separators(gray,items);current=list(sep['items']);after_sep=perf_counter()
-    evidence=lattice(gray,current,route='heuristic',version=3)
+def run(gray,items,detector,*,version=1,skip_initial_separator=False,
+        final_separators=True,grid_items=None,lattice_evidence=None,excluded_regions=()):
+    """Recover using current ownership and an optional distinct grid view.
+
+    `grid_items` has one quadrilateral per current item in exactly the same order.
+    It estimates pitch only; actual `items` own ink, including curved ribbons.
+    `excluded_regions` are rejected polygons/items (or [x0,y0,x1,y1] rectangles).
+    Precomputed lattice must describe this same grid/current pair; its cost is
+    caller-owned. The stack can skip both Q8 calls and apply its shared separator.
+    """
+    start=perf_counter();sep=None if skip_initial_separator else separators(gray,items)
+    current=list(items if sep is None else sep['items']);after_sep=perf_counter()
+    if grid_items is not None and len(grid_items)!=len(current):
+        raise ValueError('grid_items must correspond one-to-one to current items')
+    if lattice_evidence is None and grid_items is not None:
+        from .type_lattice import blocks,gaps
+        bb=blocks(grid_items,(gray.shape[1],gray.shape[0]))
+        evidence=dict(blocks=bb,slots=[inspect_slot(gray,s,current,version=3) for s in gaps(bb,current)],raw_rows=[],route='heuristic',grid_view=True)
+    else:evidence=lattice_evidence if lattice_evidence is not None else lattice(gray,current,route='heuristic',version=3)
+    from .type_context import excluded,overlaps_exclusion
+    rejected=excluded(excluded_regions)
     scout_end=perf_counter();runnable=[(i,s) for i,s in enumerate(evidence['slots']) if s['supported'] and s['owned_fraction']<.25]
     decisions=[];calls=[];added=[];table=None;layers=None;dense_checks=[]
+    permitted=[]
+    for idx,s in runnable:
+        if any(point_ownership(s['body_centres'],rejected)):
+            decisions.append(dict(slot=idx,reason='previously rejected region owns candidate ink'))
+        else:permitted.append((idx,s))
+    runnable=permitted
     if version>=4:
         confirmed=[]
         for idx,s in runnable:
@@ -66,7 +90,8 @@ def run(gray,items,detector,*,version=1):
             inside=np.asarray(point_ownership(seeds,[dict(polygon=p.tolist())]))
             if inside.sum()<5 or inside.mean()<.6:continue
             why='accept';owned=ink_ownership(gray,p,current+added,h)
-            if owned>=.25:why='existing ink ownership'
+            if overlaps_exclusion(p,rejected):why='overlaps previously rejected region'
+            elif owned>=.25:why='existing ink ownership'
             elif p[:,0].min()<a+.15*h or p[:,0].max()>b-.15*h:why='crop edge truncation'
             else:
                 # A regional line may not collect a second, separately boxed row.
@@ -78,14 +103,16 @@ def run(gray,items,detector,*,version=1):
             if why=='accept':
                 q=dict(q,polygon=p.tolist(),baseline=None,provenance='type pitch gap + measured unowned body ink + regional Paddle',type_slot=idx)
                 if version>=2:q=snap_components(gray,q,h,current+added)
+                if overlaps_exclusion(q['polygon'],rejected):
+                    decisions.append(dict(slot=idx,reason='completion overlaps previously rejected region'));continue
                 pieces,barriers=protect(gray,q,h) if version>=3 else ([q],[])
                 decisions.extend(dict(r,slot=idx,stage='regional separator protection') for r in barriers)
                 added.extend(pieces);confirmed=bool(pieces)
         if not confirmed:decisions.append(dict(slot=idx,reason='no safe regional confirmation'))
     # Run Q8 on the combined items only when something was added. Its own grid
     # and bilateral clear-paper guards still apply to a new crossing polygon.
-    final=separators(gray,current+added) if added else None
+    final=separators(gray,current+added) if added and final_separators else None
     end=perf_counter()
-    return dict(items=final['items'] if final else current,added=added,lattice=evidence,tables=table,ownership=layers,dense_checks=dense_checks,calls=calls,decisions=decisions,
+    return dict(items=final['items'] if final else current+added,added=added,lattice=evidence,tables=table,ownership=layers,dense_checks=dense_checks,calls=calls,decisions=decisions,
                 separator=sep,final_separator=final,type_s=end-after_sep,scout_s=scout_end-after_sep,correction_s=end-scout_end,
                 added_s=end-start,version=version)
