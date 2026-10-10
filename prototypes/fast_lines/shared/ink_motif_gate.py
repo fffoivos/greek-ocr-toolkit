@@ -6,6 +6,7 @@ from .geometry import quantize,line_axis,roi
 from .contracts import bbox
 from .image_evidence import components
 from .ink_photometry import percentiles8
+from .ink_recurrence import render as recurrence
 
 
 def coarse_scout(gray,item,height):
@@ -30,7 +31,7 @@ def scout(gray,item,height,*,samples=16):
     return dict(occupancy=float(occupied.mean()),width_h=raw.shape[1]/(height*s),large_ink=float(large/max(ink.sum(),1))),raw,s
 
 
-def inspect(gray,item,height,diagnostic=False,*,scouted=None,samples=16):
+def inspect(gray,item,height,diagnostic=False,*,scouted=None,samples=16,template_specs=None):
     if not diagnostic and not (coarse_scout(gray,item,height) if scouted is None else scouted):
         return dict(drop=False,reason='coarse connected-band scout negative',coverage=0.,matches=[]),None
     witness,raw,s=scout(gray,item,height,samples=samples)
@@ -40,11 +41,15 @@ def inspect(gray,item,height,diagnostic=False,*,scouted=None,samples=16):
     # Whole-strip autocorrelation cannot nominate short fragments whose repeats
     # lie in the surrounding frame. This test includes that context.
     reduced=None
+    recurrent=None
     if not diagnostic and samples==16:
+        recurrent=recurrence(gray,item,height,route='heuristic')
+        if not recurrent['nominate']:
+            return dict(witness,drop=False,reason='local four-copy recurrence absent',coverage=0.,matches=[],recurrence=recurrent),raw
         reduced,_=inspect(gray,item,height,diagnostic=True,samples=8)
         if reduced['coverage']<.125 or reduced['span']<.5:
             return dict(witness,drop=False,reason='reduced spatial repetition absent',coverage=0.,matches=[],
-                        reduced=dict(coverage=reduced['coverage'],span=reduced['span'])),raw
+                        reduced=dict(coverage=reduced['coverage'],span=reduced['span']),recurrence=recurrent),raw
     b=bbox(item);axis=line_axis(item);left=max(0,b[0]-6*height);right=min(gray.shape[1]-1,b[2]+6*height)
     half=(b[3]-b[1])/2
     expanded=dict(polygon=[[left,axis[0]+axis[1]*left-half],[right,axis[0]+axis[1]*right-half],
@@ -53,7 +58,7 @@ def inspect(gray,item,height,diagnostic=False,*,scouted=None,samples=16):
     paper,core=map(float,percentiles8(context,[90,10]));ink=np.clip((paper-context.astype(np.float32))/max(paper-core,1),0,1)
     h=height*s
     target0=int(round((b[0]-left)*s));target1=min(ink.shape[1],target0+raw.shape[1])
-    candidates=[]
+    candidates=[];specs=[]
     for bh in (.5,1.,1.5):
       th=min(ink.shape[0],quantize(bh*h))
       for top in np.unique(np.linspace(0,ink.shape[0]-th,4).astype(int)):
@@ -61,6 +66,9 @@ def inspect(gray,item,height,diagnostic=False,*,scouted=None,samples=16):
         tw=quantize(bw*h)
         if ink.shape[1]<4*tw:continue
         for bx in np.unique(np.linspace(0,ink.shape[1]-tw,5).astype(int)):
+            specs.append((bx,top,tw,th))
+    if template_specs is not None:specs=template_specs
+    for bx,top,tw,th in specs:
             template=ink[top:top+th,bx:bx+tw]
             if template.std()<.15:continue
             response=cv2.matchTemplate(ink,template,cv2.TM_CCOEFF_NORMED)
@@ -111,4 +119,5 @@ def inspect(gray,item,height,diagnostic=False,*,scouted=None,samples=16):
     best['drop']=best['remaining_glyphs']<3 and best['span']>.65 and (best['coverage']>.68 or (best['coverage']>.45 and bool(large)))
     best['reason']='continuous repeated non-word band' if best['drop'] else 'repeat coverage insufficient'
     if reduced is not None:best['reduced']=dict(coverage=reduced['coverage'],span=reduced['span'])
+    if recurrent is not None:best['recurrence']=recurrent
     return best,context

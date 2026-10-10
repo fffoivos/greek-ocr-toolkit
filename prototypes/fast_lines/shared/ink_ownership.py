@@ -12,7 +12,7 @@ from .geometry import height_proxy
 from .ink_photometry import tone,tones as sample_tones,glyphs,match_glyphs
 
 
-def analyze(gray, items, regions=None, *, detail=False, route='explicit'):
+def analyze(gray, items, regions=None, *, detail=False, route='explicit',height=None):
     """Assess full-page rectangles; default existing Paddle envelopes.
 
     Return regions with ownership front/back/unknown, reasons, spatial witnesses,
@@ -22,7 +22,8 @@ def analyze(gray, items, regions=None, *, detail=False, route='explicit'):
     """
     if route not in ('explicit','sampled','dense'):
         raise ValueError('route must be explicit, sampled or dense')
-    t=perf_counter();height=height_proxy(items,(gray.shape[1],gray.shape[0]))
+    t=perf_counter();height=height_proxy(items,(gray.shape[1],gray.shape[0])) if height is None else float(height)
+    if not np.isfinite(height) or height<=0:raise ValueError('height must be a positive finite bbox-height proxy')
     boxes=[bbox(q) for q in items]
     sampled=np.array([sample_tones(gray,b) for b in boxes]).reshape(-1,2)
     tones=sampled[:,1]
@@ -73,4 +74,4 @@ def analyze(gray, items, regions=None, *, detail=False, route='explicit'):
             r.update(ownership='back',reason='weak layer corroborated by nearby independent mirrored glyph rows',supporters=supporters)
     return dict(version='B4',route=route,regions=rows,suppress_indices=[i for i,r in enumerate(rows) if r['ownership']=='back'],
                 anchors=anchors,atlas_glyphs=len(atlas),suspects=suspects,height=height,
-                scout_s=scout_s,seconds=perf_counter()-t)
+                image_size=[gray.shape[1],gray.shape[0]],scout_s=scout_s,seconds=perf_counter()-t)
