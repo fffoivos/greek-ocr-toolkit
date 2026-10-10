@@ -122,3 +122,26 @@ Evidence: [environment](q4-speed-evidence/environment.json), [comparison summary
 ## Commit handoff
 
 Git staging is blocked by the sandbox when creating the worktree's `index.lock` (`Operation not permitted`). Following `.astra/QUEUE_COMMON.md`, `.astra/Q4.patch` contains the complete change and `.astra/commit-Q4.sh` checks the base revision and file hashes, then stages and commits the existing working-tree files with the required trailers. The patch was checked and applied to fresh Q3b files in a temporary directory; every resulting file matches the working tree. `.astra/Q4.patch.validation.json` records the patch hash and complete file manifest. No commit or push is claimed from this sandbox.
+
+## Independent review (Sol, gpt-6.1-sol xhigh) and the coordinator's disposition
+
+- **Cycle 1: HOLD.** One BLOCKER, caused by the harness: the read-only sandbox refused all writes, so the timing rerun
+  and the test suite could not run. On its read-only checks it found 15/15 fresh comparisons exact and 13,680
+  fingerprint comparisons with 0 differences. See `q4-sol-review/CYCLE1_REVIEW.md`.
+- **Cycle 2: HOLD** with 0 BLOCKERs and 1 HIGH. See `q4-sol-review/CYCLE2_REVIEW.md`.
+  - **Behaviour certified:** fresh archives of both commits, run on 15 pages × 16 option combinations, show 0 discrete
+    differences, 0 px coordinate difference and 0 statistics difference.
+  - **Tests:** the full suite gives 2,336 passed, 0 failed, 0 errors, 16 skipped.
+  - **Code:** no forbidden change was found.
+  - **HIGH, timing reproduction:** the median speed-up reproduced, 2.04× fresh against 2.09× published on the same 10
+    pages, but 5/10 per-page ratios drifted by more than 20%. The machine was not idle (load average about 4 on 10
+    CPUs; a concurrent detector-comparison job was started by the coordinator).
+- **The coordinator's disposition,** without a third cycle:
+  - Q4 is accepted as behaviour-identical, with a median speed-up of about 2.0–2.2×.
+  - Per-page and tail timings are noted as not reproducible under uncontrolled load. Re-time on an idle machine before
+    quoting per-page numbers.
+  - The 3× target remains unmet, as the report already says.
+- **LOW findings fixed:**
+  - the comparator now requires all 16 option combinations per page and non-empty mode payloads. Tested: identical
+    real receipts give exit code 0; emptied receipts give exit code 1;
+  - the different baseline runner version is noted above.

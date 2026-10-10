@@ -273,6 +273,12 @@ def main():
             for field in ('page_key','source_sha256','layout_sha256'):
                 if a[field] != b[field]: failures.append(dict(page=a['page_key'],field=field))
             if a['modes'].keys() != b['modes'].keys(): failures.append(dict(page=a['page_key'],field='modes'))
+            # Coverage is part of equality: every page must carry all 16 option combinations, each with payload families
+            # (an empty receipt on both sides must not compare as equal; Q4 review cycles 1-2, LOW).
+            for side, report in (('left', a), ('right', b)):
+                if len(report['modes']) != 16: failures.append(dict(page=report['page_key'],side=side,field='mode_count',count=len(report['modes'])))
+                for mode, values in report['modes'].items():
+                    if not values: failures.append(dict(page=report['page_key'],side=side,mode=mode,field='empty_mode'))
             for mode, values in a['modes'].items():
                 if values.keys() != b['modes'].get(mode,{}).keys(): failures.append(dict(page=a['page_key'],mode=mode,field='families'))
                 for family,value in values.items():
