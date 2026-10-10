@@ -78,8 +78,9 @@ def _table_structure(page, regions):
                 sources[(str(tid),bounds)]=f'{tid}:component-row-{ri}'
                 local_boxes.append(bounds)
         boundaries.extend(_table_gutters(p,a,t,str(tid),local_boxes))
-        ink=binarise(p.gray,window=max(BINARIZE_MIN_PIXELS,round(BINARIZE_WINDOW_PAGE*min(p.gray.shape)))|1)
-        mask=rule_ink(ink,p.xheight)
+        ink=(p.original_ink if p.original_ink is not None else
+             binarise(p.gray,window=max(BINARIZE_MIN_PIXELS,round(BINARIZE_WINDOW_PAGE*min(p.gray.shape)))|1))
+        mask=p.original_rules if p.original_rules is not None else rule_ink(ink,p.xheight)
         paths=cv2.HoughLinesP(mask.astype('uint8'),1,np.pi/HOUGH_HALF_TURN_STEPS,
             threshold=max(2,round(RULE_VOTE_LENGTH_XH*p.xheight)), minLineLength=RULE_MIN_LENGTH_XH*p.xheight,maxLineGap=RULE_MAX_GAP_XH*p.xheight)
         kept=[]
@@ -154,7 +155,7 @@ def _attach_structure(result, pieces=(), *, boundaries=()):
     cells=[p.to_record(i,(width,height),(width,height)) for i,p in enumerate(pieces)]
     result.structure=build_structure(lines,cells,(width,height),gutters=result.pixels.gutters,
                                     rules=result.pixels.column_boundaries,boundaries=boundaries,
-                                    page=result.pixels.gray)
+                                    page=result.pixels.gray, _original_ink=result.pixels.original_ink)
     for obj,record in zip(result.lines,lines):
         obj.address={k:record[k] for k in ADDRESS}
         obj.neighbours.update({k:record['neighbours'][k] for k in ('left','right')})
@@ -190,8 +191,21 @@ def _crosses(line, boundary):
         & (ys < np.interp(xs, sample, line['bottom']))))
 
 
+def _copy_line(record):
+    """Deep-copy the record, copying dense scalar sample lists in one operation."""
+    copied = deepcopy({k: v for k, v in record.items() if k not in (*CURVES, 'neighbours')})
+    if 'neighbours' in record:
+        copied['neighbours'] = {k: v.copy() if k in ('above', 'below') and isinstance(v, (list, np.ndarray)) else deepcopy(v)
+                                for k, v in record['neighbours'].items()}
+    for key in CURVES:
+        if key in record:
+            values = record[key]
+            copied[key] = values.copy() if isinstance(values, (list, np.ndarray)) else deepcopy(values)
+    return copied
+
+
 def _combine(ordered):
-    joined=deepcopy(ordered[0])
+    joined=_copy_line(ordered[0])
     if len(ordered)==1:
         return joined
     a,b=ordered[0]['x0'],max(p['x1'] for p in ordered)
@@ -304,7 +318,8 @@ def _fold(lines, width, height, boundaries):
 def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[int], *,
                     gutters: Sequence = (), rules: Sequence[dict] = (),
                     boundaries: Sequence[dict] = (), fold: dict | bool | None = None,
-                    page: Image.Image | np.ndarray | None = None) -> dict:
+                    page: Image.Image | np.ndarray | None = None,
+                    _original_ink: np.ndarray | None = None) -> dict:
     """Add addresses to line/cell records in place without changing geometry.
 
     Gutters are x0,y0,x1,y1 rectangles; rules use centre+slope*(y-height/2).
@@ -339,7 +354,7 @@ def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[
     rejected = []
     if page is not None:
         from .boundaries import BoundaryEvidence
-        validator = BoundaryEvidence(page, lines)
+        validator = BoundaryEvidence(page, lines, original_ink=_original_ink)
         if validator.ink.shape != (height,width):
             raise ValueError('page pixels must match image_size')
         for i,b in enumerate(stops):
@@ -519,7 +534,7 @@ def join_pieces(pieces: Sequence[dict], *, structure: dict) -> dict:
     joined=_combine(ordered)
     if any(_crosses(joined,b) for b in structure['boundaries']):
         raise ValueError('joined geometry crosses a boundary')
-    joined['pieces']=deepcopy(ordered)
+    joined['pieces']=[_copy_line(p) for p in ordered]
     return joined
 
 
@@ -534,7 +549,7 @@ def delivery_records(lines: Sequence[dict], *, structure: dict,
             continue
         records=[lines[i] for i in row['line_indices']]
         if granularity=='pieces' or (granularity=='default' and row['table_id'] is not None):
-            result.extend(deepcopy(records))
+            result.extend(_copy_line(p) for p in records)
         else:
             result.append(join_pieces(records,structure=structure))
     return result
@@ -588,7 +603,7 @@ def joining_result(lines: Sequence[dict], *, structure: dict, pieces: Sequence[d
         else:
             row['joinable'] = True
         if granularity == 'pieces' or (granularity == 'default' and row['table_id'] is not None):
-            delivered.extend(deepcopy(members))
+            delivered.extend(_copy_line(p) for p in members)
         elif row['joinable']:
             delivered.append(merged)
     return dict(schema_version=1, rows=delivered, blocked_rows=blocked, complete=not blocked,

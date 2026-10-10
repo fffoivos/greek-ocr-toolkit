@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
@@ -131,6 +132,8 @@ class PixelPage:
     xheight: float
     nontext_boxes: list = field(default_factory=list)
     column_boundaries: list = field(default_factory=list)
+    original_ink: NDArray | None = field(default=None, repr=False)
+    original_rules: NDArray | None = field(default=None, repr=False)
 
 
 RULE_MIN_LENGTH_XH = 3  # x-heights: reject individual short stems from the opened rule mask.
@@ -162,6 +165,13 @@ ZONE_SEARCH_END_XH = 22  # x-heights: cap regional seed height without prescribi
 REGION_RULE_SUPPORT_XH = 3  # x-heights: sustained local barrier ink must stop a seed region.
 
 def _runs(mask):
+    mask = np.asarray(mask)
+    if mask.dtype == np.bool_ and mask.ndim == 1:
+        padded = np.empty(len(mask)+2, bool)
+        padded[0] = padded[-1] = False
+        padded[1:-1] = mask
+        edges = np.flatnonzero(padded[1:] != padded[:-1])
+        return [(int(a), int(b)) for a, b in zip(edges[::2], edges[1::2])]
     edges = np.diff(np.r_[False, mask, False].astype(np.int8))
     return [(int(a), int(b)) for a, b in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1))]
 
@@ -190,6 +200,20 @@ def _records(gray, labels):
     return np.asarray(rows, float).reshape(-1, 7)
 
 
+def _rect_morphology(mask, shape, *, closing=False):
+    """The ndimage rectangular opening/closing with its exact even-size origins."""
+    kernel = np.ones(shape, np.uint8)
+    source = np.asarray(mask, dtype=np.uint8)
+    h, w = shape
+    def erode(value):
+        return cv2.erode(value, kernel, anchor=(w//2, h//2),
+                         borderType=cv2.BORDER_CONSTANT, borderValue=0)
+    def dilate(value):
+        return cv2.dilate(value, kernel, anchor=((w-1)//2, (h-1)//2),
+                          borderType=cv2.BORDER_CONSTANT, borderValue=0)
+    return (erode(dilate(source)) if closing else dilate(erode(source))).astype(bool)
+
+
 def _rule_mask(ink, xh):
     """Thin straight strokes only; close short breaks before testing length.
 
@@ -208,8 +232,8 @@ def _rule_mask(ink, xh):
         shift = np.rint(slope * (rows - h / 2)).astype(int)
         xx = cols + shift
         shear = small[rows, np.clip(xx, 0, w - 1)] & (xx >= 0) & (xx < w)
-        joined = ndi.binary_closing(shear, structure=np.ones((max(1, round(RULE_CLOSE_XH * unit)), 1)))
-        opened = ndi.binary_opening(joined, structure=np.ones((max(3, round(RULE_MIN_LENGTH_XH * unit)), 1)))
+        joined = _rect_morphology(shear, (max(1, round(RULE_CLOSE_XH * unit)), 1), closing=True)
+        opened = _rect_morphology(joined, (max(3, round(RULE_MIN_LENGTH_XH * unit)), 1))
         labels, _ = ndi.label(opened)
         thin = np.zeros_like(opened)
         for k, sl in enumerate(ndi.find_objects(labels), 1):
@@ -476,12 +500,12 @@ def prepare_pixels(page: Image.Image | NDArray[Any]) -> PixelPage:
     h, w = gray.shape
     if np.ptp(gray) < 1:
         z = np.zeros(gray.shape, bool)
-        return PixelPage(gray, z, z.astype(int), np.empty((0, 7)), z, [], [], MIN_XHEIGHT_PIXELS)
+        return PixelPage(gray, z, z.astype(int), np.empty((0, 7)), z, [], [], MIN_XHEIGHT_PIXELS, original_ink=z)
     ink = binarise(gray, window=max(BINARIZE_MIN_PIXELS, round(BINARIZE_WINDOW_PAGE * min(h, w))) | 1)
     labels, _ = ndi.label(ink, structure=EIGHT)
     cc = _records(gray, labels)
     if not len(cc):
-        return PixelPage(gray, ink, labels, cc, np.zeros_like(ink), [], [], MIN_XHEIGHT_PIXELS)
+        return PixelPage(gray, ink, labels, cc, np.zeros_like(ink), [], [], MIN_XHEIGHT_PIXELS, original_ink=ink)
     heights, widths = cc[:, 3] - cc[:, 1], cc[:, 2] - cc[:, 0]
     sel = ((heights >= BODY_MIN_HEIGHT_PAGE * h) & (heights <= BODY_MAX_HEIGHT_PAGE * h)
            & (widths >= BODY_MIN_WIDTH_PAGE * w) & (widths < BODY_MAX_WIDTH_PAGE * w))
@@ -540,8 +564,8 @@ def prepare_pixels(page: Image.Image | NDArray[Any]) -> PixelPage:
             # Engravings have texture throughout their framed height; rows of
             # text/table cells retain repeated low-ink interline valleys.
             component = original_labels[t:bot,a:b] == int(q[5])
-            long_vertical = ndi.binary_opening(component, structure=np.ones((max(3,round(RULE_SUPPORT_WINDOW_XH*xh)),1)))
-            long_horizontal = ndi.binary_opening(component, structure=np.ones((1,max(3,round(RULE_SUPPORT_WINDOW_XH*xh)))))
+            long_vertical = _rect_morphology(component, (max(3,round(RULE_SUPPORT_WINDOW_XH*xh)),1))
+            long_horizontal = _rect_morphology(component, (1,max(3,round(RULE_SUPPORT_WINDOW_XH*xh))))
             straight_fraction = np.count_nonzero(long_vertical|long_horizontal)/max(1,component.sum())
             illustration |= profile.mean()>GRAPHIC_PROFILE_MIN_FILL and straight_fraction<GRAPHIC_MAX_STRAIGHT_SHARE
         # A frame around most of a page or facing leaf is not an illustration
@@ -581,7 +605,7 @@ def prepare_pixels(page: Image.Image | NDArray[Any]) -> PixelPage:
     evidence = strong & rule_ids[labels]
     # Binding shadows can have a straight edge, but not a thin stroke. Test
     # the complete horizontal ink run before trusting its edge as a rule.
-    broad = ndi.binary_opening(evidence, structure=np.ones((1,max(2,round(RULE_BROAD_INK_WIDTH_XH*xh)))))
+    broad = _rect_morphology(evidence, (1,max(2,round(RULE_BROAD_INK_WIDTH_XH*xh))))
     evidence &= ~broad
     for a,t,b,bot in nontext:
         evidence[t:bot,a:b] = False
@@ -601,7 +625,7 @@ def prepare_pixels(page: Image.Image | NDArray[Any]) -> PixelPage:
     labels, _ = ndi.label(clean, structure=EIGHT)
     cc = _records(gray, labels)
     if not len(cc):
-        return PixelPage(gray, clean, labels, cc, barriers, [], [], xh, nontext, boundaries)
+        return PixelPage(gray, clean, labels, cc, barriers, [], [], xh, nontext, boundaries, original_ink=ink)
 
     # Coarse horizontal zones, snapped to row valleys. Within each, rules and
     # persistent whitespace establish columns. A zone may contain many lines.
@@ -657,4 +681,4 @@ def prepare_pixels(page: Image.Image | NDArray[Any]) -> PixelPage:
                 if not len(xs) or len(xs) < ROW_MIN_AREA_XH2 * xh * xh:
                     continue
                 boxes.append((a + int(xs.min()), y0 + t, a + int(xs.max()) + 1, y0 + bot))
-    return PixelPage(gray, clean, labels, cc, barriers, gutters, boxes, xh, nontext, boundaries)
+    return PixelPage(gray, clean, labels, cc, barriers, gutters, boxes, xh, nontext, boundaries, original_ink=ink)

@@ -18,7 +18,7 @@ from scipy.spatial import cKDTree
 
 from ..glyphs.baseline import text_lines
 from .font import fit_guides
-from ..glyphs.components import _xheight, line_glyphs
+from ..glyphs.components import _xheight, _line_geometry, _stable_peel_ink
 from .pixels import PixelPage, _gray, _runs, prepare_pixels
 
 __all__ = ['LineSegment', 'PageSegmentation', 'page_line_segments', 'segment_page', 'extract_line_image']
@@ -250,6 +250,8 @@ def _blocked(p: PixelPage, x0, x1, base, xh):
 def _discover(p: PixelPage):
     """Peel all main bands in each rough region using the existing crop tools."""
     cc = p.components
+    component_ids = cc[:, 5].astype(int)
+    component_cache = {}
     h, w = p.gray.shape
     models = []
     for si, (a, t, b, bot) in enumerate(p.boxes):
@@ -263,7 +265,7 @@ def _discover(p: PixelPage):
         # new lines when the main text has been removed. Faint ink remains in
         # the page component map and can attach to the established paths later.
         ink_level = float(np.percentile(useful[:, 6], 35)) if len(useful) else paper
-        strong_ids = cc[cc[:, 6] <= paper - SEED_MIN_CONTRAST_SHARE * (paper - ink_level), 5]
+        strong_ids = component_ids[cc[:, 6] <= paper - SEED_MIN_CONTRAST_SHARE * (paper - ink_level)]
         mask = p.ink[t0:t1, a:b] & np.isin(p.labels[t0:t1, a:b], strong_ids)
         sub = np.where(mask, p.gray[t0:t1, a:b], paper)
         xh = p.xheight
@@ -290,20 +292,22 @@ def _discover(p: PixelPage):
                                    support=np.column_stack(((q[:, 0] + q[:, 2]) / 2, q[:, 3])),
                                    cy=base - xh / 2, column=0))
             continue
+        stable_ink = _stable_peel_ink(sub, paper)
         for _ in range(max(2, int((t1 - t0) / (SEED_MIN_PITCH_XH * xh)) + 1)):
             if (sub < paper - 1).sum() < SEED_MIN_REMAINING_AREA_XH2 * xh * xh:
                 break
             profile = ndi.uniform_filter1d((sub < paper - 1).sum(axis=1).astype(float), max(1, round(SEED_PROFILE_WINDOW_XH * xh)))
             peak = float(np.argmax(profile)) + SEED_PEAK_OFFSET_XH * xh
-            g = line_glyphs(sub, xh_prior=xh, focus=(peak - SEED_FOCUS_RADIUS_XH * xh, peak + SEED_FOCUS_RADIUS_XH * xh))
-            guides = text_lines(g)
+            g = _line_geometry(sub, xh_prior=xh, focus=(peak - SEED_FOCUS_RADIUS_XH * xh, peak + SEED_FOCUS_RADIUS_XH * xh),
+                            component_cache=component_cache, ink=sub < paper if stable_ink else None)
+            guides = text_lines(g, max_per_side=0)
             body = [c for c in g.components if c.role == 'letter' and c.h >= SEED_BODY_HEIGHT_XH * xh
                     and c.area >= BODY_AREA_XH2 * xh * xh and c.w <= SEED_BODY_WIDTH_XH * xh]
             if not body:
                 break
             own = []
             for c in g.components:
-                base = g.band.bottom[int(np.clip(c.cx, 0, g.width - 1))]
+                base = g.band.bottom[min(max(int(c.cx), 0), g.width - 1)]
                 near = abs((c.y0 + c.y1) / 2 - (base - xh / 2))
                 if c.h <= SEED_COMPONENT_HEIGHT_XH * xh and c.w <= SEED_COMPONENT_WIDTH_XH * xh and near < (SEED_BODY_DISTANCE_XH if c.h >= SEED_MARK_HEIGHT_XH * xh else SEED_MARK_DISTANCE_XH) * xh:
                     own.append(c)
@@ -317,7 +321,7 @@ def _discover(p: PixelPage):
                 sub[sl][g.labels[sl] == c.index] = paper
             if not body_ids:
                 break
-            q = cc[np.isin(cc[:, 5], list(body_ids))]
+            q = cc[np.isin(component_ids, list(body_ids))]
             cy = float(np.median((q[:, 1] + q[:, 3]) / 2))
             # Expanded windows see neighbours too. Only seed-owned bands enter
             # here; all surviving neighbouring pixels remain for their seed.
@@ -481,6 +485,12 @@ def _pool_geometry(models):
     reliable = [m for m in models if len(m['support']) >= 8 and m['b'] - m['a'] >= RELIABLE_SEED_WIDTH_XH * m['xh'] and not m.get('faint', False)]
     slopes = [np.median(np.diff(m['base'])) for m in reliable]
     page_slope = float(np.median(slopes)) if slopes else 0.
+    contacts = {}
+    for n in reliable:
+        support = n['support']
+        ok = abs(support[:, 1] - _at(n, support[:, 0])) < POOLED_CONTACT_SLACK_XH * n['xh']
+        contacts[id(n)] = support[ok]
+    ridge = np.diag([POOLED_INTERCEPT_RIDGE, POOLED_SLOPE_RIDGE, POOLED_CURVATURE_RIDGE, POOLED_CURVATURE_RIDGE])
     new = []
     for m in models:
         grid = np.arange(m['a'], m['b'])
@@ -493,25 +503,24 @@ def _pool_geometry(models):
             # Only contacts agreed with by the crop fit enter this shared fit.
             px, py, pypos = [], [], []
             for n in nearby:
-                s = n['support']
-                ok = abs(s[:, 1] - _at(n, s[:, 0])) < POOLED_CONTACT_SLACK_XH * n['xh']
-                px.extend(s[ok, 0] - m['a'])
-                py.extend(s[ok, 1] - float(_at(n, anchor)))
-                pypos.extend(np.full(ok.sum(), (n['cy'] - m['cy']) / m['xh']))
+                s = contacts[id(n)]
+                px.extend(s[:, 0] - m['a'])
+                py.extend(s[:, 1] - float(_at(n, anchor)))
+                pypos.extend(np.full(len(s), (n['cy'] - m['cy']) / m['xh']))
             if len(px) >= 4:
                 # A local linear surface in page y allows gradual skew drift.
                 # It still pools the letters; it does not fit sparse cells.
                 px, py, pypos = np.array(px), np.array(py), np.array(pypos)
                 knots = np.linspace(0, len(grid) - 1, max(2, int(len(grid) / m['xh']) + 1))
                 values = []
+                vertical_weight = np.exp(-GAUSSIAN_EXPONENT_FACTOR * (pypos / POOLED_VERTICAL_RADIUS_XH) ** 2)
                 for gx in knots:
                     dx = (px - gx) / m['xh']
-                    weight = np.clip(1 - (abs(dx) / POOLED_HORIZONTAL_RADIUS_XH) ** 3, 0, None) ** 3 * np.exp(-GAUSSIAN_EXPONENT_FACTOR * (pypos / POOLED_VERTICAL_RADIUS_XH) ** 2)
+                    weight = np.clip(1 - (abs(dx) / POOLED_HORIZONTAL_RADIUS_XH) ** 3, 0, None) ** 3 * vertical_weight
                     if (weight > POOLED_MIN_WEIGHT).sum() < 4:
                         near = np.argsort(abs(dx))[:8]
                         weight = np.zeros_like(px); weight[near] = 1
                     design = np.column_stack((np.ones_like(dx), dx, pypos, dx * pypos))
-                    ridge = np.diag([POOLED_INTERCEPT_RIDGE, POOLED_SLOPE_RIDGE, POOLED_CURVATURE_RIDGE, POOLED_CURVATURE_RIDGE])
                     coef = np.linalg.solve(design.T @ (design * weight[:, None]) + ridge,
                                            design.T @ (weight * py))
                     values.append(coef[0])
@@ -537,40 +546,52 @@ def _assign(p, models):
     paper = float(np.percentile(p.gray, 90))
     reference = float(np.percentile(p.components[:, 6], 25)) if len(p.components) else paper
     faint_level = paper-FAINT_CONTRAST_SHARE*(paper-reference)
-    for qi, q in enumerate(p.components):
-        a, t, b, bot, area = q[:5]
-        cx, cy = (a + b) / 2, (t + bot) / 2
-        best = None
-        for j, m in enumerate(models):
-            xh = m['xh']
-            if q[6] > faint_level and not m.get('faint', False):
-                continue
-            gap = max(m['a'] - b, a - m['b'], 0)
-            small = bot - t < ASSIGN_BODY_HEIGHT_XH * xh or area < ASSIGN_BODY_AREA_XH2 * xh * xh
-            if small and gap > xh:
-                continue
-            if gap > ASSIGN_HORIZONTAL_REACH_XH * xh or abs(cy - m['cy']) > ASSIGN_VERTICAL_REACH_XH * xh or bot - t > ASSIGN_MAX_HEIGHT_XH * xh or b - a > ASSIGN_MAX_WIDTH_XH * xh:
-                continue
-            base = float(_at(m, cx))
-            distance = abs(cy - (base - xh / 2))
-            if distance > ASSIGN_MAX_DISTANCE_XH * xh:
-                continue
-            # A body must actually enter the mean-to-baseline band. Small marks
-            # attach by proximity; they cannot invent a baseline of their own.
-            if bot - t >= ASSIGN_OVERLAP_BODY_HEIGHT_XH * xh and min(bot, base + ASSIGN_BAND_BOTTOM_XH * xh) - max(t, base - ASSIGN_BAND_TOP_XH * xh) < ASSIGN_MIN_BODY_OVERLAP_XH * xh:
-                continue
-            if _blocked(p, min(cx, np.clip(cx, m['a'], m['b'] - 1)),
-                                max(cx, np.clip(cx, m['a'], m['b'] - 1)) + 1,
-                                base, xh):
-                continue
-            score = distance / xh + ASSIGN_HORIZONTAL_COST * gap / xh
-            # Retain detached marks from the tested crop classifier on ties.
-            if int(q[5]) in m['ids']:
-                score -= ASSIGN_SEED_BONUS
-            if best is None or score < best[0]:
-                best = (score, j)
-        if best is not None:
-            assigned[qi] = best[1]
+    q = p.components
+    a, t, b, bot, area = q[:, :5].T
+    cx, cy = (a + b) / 2, (t + bot) / 2
+    best = np.full(len(q), np.inf)
+    for j, m in enumerate(models):
+        xh = m['xh']
+        gap = np.maximum(np.maximum(m['a'] - b, a - m['b']), 0)
+        small = (bot - t < ASSIGN_BODY_HEIGHT_XH * xh) | (area < ASSIGN_BODY_AREA_XH2 * xh * xh)
+        eligible = (~((q[:, 6] > faint_level) & (not m.get('faint', False)))
+                    & ~(small & (gap > xh))
+                    & (gap <= ASSIGN_HORIZONTAL_REACH_XH * xh)
+                    & (abs(cy - m['cy']) <= ASSIGN_VERTICAL_REACH_XH * xh)
+                    & (bot - t <= ASSIGN_MAX_HEIGHT_XH * xh)
+                    & (b - a <= ASSIGN_MAX_WIDTH_XH * xh))
+        ids = np.flatnonzero(eligible)
+        base = _at(m, cx[ids])
+        distance = abs(cy[ids] - (base - xh / 2))
+        overlap = np.minimum(bot[ids], base + ASSIGN_BAND_BOTTOM_XH * xh) - np.maximum(t[ids], base - ASSIGN_BAND_TOP_XH * xh)
+        keep = ((distance <= ASSIGN_MAX_DISTANCE_XH * xh)
+                & ~((bot[ids] - t[ids] >= ASSIGN_OVERLAP_BODY_HEIGHT_XH * xh)
+                    & (overlap < ASSIGN_MIN_BODY_OVERLAP_XH * xh)))
+        ids, base, distance = ids[keep], base[keep], distance[keep]
+        score = distance / xh + ASSIGN_HORIZONTAL_COST * gap[ids] / xh
+        score -= np.isin(q[ids, 5], list(m['ids'])) * ASSIGN_SEED_BONUS
+        # Preserve model order and strict tie-breaking. Within a seed extent
+        # _blocked samples one column; evaluate those identical three pixels in
+        # a batch. Components outside the extent keep the full corridor test.
+        keep = score < best[ids]
+        ids, base, score = ids[keep], base[keep], score[keep]
+        edge = np.clip(cx[ids], m['a'], m['b'] - 1)
+        internal = cx[ids] == edge
+        blocked = np.zeros(len(ids), bool)
+        at = np.flatnonzero(internal)
+        columns = cx[ids[at]].astype(int)
+        y = base[at] - BARRIER_BODY_CENTRE_XH * xh
+        for dy in (-BARRIER_BODY_RADIUS_XH * xh, 0, BARRIER_BODY_RADIUS_XH * xh):
+            rows = np.clip(np.rint(y + dy).astype(int), 0, p.gray.shape[0] - 1)
+            blocked[at] |= p.barriers[rows, columns]
+        for l, t0, r, bottom in p.gutters:
+            if bottom-t0 == p.gray.shape[0] or r-l > WIDE_GUTTER_XH*xh:
+                blocked[at] |= (columns < r) & (columns+1 > l) & (t0 <= y) & (y < bottom)
+        for k in np.flatnonzero(~internal):
+            qi = ids[k]
+            blocked[k] = _blocked(p, min(cx[qi], edge[k]), max(cx[qi], edge[k]) + 1, float(base[k]), xh)
+        keep = ~blocked
+        best[ids[keep]], assigned[ids[keep]] = score[keep], j
     # Detached accents/subscripts follow the nearest physical letter, not the
     # nearest line centre. The latter sends high accents to the previous line.
     q = p.components
@@ -1032,12 +1053,43 @@ def _reading_order(lines):
     return sorted(lines, key=lambda l: (l.column, float(np.median(l.baseline)), l.x0))
 
 
+def _diagnostic_pairs(lines):
+    """Conservative broad phase for the existing overlap/lateral pair checks.
+
+    A pair is omitted only when scalar bounds prove the original predicate
+    false. Remaining indices keep their original order; curves and barrier
+    predicates are still tested below, without approximations.
+    """
+    ids = np.array([i for i, line in enumerate(lines) if line.discounted is None], int)
+    active = [lines[i] for i in ids]
+    left = np.array([l.x0 for l in active])
+    right = np.array([l.x1 for l in active])
+    top = np.array([np.min(l.top) for l in active])
+    bottom = np.array([np.max(l.bottom) for l in active])
+    xh = np.array([l.xheight for l in active])
+    start = np.array([l.baseline[0] for l in active])
+    end = np.array([l.baseline[-1] for l in active])
+    pairs = {}
+    for k, i in enumerate(ids):
+        overlap = np.minimum(right[k], right) - np.maximum(left[k], left)
+        height = np.minimum(bottom[k], bottom) - np.maximum(top[k], top)
+        # Negated rejection retains non-finite candidates for the old checks.
+        vertical = ~(height <= GEOMETRY_COMPARISON_EPSILON_PX)
+        gap = np.maximum(left[k], left) - np.minimum(right[k], right)
+        delta = np.where(left[k] < left, abs(end[k]-start), abs(end-start[k]))
+        lateral = (~(gap > JOIN_MAX_GAP_XH*np.maximum(xh[k], xh))
+                   & ~(delta > JOIN_BASELINE_SLACK_XH*np.minimum(xh[k], xh)))
+        pairs[int(i)] = ids[(ids > i) & np.where(overlap > 0, vertical, lateral)]
+    return pairs
+
+
 def _diagnostics(p, lines):
     cuts, foreign, crossings, overlaps, broken = [], [], [], [], []
     strip_edges, boundary_cuts, invalid = [], [], []
     owned_ink, clipped_ink = 0, 0
     threshold = float(np.percentile(p.gray[p.ink], 75)) if p.ink.any() else 128
     cc_by_id = {int(q[5]): q for q in p.components}
+    pairs = _diagnostic_pairs(lines)
     owners = {k: i for i, line in enumerate(lines) if line.discounted is None for k in line.component_ids}
     for i, line in enumerate(lines):
         if line.discounted is not None:
@@ -1081,7 +1133,8 @@ def _diagnostics(p, lines):
             foreign.append(i)
         if _blocked(p, line.x0, line.x1, line.baseline, line.xheight):
             crossings.append(i)
-        for j in range(i + 1, len(lines)):
+        for j in pairs[i]:
+            j = int(j)
             b = lines[j]
             if b.discounted is not None:
                 continue

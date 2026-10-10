@@ -21,7 +21,7 @@ BOOK_JPEG_QUALITY = 93
 
 
 def _json(path: Path, data: Any) -> str:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + '\n')
+    path.write_text(json.dumps(data, ensure_ascii=False, separators=(',', ':'), allow_nan=False) + '\n')
     return str(path)
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
@@ -82,8 +83,7 @@ def binarise(gray: NDArray[np.float64], *, window: int | None = None, k: float =
     sq = ndi.uniform_filter(gray * gray, window, mode='reflect')
     std = np.sqrt(np.maximum(sq - mean * mean, 0))
     local = gray < mean * (1 + k * (std / 128 - 1))
-    paper = float(np.percentile(gray, 90))
-    dark = float(np.percentile(gray, 1))
+    paper, dark = map(float, np.percentile(gray, [90, 1]))
     floor = gray < paper - max(12.0, .12 * (paper - dark))
     ink = local & floor
     strong = ink.copy()
@@ -95,7 +95,7 @@ def binarise(gray: NDArray[np.float64], *, window: int | None = None, k: float =
     lab, n = ndi.label(faint, structure=EIGHT)
     if n:
         has_ink = np.zeros(n + 1, bool)
-        has_ink[np.unique(lab[ink])] = True
+        has_ink[lab[ink]] = True
         sizes = np.bincount(lab.ravel(), minlength=n + 1)
         add = ~has_ink & (sizes >= 12)
         add[0] = False
@@ -114,20 +114,64 @@ def binarise(gray: NDArray[np.float64], *, window: int | None = None, k: float =
     # let dark specks delete faint letters; CP-G3c2: thickness relative to the blob's own short side deleted faint BOLD
     # letters (bold Ε, Ι) in tight crops — strokes stay well under 40 % of the crop height even in bold type.
     if (ink & ~strong).any():
-        dt = ndi.distance_transform_edt(ink)
+        dt = None
         alab, an = ndi.label(ink, structure=EIGHT)
         has_strong = np.zeros(an + 1, bool)
-        has_strong[np.unique(alab[strong])] = True
+        has_strong[alab[strong]] = True
         drop = np.zeros(an + 1, bool)
         for i, sl in enumerate(ndi.find_objects(alab), start=1):
             if sl is None or has_strong[i]:
                 continue
             short = min(sl[0].stop - sl[0].start, sl[1].stop - sl[1].start)
+            if short < .3 * h:
+                continue
+            if dt is None:
+                dt = ndi.distance_transform_edt(ink)
             thick = 2 * float(dt[sl][alab[sl] == i].max())
-            if short >= .3 * h and thick >= .4 * h:
+            if thick >= .4 * h:
                 drop[i] = _edge_sharpness(gray, alab == i, paper=paper, exclude=strong) < SOFT_EDGE
         ink &= ~drop[alab]
     return ink
+
+
+def _stable_peel_ink(gray, paper):
+    """Prove that replacing any subset of dark pixels by paper preserves the mask.
+
+    This is a sufficient condition, not another thresholding method. The 90th
+    percentile must already equal the maximum (paper), so it stays constant as
+    pixels are whitened. The 1st percentile and every local mean can only rise.
+    Thus the initial minimum bounds the global floor, and 0.8 times an initial
+    local-mean lower bound bounds Sauvola for every subsequent peel (std >= 0).
+    If every non-paper pixel passes both bounds, all are strong ink and there
+    is no faint-only ink to add/drop. Otherwise the caller must run binarise.
+    """
+    if gray.max() > paper or float(np.percentile(gray, 90)) != paper:
+        return False
+    mask = gray < paper
+    if not mask.any():
+        return False
+    values = gray[mask]
+    if not np.all(values < paper-max(12., .12*(paper-float(values.min())))):
+        return False
+    h, w = gray.shape
+    window = max(15, (h//2)*2+1)
+    # Sum floored pixels exactly, with the same half-sample reflection. The
+    # sum is integral and representable in float64 throughout this bound.
+    if 2*window*window*255 >= 2**53:
+        return False
+    summed = cv2.boxFilter(np.floor(gray), cv2.CV_64F, (window, window),
+                           normalize=False, borderType=cv2.BORDER_REFLECT)
+    lower = np.nextafter(summed/(window*window), -np.inf)
+    # Outward error bound for the two running-sum filter passes, including
+    # their initial sums, add/subtract updates and normalization. This only
+    # makes the shortcut more conservative; it never adjusts detector data.
+    operations = 8*(h+w+window+1)
+    relative = operations*np.finfo(np.float64).eps
+    if relative >= 1:
+        return False
+    error = 255*relative/(1-relative)
+    threshold = np.nextafter((lower[mask]-error)*(1-.2), -np.inf)
+    return bool(np.all(values < threshold))
 
 
 @dataclass(frozen=True)
@@ -142,7 +186,7 @@ class Band:
     xh_source: str = 'free_letters'                      # free_letters | substantial_letters | letter_width | prior
 
     def at(self, x: float) -> tuple[float, float]:
-        i = int(np.clip(round(x), 0, len(self.top) - 1))
+        i = min(max(round(x), 0), len(self.top) - 1)
         return float(self.top[i]), float(self.bottom[i])
 
 
@@ -210,7 +254,7 @@ def _xheight(heights: NDArray[np.float64]) -> float:
     if not len(heights):
         return 0.0
     hs = np.sort(heights)
-    counts = [np.sum((hs >= v * .88) & (hs <= v * 1.12)) for v in hs]
+    counts = np.searchsorted(hs, hs * 1.12, side='right') - np.searchsorted(hs, hs * .88, side='left')
     best = hs[np.asarray(counts) >= .9 * max(counts)]
     return float(np.median(best))
 
@@ -222,19 +266,20 @@ def _ransac_line(xs: NDArray[np.float64], ys: NDArray[np.float64], tol: float,
     best = np.ones(n, bool)
     if n < 3:
         return best
-    best_n = -1
     pairs = rng.integers(0, n, size=(min(200, n * n), 2))
-    for i, j in pairs:
-        if xs[i] == xs[j]:
-            continue
-        slope = (ys[j] - ys[i]) / (xs[j] - xs[i])
-        if abs(slope) > .2:   # > 11°: not a text line
-            continue
-        res = np.abs(ys - (ys[i] + slope * (xs - xs[i])))
-        inl = res <= tol
-        if inl.sum() > best_n:
-            best_n, best = int(inl.sum()), inl
-    return best
+    i, j = pairs.T
+    keep = xs[i] != xs[j]
+    i, j = i[keep], j[keep]
+    slopes = (ys[j] - ys[i]) / (xs[j] - xs[i])
+    keep = np.abs(slopes) <= .2
+    i, slopes = i[keep], slopes[keep]
+    if not len(i):
+        return best
+    # Same candidates, arithmetic and first-winner tie rule as the scalar loop.
+    residuals = np.abs(ys[None, :] - (ys[i, None] + slopes[:, None] * (xs[None, :] - xs[i, None])))
+    inliers = residuals <= tol
+    return inliers[np.argmax(inliers.sum(axis=1))]
+
 
 
 def _fit_curve(xs: NDArray[np.float64], ys: NDArray[np.float64], width: int) -> tuple[NDArray[np.float64], int]:
@@ -276,11 +321,15 @@ def _track(xs: NDArray[np.float64], ys: NDArray[np.float64], inl: NDArray[np.boo
         best_score, best = score(prediction), prediction
         for depth in np.arange(4 * xh, min(24 * xh, np.ptp(xs) / 2), 2 * xh):
             shape = np.maximum(depth - distance, 0.) ** 2 / (2 * depth)
-            for slope in np.arange(-.5, .501, .025):
-                trial = prediction + slope * shape
-                value = score(trial)
-                if value > best_score:
-                    best_score, best = value, trial
+            slopes = np.arange(-.5, .501, .025)
+            trials = prediction[None, :] + slopes[:, None] * shape[None, :]
+            votes = weights[None, :] * np.maximum(0., 1 - ((ys[None, :] - trials) / tol) ** 2)
+            letters = np.zeros((len(slopes), group.max() + 1))
+            np.maximum.at(letters, (np.arange(len(slopes))[:, None], group[None, :]), votes)
+            values = letters.sum(axis=1)
+            winner = int(np.argmax(values))
+            if values[winner] > best_score:
+                best_score, best = float(values[winner]), trials[winner]
         added = (np.abs(ys - prediction) > tol) & (np.abs(ys - best) <= tol)
         if len(np.unique(xs[added])) >= 3 and best_score - score(prediction) >= 2:
             prediction = best
@@ -322,6 +371,19 @@ def _smooth_curve(xs: NDArray[np.float64], ys: NDArray[np.float64], width: int, 
     return curve, (2 if np.abs(curve - lin)[sup].max() > 1.5 else 1)
 
 
+def _hole_sizes(mask):
+    """Areas of enclosed 4-connected background components, in any order.
+
+    Padding joins all exterior background into one component, exactly matching
+    ndimage.binary_fill_holes followed by its default 4-connected labelling.
+    """
+    background = np.ones((mask.shape[0]+2, mask.shape[1]+2), np.uint8)
+    background[1:-1, 1:-1] = ~mask
+    _, labels, stats, _ = cv2.connectedComponentsWithStats(background, connectivity=4)
+    sizes = stats[1:, cv2.CC_STAT_AREA]
+    return np.delete(sizes, labels[0, 0] - 1)
+
+
 def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int = 0, xh_prior: float | None = None,
                 focus: tuple[float, float] | None = None) -> LineGlyphs:
     """Components with descriptors and roles plus the letter band they define. CPU, a few ms for a 1500×80 strip.
@@ -336,12 +398,32 @@ def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int = 0, xh_prior: fl
     over; growing and tracking then follow the line's own letters outside those rows (a curl leaving the box).
 
     """
+    return _line_glyphs(crop, seed=seed, xh_prior=xh_prior, focus=focus)
+
+
+def _line_geometry(crop, *, xh_prior, focus, component_cache=None, ink=None):
+    """Private discovery evidence; holes/strokes/distance maps are not measured.
+
+    Only bounds, photometry, roles and band guides may be consumed from this
+    result. Public crop calls use complete descriptors; final statistics measure
+    their own entity masks after ownership and mark attachment.
+    """
+    return _line_glyphs(crop, xh_prior=xh_prior, focus=focus,
+                        _component_cache=component_cache, _geometry_only=True, _ink=ink)
+
+
+def _line_glyphs(crop, *, seed=0, xh_prior=None, focus=None,
+                 _component_cache=None, _geometry_only=False, _ink=None):
     gray = to_gray(crop)
     h, w = gray.shape
-    ink = binarise(gray)
+    ink = binarise(gray) if _ink is None else _ink
     labels, n = ndi.label(ink, structure=EIGHT)
-    dt = ndi.distance_transform_edt(ink)
-    ridge = _ridge(dt)
+    # Page discovery consumes bounds, photometry, roles and the fitted band.
+    # Hole/stroke descriptors do not participate in any fit or classification
+    # below, and are measured later for the delivered glyph statistics. Keep
+    # the public/default crop result complete (including orientation callers).
+    dt = np.empty((0, 0)) if _geometry_only else ndi.distance_transform_edt(ink)
+    ridge = None if _geometry_only else _ridge(dt)
     paper = float(np.median(gray[~ink])) if (~ink).any() else 255.0
     raw: list[dict[str, Any]] = []
     for i, sl in enumerate(ndi.find_objects(labels), start=1):
@@ -351,17 +433,30 @@ def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int = 0, xh_prior: fl
         area = int(sub.sum())
         if area < 3:
             continue
-        filled = ndi.binary_fill_holes(sub)
-        hl, hn = ndi.label(filled & ~sub)
-        sizes = np.bincount(hl.ravel())[1:] if hn else np.zeros(0, int)
-        rid = dt[sl][sub & ridge[sl]]
         y0, y1, x0, x1 = sl[0].start, sl[0].stop, sl[1].start, sl[1].stop
         touches = tuple(name for name, hit in (('top', y0 == 0), ('bottom', y1 == h), ('left', x0 == 0), ('right', x1 == w))
                         if hit)
+        # Only translation-invariant descriptors are reused. Relative masks,
+        # intensities, border contacts and distance/ridge evidence must match;
+        # bounds and labels are always those of the current crop.
+        key = None
+        if _component_cache is not None:
+            key = (sub.shape, touches,
+                   sub.tobytes(), gray[sl][sub].tobytes(),
+                   _geometry_only,
+                   None if _geometry_only else dt[sl][sub].tobytes(),
+                   None if _geometry_only else ridge[sl][sub].tobytes())
+            if key in _component_cache:
+                raw.append(dict(_component_cache[key], index=i, x0=x0, y0=y0, x1=x1, y1=y1))
+                continue
+        sizes = np.empty(0, int) if _geometry_only else _hole_sizes(sub)
+        rid = np.empty(0) if _geometry_only else dt[sl][sub & ridge[sl]]
         raw.append(dict(index=i, x0=x0, y0=y0, x1=x1, y1=y1, area=area, holes=int((sizes >= 2).sum()),
                         hole_area=int(sizes[sizes >= 2].sum()), stroke=float(2 * np.median(rid)) if rid.size else 1.0,
                         darkness=float(np.median(gray[sl][sub])), fill=area / float((y1 - y0) * (x1 - x0)),
                         touches=touches))
+        if key is not None:
+            _component_cache[key] = raw[-1]
     # faint-only blobs (smudges, bleed-through, faint letters) never drive the letter height or the band: those come
     # from clearly inked letters; faint ink inside the band is still read as letters later
     faint_cut = paper - .45 * (paper - (float(np.median(gray[ink])) if ink.any() else paper))
@@ -443,7 +538,7 @@ def line_glyphs(crop: Image.Image | NDArray[Any], *, seed: int = 0, xh_prior: fl
     top = bottom - xh
 
     def band(cx: float) -> tuple[float, float]:
-        i = int(np.clip(cx, 0, w - 1))
+        i = min(max(int(cx), 0), w - 1)
         return float(top[i]), float(bottom[i])
 
     roles: dict[int, str] = {}

@@ -6,6 +6,7 @@ Candidate provenance is measured evidence, never a trained or confirmed label.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from copy import deepcopy
 from dataclasses import replace
 import hashlib
 import json
@@ -18,7 +19,7 @@ from PIL import Image, ImageDraw
 from scipy import ndimage as ndi
 from scipy.spatial import cKDTree
 
-from ..glyphs.components import Band, EIGHT, line_glyphs
+from ..glyphs.components import Band, EIGHT, _hole_sizes, _line_geometry
 from ..glyphs.ink import ink_profile
 from ..glyphs.letters import letter_boxes
 from .pixels import _gray
@@ -61,12 +62,14 @@ def _distribution(values):
     a = np.asarray([x for x in values if x is not None and np.isfinite(x)], float)
     if not len(a):
         return dict(n=0, median=None, p10=None, p90=None, mean=None, std=None)
-    return dict(n=len(a), median=float(np.median(a)), p10=float(np.percentile(a, 10)),
-                p90=float(np.percentile(a, 90)), mean=float(a.mean()), std=float(a.std()))
+    p10, p90 = np.percentile(a, [10, 90])
+    return dict(n=len(a), median=float(np.median(a)), p10=float(p10),
+                p90=float(p90), mean=float(a.mean()), std=float(a.std()))
 
 
 def _median(values):
-    return _distribution(values)['median']
+    a = np.asarray([x for x in values if x is not None and np.isfinite(x)], float)
+    return float(np.median(a)) if len(a) else None
 
 
 def _ratio(a, b):
@@ -94,7 +97,13 @@ def _body_class(box, baseline, xh):
 
 
 def _curve(line, name, x):
-    return float(np.interp(x, np.arange(line['x0'], line['x1']), line[name]))
+    # Unit-spaced source samples: only the two bracketing values contribute.
+    values = line[name]
+    i = max(0, min(len(values)-1, int(np.floor(x))-line['x0']))
+    if i == len(values)-1:
+        return float(values[i])
+    left = line['x0'] + i
+    return float(np.interp(x, (left, left+1), values[i:i+2]))
 
 
 def _line_residual(box, line):
@@ -128,8 +137,9 @@ def _measure(gray, rgb, box, mask, xh, page_paper):
     distance = ndi.distance_transform_edt(np.pad(mask, 1))[1:-1, 1:-1]
     ridge = (distance > 0) & (distance >= ndi.maximum_filter(distance, 3))
     stroke = 2*float(np.median(distance[ridge])) if ridge.any() else 0.
-    holes = ndi.binary_fill_holes(mask) & ~mask
-    _, n_holes = ndi.label(holes)
+    holes = _hole_sizes(mask)
+    n_holes = len(holes)
+    hole_area = int(holes.sum())
     color = None
     if rgb is not None:
         pixels = rgb[t:d, a:b][mask].astype(float)
@@ -138,8 +148,8 @@ def _measure(gray, rgb, box, mask, xh, page_paper):
         paper_gray=paper, contrast_absolute=delta/255, contrast_local=delta/max(paper, 1),
         edge_sharpness=edge, color_spread=color, color_available=rgb is not None,
         height_xh=(d-t)/xh, width_xh=(b-a)/xh, stroke_width_px=stroke, stroke_width_xh=stroke/xh,
-        fill=float(mask.mean()), holes=int(n_holes), hole_area=int(holes.sum()),
-        hole_fraction=float(holes.mean()))
+        fill=float(mask.mean()), holes=int(n_holes), hole_area=hole_area,
+        hole_fraction=hole_area / mask.size)
 
 
 def _reference(rows):
@@ -216,6 +226,14 @@ def _mean(values):
 
 def _aggregates(rows, lines, structure):
     result = {}
+    # The same ordered rows often form both a printed line and a row, or a
+    # single column and page side. All provenance is fixed before this call.
+    summaries = {}
+    def summary(value):
+        key = tuple(map(id, value))
+        if key not in summaries:
+            summaries[key] = _summary(value)
+        return deepcopy(summaries[key])
     specifications = dict(lines=('line_index',), rows=('page_side', 'column_id', 'row_id'),
                           columns=('page_side', 'column_id'), page_sides=('page_side',))
     for name, keys in specifications.items():
@@ -231,7 +249,7 @@ def _aggregates(rows, lines, structure):
         if name == 'page_sides':
             for side in (structure or {}).get('pages', []):
                 groups.setdefault((side['page_side'],), [])
-        result[name] = [dict(address=dict(zip(keys, key)), **_summary(value))
+        result[name] = [dict(address=dict(zip(keys, key)), **summary(value))
                         for key, value in sorted(groups.items(), key=lambda kv: str(kv[0]))]
         nearby = defaultdict(list)
         for row in rows:
@@ -249,7 +267,7 @@ def _aggregates(rows, lines, structure):
         for group in result[name]:
             key = tuple(group['address'][k] for k in keys)
             if name != 'page_sides':
-                group['nearby_unassigned_ink'] = _summary(nearby[key])
+                group['nearby_unassigned_ink'] = summary(nearby[key])
     return result
 
 
@@ -297,7 +315,9 @@ def _line_rows(gray, rgb, line, index, page_key, book_id, page_paper, owned):
     d = min(gray.shape[0], int(np.ceil(max(line['bottom'])))+1)
     if b <= a or d <= t:
         return []
-    g = line_glyphs(gray[t:d, a:b], xh_prior=xh,
+    # Original component stroke/hole descriptors are unused: final entity
+    # masks are measured independently below after ownership and mark joins.
+    g = _line_geometry(gray[t:d, a:b], xh_prior=xh,
                     focus=(float(np.median(line['baseline']))-t-FIT_FOCUS_XH*xh,
                            float(np.median(line['baseline']))-t+FIT_FOCUS_XH*xh))
     top, base = np.asarray(line['meanline'])-t, np.asarray(line['baseline'])-t
@@ -312,7 +332,7 @@ def _line_rows(gray, rgb, line, index, page_key, book_id, page_paper, owned):
         sub = g.labels[c.y0:c.y1, c.x0:c.x1] == c.index
         if not sub.any():
             continue
-        cx = int(np.clip(c.cx, 0, len(base)-1))
+        cx = min(max(int(c.cx), 0), len(base)-1)
         overlap = max(0., min(c.y1, base[cx])-max(c.y0, top[cx]))/max(1., min(c.h, xh))
         role = c.role
         if c.role == 'rule':
@@ -345,11 +365,11 @@ def _line_rows(gray, rgb, line, index, page_key, book_id, page_paper, owned):
         if not m.any() or c.role in ('rule', 'large'):
             continue
         options = []
+        bs = float(np.interp(c.cx, np.arange(len(base)), base))
+        kind = 'mark_above' if c.y1 < bs-UPPER_MARK_OFFSET_XH*xh else ('mark_below' if c.y0 >= bs-LOWER_MARK_OFFSET_XH*xh else None)
         for j, body in enumerate(boxes):
             dx = max(c.x0-body.x1, body.x0-c.x1, 0)
             dy = max(c.y0-body.y1, body.y0-c.y1, 0)
-            bs = float(np.interp(c.cx, np.arange(len(base)), base))
-            kind = 'mark_above' if c.y1 < bs-UPPER_MARK_OFFSET_XH*xh else ('mark_below' if c.y0 >= bs-LOWER_MARK_OFFSET_XH*xh else None)
             if kind and c.h < ATTACHED_MARK_MAX_HEIGHT_XH*xh and dx <= THRESHOLDS['mark_dx_xh']*xh and dy < THRESHOLDS['mark_dy_xh']*xh:
                 options.append((2*dx+dy, j, kind))
         if options:
@@ -361,7 +381,7 @@ def _line_rows(gray, rgb, line, index, page_key, book_id, page_paper, owned):
         else:
             # Keep punctuation/marks on the established envelope; larger and
             # off-band ink goes through the page residual pass, without an address.
-            cx = int(np.clip(c.cx, 0, len(base)-1))
+            cx = min(max(int(c.cx), 0), len(base)-1)
             if c.h <= LOOSE_MARK_MAX_HEIGHT_XH*xh and top[cx]-LOOSE_MARK_TOP_REACH_XH*xh <= (c.y0+c.y1)/2 <= base[cx]+LOOSE_MARK_BOTTOM_REACH_XH*xh:
                 full = np.zeros(g.ink.shape, bool)
                 full[sl] = m
@@ -369,7 +389,17 @@ def _line_rows(gray, rgb, line, index, page_key, book_id, page_paper, owned):
     rows = []
     entries = [(m, 'letter_body', j) for j, m in enumerate(masks)] + leftovers
     for m, entity, source in entries:
-        ys, xs = np.nonzero(m)
+        # The body/mark boxes bound all set pixels. Avoid scanning a complete
+        # line-sized mask again for each glyph; retain row-major pixel order.
+        bounds = boxes[source] if entity == 'letter_body' else source
+        left, top_edge, right, bottom_edge = bounds.x0, bounds.y0, bounds.x1, bounds.y1
+        if entity == 'letter_body':
+            for mark in marks[source]:
+                ma, mt, mb, md = mark['box']
+                left, top_edge = min(left, ma-a), min(top_edge, mt-t)
+                right, bottom_edge = max(right, mb-a), max(bottom_edge, md-t)
+        ys, xs = np.nonzero(m[top_edge:bottom_edge, left:right])
+        ys, xs = ys+top_edge, xs+left
         if not len(xs):
             continue
         box = [a+int(xs.min()), t+int(ys.min()), a+int(xs.max())+1, t+int(ys.max())+1]
@@ -606,7 +636,7 @@ def corpus_statistics(pages: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _write_json(path, data):
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False)+'\n')
+    path.write_text(json.dumps(data, ensure_ascii=False, separators=(',', ':'), allow_nan=False)+'\n')
 
 
 def write_statistics(result: dict[str, Any], directory: str | Path) -> dict[str, str]:

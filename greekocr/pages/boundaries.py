@@ -61,10 +61,11 @@ def _at(boundary, ys):
 class BoundaryEvidence:
     """One original-image mask and line-local spacing measurements per page."""
 
-    def __init__(self, page, lines):
+    def __init__(self, page, lines, *, original_ink=None):
         gray = to_gray(page)
         self.gray = np.rint(gray).astype(np.uint8)
-        self.ink = binarise(gray, window=max(BINARIZE_MIN_PIXELS, round(BINARIZE_WINDOW_PAGE * min(gray.shape))) | 1)
+        self.ink = (original_ink if original_ink is not None else
+                    binarise(gray, window=max(BINARIZE_MIN_PIXELS, round(BINARIZE_WINDOW_PAGE * min(gray.shape))) | 1))
         self.lines = lines
         self.profiles = {}
         self.validated_rules = []

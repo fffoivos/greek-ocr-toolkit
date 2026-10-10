@@ -138,7 +138,7 @@ def table_pixels(page, xheight=None):
     labels, _ = ndi.label(ink, EIGHT)
     cc = _records(gray, labels)
     if not len(cc):
-        return PixelPage(gray, ink, labels, cc, np.zeros_like(ink), [], [], xheight or MIN_XHEIGHT_PIXELS)
+        return PixelPage(gray, ink, labels, cc, np.zeros_like(ink), [], [], xheight or MIN_XHEIGHT_PIXELS, original_ink=ink)
     heights, widths = cc[:,3]-cc[:,1], cc[:,2]-cc[:,0]
     plausible = cc[(heights > MIN_BODY_HEIGHT_PAGE*h) & (heights < MAX_BODY_HEIGHT_PAGE*h) & (widths > MIN_BODY_WIDTH_PAGE*w)
                    & (widths < MAX_BODY_WIDTH_PAGE*w) & (cc[:,4] > MIN_BODY_AREA_PAGE*h*w)]
@@ -165,7 +165,7 @@ def table_pixels(page, xheight=None):
         # A repeated lane supplies a split only where this row is actually
         # empty. It must not cut a spanning header or erase any letter pixels.
         stops[t:bot,a:b] |= ~ndi.maximum_filter(clean[t:bot,a:b], size=(1,max(1,round(GUTTER_INK_CLEARANCE_XH*xh))))
-    return PixelPage(gray, clean, labels, cc, stops, gutters, [], xh)
+    return PixelPage(gray, clean, labels, cc, stops, gutters, [], xh, original_ink=ink, original_rules=rules)
 
 
 def _local_gutters(ink, xh):
@@ -245,7 +245,7 @@ def split_group(group, barriers, xh):
     return pieces
 
 
-def _line_from_group(group, p, dx, dy, table_index):
+def _line_from_group(group, p, dx, dy, table_index, *, _lookup=None):
     from .font import fit_guides
     q=np.array(group)
     a,t,b,bot=[int(v) for v in (q[:,0].min(),q[:,1].min(),q[:,2].max(),q[:,3].max())]
@@ -261,7 +261,7 @@ def _line_from_group(group, p, dx, dy, table_index):
                      column=table_index+1,support=len(body),geometry_source='table-pixel-piece',
                      component_ids=tuple(q[:,5].astype(int)),
                      neighbours=dict(above=np.full(b-a,-1),below=np.full(b-a,-1)))
-    fit_guides(p,[line])
+    fit_guides(p,[line],_lookup=_lookup)
     # Preserve the observed ink including diacritics; no neighbour seam can
     # extend this piece into a different row or a rule.
     for name in CURVES:
@@ -281,9 +281,10 @@ def table_text_pieces(page: Image.Image | NDArray[Any], region: Sequence[float],
         raise ValueError('table region must have positive area inside the page')
     p=table_pixels(gray[t:bot,a:b])
     pieces=[]
+    lookup={int(q[5]): q for q in p.components}
     for row_index,row in enumerate(_row_groups(p.components,p.xheight)):
         for group in split_group(row,p.barriers,p.xheight):
-            built=_line_from_group(group,p,a,t,table_index)
+            built=_line_from_group(group,p,a,t,table_index,_lookup=lookup)
             if built is not None:
                 line,box=built
                 line.row_source=f'{table_id}:component-row-{row_index}'
@@ -345,7 +346,7 @@ def detector_pieces(page, lines, table_regions=()):
     return result
 
 
-def supplemental_regions(page, lines):
+def supplemental_regions(page, lines, *, _original_ink=None):
     """Find a later-starting ruled block overlooked by image layout.
 
     This deliberately conservative fallback requires a central vertical divider,
@@ -355,7 +356,8 @@ def supplemental_regions(page, lines):
     active=[l for l in lines if l.discounted is None]
     if not active:return []
     gray=_gray(page);h,w=gray.shape;xh=float(np.median([l.xheight for l in active]))
-    ink=binarise(gray,window=max(BINARIZE_MIN_PIXELS,round(BINARIZE_WINDOW_PAGE*min(h,w)))|1)
+    ink=(_original_ink if _original_ink is not None else
+         binarise(gray,window=max(BINARIZE_MIN_PIXELS,round(BINARIZE_WINDOW_PAGE*min(h,w)))|1))
     import cv2
     paths=cv2.HoughLinesP(ink.astype('uint8'),1,np.pi/HOUGH_HALF_TURN_STEPS,threshold=max(2,round(RULE_VOTE_LENGTH_XH*xh)),
                          minLineLength=RULE_MIN_LENGTH_XH*xh,maxLineGap=RULE_MAX_GAP_XH*xh)
@@ -406,11 +408,11 @@ def supplemental_regions(page, lines):
 
 def recognition_pieces(page: Image.Image | NDArray[Any], lines: list[LineSegment],
                        table_regions: Sequence[tuple[str, Sequence[float]]] = (), *,
-                       supplement: bool = True) -> tuple[list[TextPiece], list, PageSegmentation | None]:
+                       supplement: bool = True, _original_ink: NDArray[Any] | None = None) -> tuple[list[TextPiece], list, PageSegmentation | None]:
     """Shared delivery path for the plugin and offline review harness."""
     regions=list(table_regions)
     if supplement and not regions:
-        regions=supplemental_regions(page,lines)
+        regions=supplemental_regions(page,lines,_original_ink=_original_ink)
     prefix=None
     source=lines
     if regions and lines:
@@ -450,7 +452,8 @@ def prepare_delivery(page: Image.Image | NDArray[Any], result: PageSegmentation,
     """
     from .lines import _diagnostics, _addresses
     from .structure import _attach_structure, _table_structure
-    pieces,regions,prefix=recognition_pieces(page,result.lines,table_regions,supplement=supplement)
+    pieces,regions,prefix=recognition_pieces(page,result.lines,table_regions,supplement=supplement,
+                                              _original_ink=result.pixels.original_ink)
     if not regions:
         pieces=detector_pieces(page,result.lines)
         _attach_structure(result,pieces)
@@ -487,13 +490,14 @@ def prepare_delivery(page: Image.Image | NDArray[Any], result: PageSegmentation,
     # Source/component diagnostics refer to the *new* mask, including recovered
     # text, rather than silently measuring the old mask that deleted a column.
     ownership={i:[] for i in range(len(lines))}
+    boxes = np.asarray([piece.box for piece in pieces]).reshape(-1, 4)
+    indices = np.asarray([piece.line_index for piece in pieces])
     for q in p.components:
-        candidates=[]
-        for piece in pieces:
-            a,t,b,bot=piece.box
-            area=max(0,min(b,q[2])-max(a,q[0]))*max(0,min(bot,q[3])-max(t,q[1]))
-            if area>0:candidates.append((area,piece.line_index))
-        if candidates:ownership[max(candidates)[1]].append(int(q[5]))
+        areas = (np.maximum(0, np.minimum(boxes[:, 2], q[2])-np.maximum(boxes[:, 0], q[0]))
+                 * np.maximum(0, np.minimum(boxes[:, 3], q[3])-np.maximum(boxes[:, 1], q[1])))
+        if len(areas) and areas.max() > 0:
+            owner = int(indices[areas == areas.max()].max())
+            ownership[owner].append(int(q[5]))
     for i,line in enumerate(lines):line.component_ids=tuple(ownership[i])
     p.gutters=[];p.column_boundaries=[]
     p.nontext_boxes=[box for box in p.nontext_boxes if not any(

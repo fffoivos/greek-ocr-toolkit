@@ -76,9 +76,9 @@ ACCENT_TOP_MIN_RISE_XH = 1.1  # x-heights above baseline: accent upper guide sta
 
 LOCAL_SIZE_SMOOTHING_XH = 2  # x-heights: smooth local body-size changes across neighboring letters.
 
-def evidence(p, line):
+def evidence(p, line, *, _lookup=None):
     """Assign marks to bodies and gather contacts from their own ink class."""
-    lookup = {int(q[5]): q for q in p.components}
+    lookup = {int(q[5]): q for q in p.components} if _lookup is None else _lookup
     q = np.array([lookup[k] for k in line.component_ids]).reshape(-1, 7)
     counts = dict.fromkeys(CLASSES, 0)
     points = {k: [] for k in GUIDES}
@@ -173,13 +173,14 @@ def _smooth_samples(xs, ys, grid, xh):
     return ndi.gaussian_filter1d(np.interp(grid, knots, values), max(1., GUIDE_SMOOTH_XH*xh))
 
 
-def fit_guides(p, lines):
+def fit_guides(p, lines, *, _lookup=None):
     """Alternate one smooth shape and six robust class offsets per line.
 
     Reliable neighbouring lines regularise the shape inherited from the crop
     fits. Sparse lines retain that shared geometry and fit only their offsets.
     """
-    evidence_rows = [evidence(p, line) for line in lines]
+    lookup = {int(q[5]): q for q in p.components} if _lookup is None else _lookup
+    evidence_rows = [evidence(p, line, _lookup=lookup) for line in lines]
     ratios = []
     for line, (counts, points) in zip(lines, evidence_rows):
         offsets = {}
