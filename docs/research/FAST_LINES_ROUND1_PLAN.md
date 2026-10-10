@@ -8,6 +8,30 @@ The aim is viewable evidence about what works and why, including negative result
 
 ## 1. Scope, receipts and completion
 
+### Q7 build amendment (before implementation)
+
+The Q7 owner's expanded scope supersedes the 54-only wording below: freeze the
+54 development images **and exactly the 120 entries in discrepancy/selection.json**
+(80 disagreements: 25 geometry, 25 missed, 20 false-positive candidates, 10 tables;
+40 sampled agreement controls). These are 174 distinct images, 173 upright. The
+220 agreement-pool count describes the selection source, not supplied controls.
+Every prototype must emit 174 output/status records. No other image directory is
+enumerated. Both dream files are already completely mapped in Q6 sections 4–6;
+no additional standalone experiment is needed.
+
+Implementation refinements shared by multiple prototypes belong in S2/S3/S4:
+ROI clipping and physical-scale quantisation, polygon masks, dense/sparse strip
+sampling, request merging, candidate seam deduplication, and local threshold
+persistence/stroke topology. The runtime carries no selection category, page
+name or old-detector answer into an algorithm; these are reporting metadata.
+
+Before each numbered experiment phase, append its prediction to the approach
+README; append measured result and next step after the phase. S5 references are
+built and inspected before fast-witness experiments. Conservative candidates may
+remain explicitly unknown; unreviewed output must never be called a correction
+success. The report must list omitted substeps as unfinished, not substitute
+placeholder status records for an implemented experiment.
+
 Use the worktree root and:
 
 ```sh
@@ -303,3 +327,38 @@ Each prototype's visual sequence should reuse the supplied stage style: (1) orig
 Detector-format JSON uses `items` with `polygon`, `baseline`, `score`, page identity and dimensions. Keep page-coordinate transforms explicit. Carry an inherited detector score with its source; it is not a newly calibrated correction confidence. A new candidate with no comparable score uses null plus an evidence record; verify local viewer compatibility once. If it cannot display null, use the image gallery for that candidate rather than inventing a numeric probability. Similarly, do not label a centreline as a baseline merely to satisfy the viewer. No changes to the comparison app or page API are required by this plan.
 
 Round-1's handoff should link all 12 results, the shared gallery, raw timing/decision records and the exact manifest/config/source hashes. For each charter feature and each error type, say what improved, what regressed, what remains ambiguous, and which explicit rendering supports that statement. Show cheap-page overhead and false-negative triggers together. Recommend a small surviving combination for round 2, explaining why discarded approaches failed or duplicated another's contribution. Record deferred A13–A19 and their missing evidence rather than silently forgetting them. Do not access held-out pages or claim readiness for production from the 54 development pages.
+
+### Q7 implementation refinement and pre-run limits
+
+S4 gains `shared/context.py`, the one page record and primitive-cache adapter used by
+all prototypes. The extracted Paddle DB source is isolated as `shared/paddle_db.py`
+with a source/config hash receipt, rather than copied into A01/A09. All 174 images
+are verified grayscale. Network unit minimum contour widths are retained exactly
+from that source; new geometric lengths use body proxies or page fractions.
+
+The first explicit dense reference (independent per-column maxima) visibly jumped
+rows on clean and curled examples. Keep its artifacts in `references-v1`; rerender
+with raw-ink continuity and a body-height strip before heuristic comparisons.
+This is an evidence-driven revision, not a threshold selected by the old detector.
+
+A09 has a declared three-request diagnostic budget per page and lists all unscheduled
+requests. Its full-page 1440 comparator is offline. Full crop saturation is not an
+assumed subsecond solution. A07 density modes remain unidentified where no semantic
+baseline/accents can be established; A05 does not infer front/verso from darkness.
+These conservative limits are results to report, not hidden corrections.
+
+The runnable phase interface groups shared explicit rendering, the compact algorithm
+study, and read-only freezing. The finer-grained numbered plan remains the checklist;
+any substep not implemented or not visually adjudicated must be listed as unfinished.
+
+### Q7 freeze after the first studies
+
+The local-ribbon clean control regressed, so it is a negative result, not a chosen
+repair. A02 v1 missed sloping rules and confused a newspaper header with a table;
+A02 v2 explicitly traces supported sloped segments and requires intersections at
+distinct grid rows. It separates the inspected prose columns, but costs more.
+The v1 outputs and exact hash-matching source are archived outside git. A03–A12
+retain their v1 dependencies and frozen A06 requests; no second resolution/crop
+study was run merely to update the report. Fresh composition measures v2 A02 and
+A03 and openly leaves the full fallback DAG unfinished. See the final results
+report for every unimplemented or unadjudicated substep.
