@@ -1,3 +1,81 @@
+# Track A geometry: round 4 continuation
+
+The current research pipeline is `shared/geometry_pipeline.run(gray, pm, items)`.
+It includes Q8 once, the faster equivalent R3 scout/context, native contour and
+curved-rule corrections, then guarded original-ink fragment joining. It is
+separate from the stack track's frozen B/C composition. Orientation parking is
+still the caller's responsibility. Inputs remain native pixel coordinates.
+
+```python
+from prototypes.fast_lines.shared.geometry_pipeline import run
+result = run(gray_uint8, probability_map, original_items)
+```
+
+For composition, preserve original item identity:
+
+```python
+from prototypes.fast_lines.shared.geometry_scout import sparse_fast
+from prototypes.fast_lines.shared.geometry_context import correct_geometry
+from prototypes.fast_lines.shared.geometry_fragment_correct import run as fragments
+# Both optional witnesses below must be charged by the caller.
+a = correct_geometry(gray, pm, original_items,
+    retained_source_indices=retained_original_ids,
+    rule_witness=rule_witness, geometry_scout=geometry_witness)
+b = fragments(gray, original_items, current_items,
+    forbidden_regions=removed_or_uncertain_regions)
+```
+
+`current_items` must have original `source_ids`; split or removed owners cannot
+be rejoined. Original competing owners still veto ambiguity. A supplied
+`rendering`/`witness` is reused only at caller cost; default runtime computes every
+dependency. `forbidden_regions` takes dictionaries with `bbox` or `polygon`;
+its veto uses the bounding rectangle. The Q8+A harness does not include B/C.
+Joined `baseline` is null and `centreline` is a body-contact path, not a baseline.
+All participating old polygon pixels are retained. No wholly missing line is
+searched for and no original source is suppressed by the new operator.
+
+`geometry_contacts.render_contacts(gray, items, route='slow'|'explicit_fast',
+version=7, selected=None)` exposes components, observed paths, end traces and
+ambiguity. `geometry_fragments.candidates(items,size)` is a cheap box/tangent
+scout, not a join certificate. Leaf and skew tools are diagnostics only.
+
+The [round-4 legend](ROUND4_README.md) and [visual review record](ROUND4_REVIEW.md)
+state every retained failure and the scope of actual inspection. Full report:
+`docs/research/FAST_LINES_FEATURES_A.md`; owner gallery:
+`.astra/fast_lines/out/features_geometry/round4/index.html`.
+
+## Reproduce round 4
+
+Use the prescribed Python from the worktree root with
+`PYTHONDONTWRITEBYTECODE=1`, as below in the historical section. Run sequentially;
+no background jobs. The R3 final artifacts/cached inputs must already exist.
+
+```text
+-m prototypes.fast_lines.features_geometry.scout_audit --repeat 1
+-m prototypes.fast_lines.features_geometry.scout_audit --repeat 2 --groups agreement discrepancy
+-m prototypes.fast_lines.features_geometry.body_paths --version 7 --route slow
+-m prototypes.fast_lines.features_geometry.body_paths --version 7 --route explicit_fast --no-details
+-m prototypes.fast_lines.features_geometry.contact_audit
+-m prototypes.fast_lines.features_geometry.fragments --version 5
+-m prototypes.fast_lines.features_geometry.leaves --version 4
+-m prototypes.fast_lines.features_geometry.skew_contacts --version 2
+-m prototypes.fast_lines.features_geometry.skew_rotation
+-m prototypes.fast_lines.features_geometry.review_round4
+-m prototypes.fast_lines.features_geometry.benchmark_round4 --repeat 1
+-m prototypes.fast_lines.features_geometry.benchmark_round4 --repeat 2
+-m prototypes.fast_lines.features_geometry.artifacts_round4
+-m pytest prototypes/fast_lines/tests prototypes/fast_lines/features_geometry -q -p no:cacheprovider
+```
+
+Body rendering skips existing page JSON; the timing harness refuses to overwrite
+repeat receipts. Use a fresh output area for a new experiment. Intermediate
+`fragments-v1` to v4 images record previous code states; `--version` on that
+harness names the output study, not a historical algorithm implementation.
+`artifacts_round4` also requires the preserved v3 evidence to verify that final
+accepted polygons are a subset of the crops reviewed before the rule veto.
+
+## Preserved round 3 account
+
 # Round 3 A: curvature, skew, separation
 
 This is a research prototype, independent of `greekocr/pages/`. It renders each
