@@ -1192,3 +1192,12 @@ These fixtures are newly authored synthetic offline contracts. No source Anemi i
 | `tests/data/docai_failed_lines/crops/s2-multi.png` | T10 synthetic offline fixture | `dd5d8a3753179dfd67aea09e8cad21f16ea95be2f8b682e13da56d6f77036a96` |
 | `tests/data/docai_failed_lines/multi_line_segments.json` | T10 synthetic offline fixture | `6eca70a2d2dc800074c93ab597a60d225f11d6fcc8c63289ff8831b6765b407a` |
 | `tests/data/docai_failed_lines/response.json` | T10 synthetic offline fixture | `e201dcc5cd51f8d7b1c82baea76bbbf441c1983192706b90c53d74579efabd19` |
+
+## T11 Cloud Vision audit fixtures (11 October 2026)
+
+Newly authored synthetic offline REST contracts, not live provider output. The image tests reuse the synthetic T10 white PNG already inventoried above. No Anemi source image is included in fixtures.
+
+| Path | Origin | SHA-256 |
+| --- | --- | --- |
+| `tests/data/vision_failed_lines/README.md` | T11 synthetic offline fixture | `22ee71fff17282203c9a6d9eab40db3a425ddef242605daba78f3b725972853f` |
+| `tests/data/vision_failed_lines/response.json` | T11 synthetic offline fixture | `d7396b08cdbf830c83be20931f8074e0637c47934aea38ea067918da20789903` |

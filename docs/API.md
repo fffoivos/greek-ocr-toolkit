@@ -2467,3 +2467,85 @@ Validate the frozen v1 artifacts without network:
 ```
 
 The validator recomputes all crop metrics and character counts, verifies raw responses/image hashes/CSV IDs/cards/links and one API call per image SHA, and writes `docai_failed_lines/validation.json`. It checks responsive CSS constraints; it does not claim a rendered desktop/phone viewport check. Hash-bound manual observations are retained in `visual_findings.json` and shown on the corresponding cards.
+
+## Cloud Vision service reader (T11)
+
+Explicit opt-in and ADC; raw SHA-cached annotations plus NFD public text. See [READERS_VISION.md](READERS_VISION.md).
+
+### `greekocr.readers.services.google_vision.VisionError`
+
+A retained service failure; the same crop is never automatically retried.
+
+```python
+from greekocr.readers.services.google_vision import VisionError
+error = VisionError("retained service refusal")
+```
+
+### `greekocr.readers.services.google_vision.VisionReading`
+
+```python
+from greekocr.readers.services.google_vision import VisionReading
+reading = VisionReading(**recorded_vision_values)
+```
+
+### `greekocr.readers.services.google_vision.VisionReader`
+
+Construct explicitly; ADC and requests are loaded only on a cache miss.
+
+```python
+from greekocr.readers.services.google_vision import VisionReader
+reader = VisionReader("quota-project", language_hints=("el", "grc"))
+```
+
+### `greekocr.readers.services.google_vision.VisionReader.binding`
+
+`def binding(self) -> dict[str, Any]`
+
+Return defensive request settings, including hints and unpinned model.
+
+```python
+from greekocr.readers.services.google_vision import VisionReader
+binding = reader.binding()
+```
+
+### `greekocr.readers.services.google_vision.VisionReader.read`
+
+`def read(self, path: str | Path) -> str`
+
+Return NFD text, retaining whitespace and all reported lines.
+
+```python
+from greekocr.readers.services.google_vision import VisionReader
+text = reader.read("crop.png")
+```
+
+### `greekocr.readers.services.google_vision.VisionReader.read_annotation`
+
+`def read_annotation(self, path: str | Path, *, expected_sha256: str | None=None) -> VisionReading`
+
+Return full annotation, flattened hierarchy, confidence and receipt.
+
+```python
+from greekocr.readers.services.google_vision import VisionReader
+reading = reader.read_annotation("crop.png")
+```
+
+### `greekocr.readers.services.google_vision.load_google_vision`
+
+`def load_google_vision(*, enabled: bool=False, user_project: str | None=None, language_hints: Iterable[str]=('el', 'grc'), responses_dir: str | Path=DEFAULT_RESPONSES) -> VisionReader`
+
+Factory gated by explicit opt-in or GREEKOCR_ENABLE_GOOGLE_VISION=1, then ADC.
+
+```python
+from greekocr.readers.services.google_vision import load_google_vision
+reader = load_google_vision(enabled=True, user_project="quota-project")
+```
+
+### Failed-line engine comparison
+
+```sh
+python scripts/harvest/google_failed_lines.py --engine vision --include-anemi
+python scripts/harvest/google_failed_lines.py --engine vision --include-anemi --offline
+```
+
+`--engine docai` remains the default. Vision accepts `--language-hints el grc` (the default); empty hints are possible with `--language-hints`. All responses bind the hints. `--out` is the parent report directory; data go into `<out>/vision_failed_lines/`, while comparison reads the existing `<out>/docai_failed_lines/` cache. No DocAI request is made for comparison. See [VISION_VS_DOCAI_v1.md](harvest/VISION_VS_DOCAI_v1.md).

@@ -207,3 +207,7 @@ See [ProtoJSON default-value rules](https://protobuf.dev/programming-guides/json
 T10 recovered the original saved raw response without re-calling the crop and
 retains the historical parse-error ledger. This does not change T8's offline-only
 provenance. The audit CLI/report is documented in [API.md](API.md#failed-line-document-ai-audit-t10-prototype).
+
+## T11 Vision comparison
+
+The failed-lines runner now accepts `--engine {docai,vision}` with `docai` as its unchanged default. The authorised Anemi-inclusive Vision audit uses `el` and `grc` hints and SHA-addressed responses. Comparison consumes the existing DocAI cache, verifies identical crop bytes and recomputes raw metrics; it sends no additional DocAI requests. See [READERS_VISION.md](READERS_VISION.md) and [VISION_VS_DOCAI_v1.md](harvest/VISION_VS_DOCAI_v1.md). The current per-crop T10 cache includes Anemi; historical withheld-language in the original report must not be used as the comparison's coverage source.

@@ -1,0 +1,1 @@
+Synthetic T11 REST response authored offline, not service output. One block, one paragraph, two words, six symbols, reported language codes el/grc and symbol breaks. Coordinates/confidences are artificial. Image tests reuse the T10 synthetic white PNG; no source Anemi image is included.

@@ -1,4 +1,4 @@
-"""T10: licensed, at-most-once Document AI audit of R7 crop failures.
+"""T10/T11: at-most-once Google OCR audits of the same R7 crop failures.
 
 No harvest or training dataset is created. The raw response envelopes are bound to
 both image bytes and processor options. An attempted request without a durable
@@ -23,6 +23,7 @@ import unicodedata
 
 from PIL import Image, ImageDraw
 from greekocr.readers.services.google_docai import DEFAULT_VERSION, DocAIReader, _reading
+from greekocr.readers.services.google_vision import VisionReader, load_google_vision, _reading as vision_reading
 
 CATALOGUES = ('controls_owner_marked.json', 'multi_line_segments.json')
 SPECIAL = 'ϗȣϛϲϹϝϙϡͅʹ͵'
@@ -233,10 +234,14 @@ def anchored_text(layout: dict, text: str) -> str:
     return ''.join(result).rstrip('\r\n')
 
 
-def crop_metrics(raw: dict, width: int, height: int) -> dict:
+def crop_metrics(raw: dict, width: int, height: int, *, engine: str = 'docai') -> dict:
     """Measure actual page.lines, with explicitly labelled splitlines fallback."""
     if width <= 0 or height <= 0:
         raise ValueError('crop dimensions must be positive')
+    if engine == 'vision':
+        return vision_crop_metrics(raw, width, height)
+    if engine != 'docai':
+        raise ValueError('unknown engine')
     reading = _reading(raw, dict(raw_json_path='', request_id=None, latency_s=0,
                                 crop_sha256='', receipt_id=''))
     page = raw['document']['pages'][0]
@@ -260,6 +265,25 @@ def crop_metrics(raw: dict, width: int, height: int) -> dict:
         mean_symbol_confidence=reading.mean_symbol_conf, min_symbol_confidence=reading.min_symbol_conf,
         symbol_count=len(reading.symbol_confidences),
         empty=not reading.text.strip(), greek_characters=greek)
+
+
+def response_path(output: Path, row: dict, engine: str = 'docai') -> Path:
+    """DocAI keeps its historical crop-ID paths; Vision uses image SHA paths."""
+    return output / 'responses' / ((row['crop_sha256'] if engine == 'vision' else row['crop_id']) + '.json')
+
+
+def vision_crop_metrics(raw: dict, width: int, height: int) -> dict:
+    reading = vision_reading(raw, {})
+    characters = reading.raw_text.replace('\r', '').replace('\n', '')
+    greek = sorted({c for c in reading.raw_text if 'GREEK' in unicodedata.name(c, '')}, key=ord)
+    return dict(width_px=width, height_px=height, lines_returned=len(reading.lines),
+        text_per_line=reading.lines, line_confidences=reading.line_confidences,
+        line_count_source=reading.line_count_source, paragraphs_returned=len(reading.paragraphs),
+        text=reading.raw_text, total_characters=len(characters),
+        characters_per_100px_width=100 * len(characters) / width,
+        mean_symbol_confidence=reading.mean_symbol_conf, min_symbol_confidence=reading.min_symbol_conf,
+        symbol_count=len(reading.symbol_confidences), empty=not reading.raw_text.strip(),
+        greek_characters=greek, detected_languages=reading.detected_languages)
 
 
 def characters_table(rows: list[dict]) -> dict:
@@ -348,14 +372,21 @@ def run_lock(path):
         yield
 
 
-def cached_response(row: dict, output: Path, reader: DocAIReader, *, offline=False) -> dict:
-    """No Anemi bytes reach the adapter. Validate cache before every reuse."""
+def cached_response(row: dict, output: Path, reader: DocAIReader | VisionReader, *, offline=False, engine='docai') -> dict:
+    """Apply the Anemi opt-in gate and validate cache before every reuse."""
     if is_anemi(row['page'], row['crop_path']):
         raise ValueError('Anemi is withheld: no adapter call allowed')
     crop_sha = row['crop_sha256']
     if sha256(Path(row['crop_path'])) != crop_sha:
         raise ValueError('crop changed since inventory; no call made')
-    path = output / 'responses' / (row['crop_id'] + '.json')
+    path = response_path(output, row, engine)
+    if engine == 'vision':
+        if reader.responses_dir != (output / 'responses').resolve():
+            raise ValueError('Vision reader cache directory must match the engine output')
+        if offline and not path.exists():
+            raise ValueError(f"offline cache miss: {row['crop_id']}")
+        reader.read_annotation(row['crop_path'], expected_sha256=crop_sha)
+        return json.loads(path.read_text())
     binding = reader.binding()
     if path.exists():
         value = json.loads(path.read_text())
@@ -422,13 +453,13 @@ def cached_response(row: dict, output: Path, reader: DocAIReader, *, offline=Fal
         raise
 
 
-def receipt(rows, directory, output, reader, status, error=None) -> dict:
+def receipt(rows, directory, output, reader, status, error=None, *, engine='docai') -> dict:
     ledger = [json.loads(s) for s in reader.ledger_path.read_text().splitlines()] if reader.ledger_path.exists() else []
     calls = [r for r in ledger if not r['cached']]
     billed = sum(r.get('pages_billed') or 0 for r in calls)
     recovered = {json.loads(p.read_text())['receipt_id'] for p in (output/'responses').glob('*.json') if 'recovered_adapter_parse_error' in json.loads(p.read_text())}
     files = list((directory / 'crops').glob('*.png'))
-    return dict(schema_version=1, status=status, error=error, timestamp=datetime.now(timezone.utc).isoformat(),
+    value = dict(schema_version=1, status=status, error=error, timestamp=datetime.now(timezone.utc).isoformat(),
         catalogue_directory=str(directory), binding=reader.binding(),
         input_hashes={f:sha256(directory/f) for f in ['README.md', *CATALOGUES, 'page_comments.json'] if (directory/f).exists()},
         calls=len(calls), successful_calls=sum(r['status']=='ok' or r['receipt_id'] in recovered for r in calls),
@@ -445,6 +476,16 @@ def receipt(rows, directory, output, reader, status, error=None) -> dict:
         measured_crop_ids=sum(r['status']=='ok' for r in rows),
         unique_measured_crop_sha256=len({r['crop_sha256'] for r in rows if r['status']=='ok'}),
         request_policy='sequential; no retries; SHA cache; stop on first error; el hints; symbols enabled')
+    value.update(engine=engine, include_anemi=ALLOW_ANEMI, language_hints=list(reader.language_hints))
+    value['anemi_crop_files'] = value['withheld_anemi']
+    if ALLOW_ANEMI:
+        value['withheld_anemi'] = 0
+    if engine == 'vision':
+        value.update(images_billed_known=billed, images_billing_unknown=value['pages_billing_unknown'],
+            price_per_1000_images_usd=1.50, price_source='https://cloud.google.com/vision/pricing',
+            cost_basis='Document Text Detection image-feature base list price; excludes free allowance, credits, taxes and discounts; not an invoice',
+            request_policy='sequential; no retries; SHA cache; stop on first error; hints recorded in binding')
+    return value
 
 
 def fmt(value):
@@ -461,6 +502,9 @@ def write_csv(path, rows):
 
 
 def build_artifacts(rows, comments, directory, out, rec):
+    if rec.get('engine') == 'vision':
+        from prototypes.harvest.vision_comparison import build_vision_artifacts
+        return build_vision_artifacts(rows, comments, directory, out, rec)
     output = out / 'docai_failed_lines'
     effects = json.loads((directory/'page_comments.json').read_text())['effects']
     findings_path = output/'visual_findings.json'
@@ -577,10 +621,10 @@ def build_artifacts(rows, comments, directory, out, rec):
     build_review(rows, summary, comments, out, rec)
 
 
-def build_review(rows, summary, comments, out, rec):
+def build_review(rows, summary, comments, out, rec, *, engine='docai', comparison=None):
     """Continuous strip/card format and palette from scripts/glyphs/pages_review.html."""
     esc = lambda s: html.escape(str(s), quote=True)
-    images = out/'docai_failed_lines/images'
+    images = out/f'{engine}_failed_lines/images'
     images.mkdir(parents=True, exist_ok=True)
     groups = defaultdict(list)
     for row in rows:
@@ -616,6 +660,8 @@ def build_review(rows, summary, comments, out, rec):
             for c in row['comment_associations']:
                 parts.append(f'<div class="note"><b>{esc(c["comment_id"])} · {esc(c["failure_type"])} · #{c["number"]}</b>\n{esc(c["owner_words"])}\n{esc(c["observation"])}</div>')
             if row['status']=='ok':
+                if engine == 'vision':
+                    parts.append(f'<h4>Cloud Vision raw full annotation text</h4><p class="ocr" lang="el">{esc(row["text"])}</p>')
                 parts += [f'<div class="events"><span>{row["width_px"]} × {row["height_px"]} px</span><span>{row["lines_returned"]} layout lines</span><span>Mean symbol confidence {fmt(row["mean_symbol_confidence"])}</span><span>Minimum {fmt(row["min_symbol_confidence"])}</span><span>{row["total_characters"]} characters · {fmt(row["characters_per_100px_width"])} / 100 px</span></div>',
                     f'<p><b>{esc(row["treatment"])}</b> · {esc(", ".join(row["exposure_signals"]) or "no exposure signal")}</p>', '<ol class="ocr" lang="el">']
                 for text, conf in zip(row['text_per_line'],row['line_confidences']):
@@ -624,6 +670,18 @@ def build_review(rows, summary, comments, out, rec):
                     f'<a href="docai_failed_lines/responses/{esc(row["crop_id"])}.json">Raw response and SHA receipt</a>']
             else:
                 parts.append(f'<p><b>{esc(row["status"])}</b> · No Google output.</p>')
+            if comparison is not None:
+                pair = comparison[row['crop_id']]
+                parts.append('<div class="docai-reading"><h4>Document AI</h4>')
+                if pair['docai_status'] == 'ok':
+                    parts.append(f'<p class="ocr" lang="el">{esc(pair["docai_text"])}</p>')
+                    parts.append(f'<p class="muted">Mean symbol confidence {fmt(pair["docai_mean_symbol_confidence"])} · minimum {fmt(pair["docai_min_symbol_confidence"])} · {pair["docai_lines_returned"]} layout lines</p>')
+                    parts.append(f'<p>{esc(pair["docai_treatment"])} · {esc(", ".join(pair["docai_exposure_signals"]))}</p>')
+                    parts.append(f'<a href="__DOCAI__/responses/{esc(row["crop_id"])}.json">DocAI raw response and SHA receipt</a>')
+                    parts.append(f'<p>Strict NFD CER (DocAI reference): {fmt(pair["nfd_cer_docai_reference"])} · NFD identical: {pair["nfd_equal"]}</p>')
+                else:
+                    parts.append(f'<p>{esc(pair["docai_status"])}</p>')
+                parts.append('</div>')
             parts.append('</article>')
         parts.append('</section>')
     parts += ['<section><h2>Types without a crop measurement</h2>']
@@ -631,12 +689,24 @@ def build_review(rows, summary, comments, out, rec):
         if not s['n_measured']:
             parts.append(f'<p><b>{esc(kind)}</b>: withheld, absent crop, or no unambiguous region. See report for page comments; no treatment is inferred.</p>')
     parts.append('</section></main></html>')
-    (out/'docai_failed_lines_review.html').write_text('\n'.join(parts), encoding='utf-8')
+    text = '\n'.join(parts)
+    if engine == 'vision':
+        text = text.replace('Document AI · Known failed lines · T10', 'Vision vs Document AI · Known failed lines · T11').replace('How Google treats the line finder’s failures', 'Cloud Vision vs Document AI: failed lines').replace('docai_failed_lines/', 'vision_failed_lines/').replace('DOCAI_FAILED_LINES_v1.md', 'VISION_VS_DOCAI_v1.md').replace('Google’s layout lines', 'Vision’s paragraphs and detected symbol breaks').replace('Raw response and SHA receipt', 'Vision raw response and SHA receipt')
+        # SHA-addressed Vision envelopes can be shared by multiple crop IDs.
+        for row in rows:
+            text = text.replace('vision_failed_lines/responses/' + esc(row['crop_id']) + '.json', 'vision_failed_lines/responses/' + row['crop_sha256'] + '.json')
+        text = text.replace('<ol class="ocr" lang="el">', '<h4>Cloud Vision</h4><ol class="ocr" lang="el">')
+        text = text.replace('__DOCAI__/', 'docai_failed_lines/')
+    (out/('vision_vs_docai_review.html' if comparison is not None else f'{engine}_failed_lines_review.html')).write_text(text, encoding='utf-8')
 
 
-def run(directory: Path, out: Path, *, offline=False, reader=None):
+def run(directory: Path, out: Path, *, offline=False, reader=None, engine='docai', language_hints=None):
     directory, out = directory.resolve(), out.resolve()
-    output = out/'docai_failed_lines'
+    if engine not in ('docai', 'vision'):
+        raise ValueError('unknown engine')
+    output = out/f'{engine}_failed_lines'
+    if engine == 'vision':
+        reader = reader or load_google_vision(enabled=True, user_project='ocr-ground-truth-20261008', language_hints=language_hints if language_hints is not None else ('el', 'grc'), responses_dir=output/'responses')
     reader = reader or DocAIReader('ocr-ground-truth-20261008', 'eu', '9a98b7aca3c19561',
         DEFAULT_VERSION, language_hints=('el',), enable_symbol=True, receipts_dir=output/'adapter_receipts')
     out.mkdir(parents=True, exist_ok=True)
@@ -648,20 +718,20 @@ def run(directory: Path, out: Path, *, offline=False, reader=None):
         print(f'inventory: {len(rows)} crop IDs, {len(permitted)} permitted, {len(rows)-len(permitted)} withheld input crops', flush=True)
         try:
             for i, row in enumerate(permitted, 1):
-                value = cached_response(row, output, reader, offline=offline)
-                row.update(crop_metrics(value['response'],row['width_px'],row['height_px']))
+                value = cached_response(row, output, reader, offline=offline, engine=engine)
+                row.update(crop_metrics(value['response'],row['width_px'],row['height_px'],engine=engine))
                 row.update(status='ok', request_id=value['request_id'], receipt_id=value['receipt_id'])
                 if i % 10 == 0 or i == len(permitted):
                     print(f'completed {i}/{len(permitted)} crop IDs', flush=True)
-                    atomic_json(output/'receipt.json', receipt(rows,directory,output,reader,'running'))
+                    atomic_json(output/'receipt.json', receipt(rows,directory,output,reader,'running',engine=engine))
         except Exception as error:
             row['status']='error'
             row['error']=str(error)
-            rec=receipt(rows,directory,output,reader,'stopped',str(error))
+            rec=receipt(rows,directory,output,reader,'stopped',str(error),engine=engine)
             build_artifacts(rows,comments,directory,out,rec)
             print(f'STOPPED: {error}', flush=True)
             return rec
-        rec=receipt(rows,directory,output,reader,'complete')
+        rec=receipt(rows,directory,output,reader,'complete',engine=engine)
         build_artifacts(rows,comments,directory,out,rec)
         print(f"complete: {rec['calls']} calls; US${rec['estimated_cost_usd']:.4f}; {rec['withheld_anemi']} Anemi files withheld", flush=True)
         return rec
@@ -671,12 +741,14 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--catalogue', type=Path, default=DEFAULT_CATALOGUE)
     parser.add_argument('--out', type=Path, default=DEFAULT_OUT)
+    parser.add_argument('--engine', choices=('docai', 'vision'), default='docai')
+    parser.add_argument('--language-hints', nargs='*', default=None, help='Vision hints (default el grc)')
     parser.add_argument('--offline', action='store_true', help='rebuild from saved responses; no ADC or API calls')
     parser.add_argument('--include-anemi', action='store_true', help='send Anemi crops too (owner authorised 11 Oct 2026)')
     args=parser.parse_args(argv)
     global ALLOW_ANEMI
     ALLOW_ANEMI = bool(args.include_anemi)
-    result=run(args.catalogue,args.out,offline=args.offline)
+    result=run(args.catalogue,args.out,offline=args.offline,engine=args.engine,language_hints=args.language_hints)
     return 0 if result['status']=='complete' else 1
 
 

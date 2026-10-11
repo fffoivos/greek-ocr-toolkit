@@ -5,6 +5,13 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 CALLS={
+'VisionReader':'reader = VisionReader("quota-project", language_hints=("el", "grc"))',
+'VisionReading':'reading = VisionReading(**recorded_vision_values)',
+'VisionError':'error = VisionError("retained service refusal")',
+'load_google_vision':'reader = load_google_vision(enabled=True, user_project="quota-project")',
+'read_annotation':'reading = reader.read_annotation("crop.png")',
+'VisionReader.read':'text = reader.read("crop.png")',
+'VisionReader.binding':'binding = reader.binding()',
 'process_page':'result = process_page(image, options=PageOptions(statistics=True))',
 'process_book':'result = process_book(page_images, book_id="book-1", options=PageOptions(statistics=True))',
 'PageOptions':'options = PageOptions(tables=True, join_lines=True, granularity="rows", statistics=True)',
