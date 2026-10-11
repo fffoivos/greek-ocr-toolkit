@@ -392,3 +392,18 @@ def test_docai_public_api_typed_documented_and_packaged():
         imported = importlib.import_module(module)
         assert callable(getattr(getattr(imported, owner) if owner else imported, name))
     assert 'greekocr.readers.services' in find_namespace_packages(str(root), include=['greekocr*'])
+
+
+def test_protojson_omitted_empty_text_is_cached_without_recall(reader, crop):
+    reader._transport.raw={'document':{'mimeType':'image/png','pages':[{'pageNumber':1}]}}
+    reading=reader.read(crop)
+    assert reading.text=='' and reading.lines==[]
+    assert reading.mean_symbol_conf is None and reading.min_symbol_conf is None
+    assert reader.read(crop).cached
+    assert len(reader._transport.calls)==1
+
+
+def test_omitted_text_with_nonempty_layout_is_still_invalid(reader,crop):
+    reader._transport.raw['document'].pop('text')
+    with pytest.raises(DocAIError,match='missing document.text'):
+        reader.read(crop)

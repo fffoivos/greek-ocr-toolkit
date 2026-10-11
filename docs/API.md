@@ -2439,3 +2439,31 @@ checkpoint = verify_init("converted/donor_init.pt")
 from greekocr.warmstart import qualify_parity
 receipt = qualify_parity(donor_spec, "converted/native_before_swap.pt", "100_crops.jsonl", "parity")
 ```
+
+## Failed-line Document AI audit (T10 prototype)
+
+`prototypes.harvest.google_failed_lines` audits the R7 owner's crop catalogue before any harvest. It uses the existing `DocAIReader`, Greek hints and symbol output, excludes Anemi by both page ID and filename before adapter access, and binds response envelopes to image SHA-256 plus processor/options. Byte-identical crops reuse one request. No `.git` writes, crop straightening, held-out processing or training-data harvest are performed.
+
+```sh
+.venv/bin/python scripts/harvest/google_failed_lines.py
+.venv/bin/python scripts/harvest/google_failed_lines.py --offline
+```
+
+Options: `--catalogue DIRECTORY`, `--out DIRECTORY`, `--offline`. Defaults are the supplied sibling `greek-ocr-toolkit-ff-merged/.astra/fast_lines/out/stack/r7/failed_lines` catalogue and this repository's `docs/harvest`. Offline regeneration reads saved envelopes without ADC or network. A missing cache stops; it never silently calls Google.
+
+- `load_catalogues(directory) -> list[dict]`: flatten the two JSON catalogues' `current_output_items`, validate paths, retain owner metadata, dimensions, SHA and withheld rows. Marked-region crops are excluded from calls.
+- `derive_comment_crops(directory, rows, output) -> list[dict]`: bind explicit current-owner box numbers only when saved R6 item geometry and display order equal R7; intersect exact polygons and crop native grayscale pixels. Reuse existing catalogue items, preserve association and source hashes. Ambiguous historical/page-wide comments remain unmeasured.
+- `crop_metrics(raw, width, height) -> dict`: actual layout-line count/text, line confidence, symbol confidence, empty flag, characters excluding CR/LF, characters per 100 image-width pixels, and raw Greek code-point set. If layout lines are absent the text-split fallback is labelled.
+- `characters_table(rows) -> dict`: ALL and each present source, exact emitted code-point counts, requested historical-character observations, and NFD combining marks attached to Greek letters; deduplicate image SHA values.
+- `cached_response(row, output, reader, offline=False) -> dict`: response envelope with raw response and hash, image hash, binding and adapter receipt. Never calls Anemi. Changed bindings/hashes or unresolved attempts fail closed. No fresh/retry option is exposed.
+- `run(directory, out, offline=False, reader=None) -> dict`: sequential audit; durable attempt journal, adapter receipts/ledger, response envelopes, CSV/JSON metrics, character tables, per-type report, local-file-image review HTML and cost receipt. Stops on the first request error, including permission/billing errors, preserving a partial report.
+
+Outputs: `DOCAI_FAILED_LINES_v1.md`, `docai_failed_lines_review.html`, and `docai_failed_lines/{responses,adapter_receipts,attempts,derived_crops,images,inventory.json,metrics.json,crops.csv,characters.csv,characters.json,summary.json,page_comment_coverage.json,receipt.json}`. Receipt cost is a base list-price estimate, not a billing statement. Confidence exposure thresholds are diagnostic and single-line silent candidates require visual confirmation against source geometry.
+
+Validate the frozen v1 artifacts without network:
+
+```sh
+.venv/bin/python scripts/harvest/validate_google_failed_lines.py
+```
+
+The validator recomputes all crop metrics and character counts, verifies raw responses/image hashes/CSV IDs/cards/links and one API call per image SHA, and writes `docai_failed_lines/validation.json`. It checks responsive CSS constraints; it does not claim a rendered desktop/phone viewport check. Hash-bound manual observations are retained in `visual_findings.json` and shown on the corresponding cards.

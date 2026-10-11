@@ -196,3 +196,14 @@ are needed. The synthetic response has two tokens and five symbols.
 ```sh
 python -m pytest tests/test_docai.py -q
 ```
+
+## T10 live empty-response handling
+
+The failed-line audit on 11 October 2026 encountered an HTTP-success empty page
+whose `document.text`, lines and symbols were omitted as default ProtoJSON
+fields. The adapter now reads that form as empty text with no confidence values;
+it still rejects missing text accompanied by nonempty text-bearing layout.
+See [ProtoJSON default-value rules](https://protobuf.dev/programming-guides/json/#presence-and-default-values).
+T10 recovered the original saved raw response without re-calling the crop and
+retains the historical parse-error ledger. This does not change T8's offline-only
+provenance. The audit CLI/report is documented in [API.md](API.md#failed-line-document-ai-audit-t10-prototype).

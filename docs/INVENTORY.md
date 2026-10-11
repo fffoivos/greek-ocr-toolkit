@@ -1178,3 +1178,17 @@ The two CLLG implementation files above now support optional confidence records.
 Round 4 part 3 adds the opt-in oriented OCR mode without changing the compatibility detector.
 
 | `greekocr/deploy/docling_plugin/orientation.py` | new toolkit implementation | 420b320 baseline | adapted | guide-tested pre-layout spatial uniformity and orientation timing; rotated-table adapter retained |
+
+## T10 failed-line Document AI audit fixtures (11 October 2026)
+
+These fixtures are newly authored synthetic offline contracts. No source Anemi image is included; the filename prefix tests the licensing gate. `response.json` extends the existing T8 synthetic stored response with a layout-line anchor. No API call generated the fixtures.
+
+| Fixture path | Provenance | SHA-256 |
+| --- | --- | --- |
+| `tests/data/docai_failed_lines/README.md` | T10 synthetic offline fixture | `0eabcfa0d25cfbcfdd554ce6125474865bbfbe8603cd2509c8c00f3279a6c2bc` |
+| `tests/data/docai_failed_lines/controls_owner_marked.json` | T10 synthetic offline fixture | `dbad7f91effdf038bcd9d14ecb006b05b9c2800fbc2045b25c850f1d90a429bd` |
+| `tests/data/docai_failed_lines/crops/an-withheld.png` | T10 synthetic offline fixture | `dd5d8a3753179dfd67aea09e8cad21f16ea95be2f8b682e13da56d6f77036a96` |
+| `tests/data/docai_failed_lines/crops/s2-control.png` | T10 synthetic offline fixture | `dd5d8a3753179dfd67aea09e8cad21f16ea95be2f8b682e13da56d6f77036a96` |
+| `tests/data/docai_failed_lines/crops/s2-multi.png` | T10 synthetic offline fixture | `dd5d8a3753179dfd67aea09e8cad21f16ea95be2f8b682e13da56d6f77036a96` |
+| `tests/data/docai_failed_lines/multi_line_segments.json` | T10 synthetic offline fixture | `6eca70a2d2dc800074c93ab597a60d225f11d6fcc8c63289ff8831b6765b407a` |
+| `tests/data/docai_failed_lines/response.json` | T10 synthetic offline fixture | `e201dcc5cd51f8d7b1c82baea76bbbf441c1983192706b90c53d74579efabd19` |

@@ -1,0 +1,1 @@
+T10 offline fixtures: minimal synthetic catalogue records preserving the input schema. The PNGs are blank synthetic 100 × 20 grayscale images; the Anemi prefix exercises exclusion and contains no licensed source material. response.json extends the existing T8 synthetic recorded REST response with a layout-line anchor. No network request produced these fixtures.

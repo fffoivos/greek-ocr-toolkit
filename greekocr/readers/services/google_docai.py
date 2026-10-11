@@ -100,14 +100,19 @@ def _reading(raw: dict, metadata: dict, *, cached: bool = False) -> Reading:
     if raw.get('error'):
         raise DocAIError('Document AI returned an error: ' + _canonical(raw['error']))
     document = raw.get('document')
-    if not isinstance(document, dict) or not isinstance(document.get('text'), str):
+    if not isinstance(document, dict):
         raise ValueError('Document AI response is missing document.text')
     if document.get('error'):
         raise DocAIError('Document AI document error: ' + _canonical(document['error']))
     pages = document.get('pages', [])
     if len(pages) != 1:
         raise ValueError('line-crop response must contain exactly one page')
-    text = document['text']
+    # ProtoJSON omits default empty strings/repeated fields. A successful empty
+    # page therefore need not contain document.text, lines, tokens or symbols.
+    text = document.get('text', '')
+    if not isinstance(text, str) or ('text' not in document and any(
+            pages[0].get(kind) for kind in ('lines', 'tokens', 'symbols', 'paragraphs'))):
+        raise ValueError('Document AI response is missing document.text')
     tokens = _confidence_items(pages[0], 'tokens', text, 1)
     symbols = _confidence_items(pages[0], 'symbols', text, 1)
     confidences = [s['confidence'] for s in symbols if s['confidence'] is not None]
