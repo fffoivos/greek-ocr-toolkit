@@ -9,7 +9,7 @@ import numpy as np
 import cv2
 from PIL import Image
 import pypdfium2 as pdfium
-from .core import STACK_COMMIT, SCHEMA, bbox, page_gate, crop_gate, body_font_gate, tier, validate_record
+from .core import STACK_COMMIT, SCHEMA, GATE_REVISION, bbox, page_gate, crop_gate, body_font_gate, split_columns, tier, validate_record
 from .readers import Readers, BudgetExceeded, atomic, read_jsonl
 
 HOME=Path('/Users/foivoskarounos-zamparloukos/Projects')
@@ -105,10 +105,16 @@ def crop_features(im):
                 component_count=len(bodies),length_stratum='full_width' if im.width/max(1,im.height)>=12 else 'short',
                 readability_stratum='faint' if paper-dark<70 else 'normal',chars_per_100px=None)
 
-def polygon_crop(image, polygon):
+def polygon_crop(image, polygon, *, parent_polygon=None):
     box=bbox(polygon)
     x0,y0,x1,y1=max(0,math.floor(box[0])),max(0,math.floor(box[1])),min(image.width,math.ceil(box[2])),min(image.height,math.ceil(box[3]))
     if x1<=x0 or y1<=y0: raise ValueError('invalid polygon crop')
+    if parent_polygon is not None:
+        # Re-rasterising a clipped sloping edge can move it by one pixel. Cut
+        # the original mask instead, preserving every original column pixel.
+        parent_box=bbox(parent_polygon)
+        px,py=max(0,math.floor(parent_box[0])),max(0,math.floor(parent_box[1]))
+        return polygon_crop(image,parent_polygon).crop((x0-px,y0-py,x1-px,y1-py))
     raw=image.crop((x0,y0,x1,y1)); mask=np.zeros((raw.height,raw.width),np.uint8)
     cv2.fillPoly(mask,[np.rint(np.asarray(polygon)-[x0,y0]).astype(np.int32)],255)
     return Image.fromarray(np.where(mask,np.asarray(raw),255).astype(np.uint8))
@@ -124,18 +130,22 @@ def extract_page(inp,stack,big,source):
     render_s=time.perf_counter()-start; gray=np.asarray(image)
     t=time.perf_counter(); result=stack.run(page_path,gray); stack_s=time.perf_counter()-t
     t=time.perf_counter(); pg=page_gate(gray,result['items'],bend_fired=any(f['side']!=0 for f in result['harvest_bend']))
-    gates_s=time.perf_counter()-t; boxes=[bbox(q['polygon']) for q in result['items']]
+    items=split_columns(result['items'],pg['column_bands'],gray)
+    gates_s=time.perf_counter()-t; boxes=[bbox(q['polygon']) for q in items]
     records=[];crop_s=0.; code_hash={p.name:digest(p) for p in sorted(Path(__file__).parent.glob('*.py'))}
-    for i,(item,box) in enumerate(zip(result['items'],boxes)):
+    for i,(item,box) in enumerate(zip(items,boxes)):
         t=time.perf_counter(); gate=crop_gate(box,boxes,pg,image.size,item,long_complete=True)
         feat=dict(width=math.ceil(box[2])-math.floor(box[0]),height=math.ceil(box[3])-math.floor(box[1]),
             x_height_estimate=None,chars_per_100px=None,faintness_proxy=None,
             width_band_ratio=gate['width_band_ratio'],paragraph_position=gate['paragraph_position'])
         if gate['accepted']:
-            feat.update(crop_features(polygon_crop(image,item['polygon'])))
+            feat.update(crop_features(polygon_crop(image,item['polygon'],parent_polygon=item.get('harvest_parent_polygon'))))
             feat['length_stratum']='long_complete_candidate'
         crop_s+=time.perf_counter()-t
-        record=dict(schema=SCHEMA,id=inp['id']+f'-l{i+1:04d}',page_id=inp['id'],source='Anemi',
+        ident=inp['id']+f"-l{item['harvest_parent_index']+1:04d}"
+        if 'harvest_column_piece' in item: ident+=f"-c{item['harvest_column_piece']+1}"
+        gate['column_bands']=pg['column_bands']
+        record=dict(schema=SCHEMA,id=ident,page_id=inp['id'],source='Anemi',
             book=inp['book'],year=inp['year'],decade=inp['decade'],page=inp['page'],
             provenance=dict(pdf=inp['pdf'],pdf_sha256=pdf_sha,source_url=inp['source_url'],
                 catalogue=inp['catalogue'],rights=inp['rights'],fetch_receipt=inp['fetch_receipt'],
@@ -146,6 +156,8 @@ def extract_page(inp,stack,big,source):
             gates=gate,page_gate_flags=pg['flags'],features=feat,straighten=None,raw_crop=None,
             straight_crop=None,text_layer=None,readers={},tier='unread' if gate['accepted'] else 'rejected',
             label=None,tags=[],sampled=False)
+        if 'harvest_parent_polygon' in item:
+            record['pre_split_polygon']=item['harvest_parent_polygon']
         records.append(validate_record(record))
     body_font_gate(records,pg)
     receipt=dict(**inp,stack_commit=STACK_COMMIT,page_gate=pg,bend_scout=result['harvest_bend'],
@@ -227,28 +239,72 @@ def sample_order(rows,seed=13):
         ordered.extend(groups[k][i] for k in keys if i<len(groups[k]))
     return ordered
 
-def straighten_candidate(r,big):
+def neighbour_ink(line):
+    """Measure retained neighbour pixels, excluding the main row's own marks.
+
+    Component ownership is fitted with the main baseline pinned by the
+    straightener. Above/below neighbours are measured independently, including
+    partial bodies that never reach 50% visibility. Denominators are the actual
+    reader-facing crop height and width, not a neighbour's fitted body height.
+    """
+    from greekocr.glyphs.components import line_glyphs
+    g=line_glyphs(line.image,xh_prior=line.xh,
+                  focus=(line.baseline_row-2,line.baseline_row+2))
+    yy=np.arange(g.height)[:,None]
+    result={}
+    for side,region in (('above',yy<g.band.top[None,:]),('below',yy>=g.band.bottom[None,:])):
+        ids=[c.index for c in g.components if c.role=='neighbour' and
+             (c.rel_cy<0 if side=='above' else c.rel_cy>0)]
+        mask=np.isin(g.labels,ids)&region if ids else np.zeros_like(g.ink)
+        rows=np.flatnonzero(mask.any(axis=1));cols=np.flatnonzero(mask.any(axis=0))
+        result[side]=dict(height_fraction=len(rows)/g.height,
+            x_span_fraction=float(cols[-1]-cols[0]+1)/g.width if cols.size else 0.,
+            ink_pixels=int(mask.sum()),component_count=len(ids))
+    result['height_limit']=.12;result['x_span_limit']=.30
+    result['rejected']=any(result[s]['height_fraction']>.12 or result[s]['x_span_fraction']>.30
+                           for s in ('above','below'))
+    return result
+
+def inspect_straight_crop(raw):
+    """Offline gate stage only: no filesystem writes, detector or readers."""
     from greekocr.glyphs.lines_api import separate_lines
+    flags=[];line=None;metadata=None;sliver=None
+    try:
+        lines=separate_lines(raw,min_visible=0,tight=True,margin=.2)
+        mains=[l for l in lines if l.side=='main']
+        neighbours=[l for l in lines if l.side!='main' and l.visible>=.5]
+        if len(mains)!=1:
+            flags.append('straightener_multiple_bands' if lines else 'straightener_empty')
+        else:
+            line=mains[0]
+            metadata=dict(x_height=float(line.xh),missing_fraction=float(line.missing.mean()),
+                top_body_cut=float(line.top_cut.mean()),bottom_body_cut=float(line.bottom_cut.mean()),
+                margin_xh=.2,tight=True,page_x_offset_in_crop=line.x0)
+            sliver=neighbour_ink(line)
+            if sliver['rejected']: flags.append('neighbour_sliver')
+            if neighbours: flags.append('straightener_multiple_bands')
+            if metadata['top_body_cut']>.08 or metadata['bottom_body_cut']>.08:
+                flags.append('curled_or_clipped_body_edge')
+    except Exception as e: flags.append('straightener_error_'+type(e).__name__)
+    return dict(flags=flags,line=line,straighten=metadata,neighbour_sliver=sliver)
+
+def straighten_candidate(r,big):
     t=time.perf_counter();directory=Path(big)/'crops'/r['page_id'];directory.mkdir(parents=True,exist_ok=True)
-    with Image.open(r['provenance']['page_image']) as page: raw=polygon_crop(page,r['polygon'])
+    with Image.open(r['provenance']['page_image']) as page:
+        raw=polygon_crop(page,r['polygon'],parent_polygon=r.get('pre_split_polygon'))
     raw_path=directory/(r['id']+'.raw.png');raw.save(raw_path)
     r['raw_crop']=str(raw_path.resolve())
-    try:
-        lines=separate_lines(raw,tight=True,margin=.2)
-        mains=[l for l in lines if l.side=='main'];neighbours=[l for l in lines if l.side!='main' and l.visible>=.5]
-        if len(mains)!=1 or neighbours:
-            r['gates']['flags'].append('straightener_multiple_bands' if lines else 'straightener_empty')
-        else:
-            line=mains[0];path=directory/(r['id']+'.straight.png');line.image.save(path)
-            r['straight_crop']=str(path.resolve())
-            r['straighten']=dict(x_height=float(line.xh),missing_fraction=float(line.missing.mean()),
-                top_body_cut=float(line.top_cut.mean()),bottom_body_cut=float(line.bottom_cut.mean()),
-                margin_xh=.2,tight=True)
-            r['features']['x_height_estimate']=float(line.xh)
-            r['features']['straight_width']=line.image.width;r['features']['straight_height']=line.image.height
-            if r['straighten']['top_body_cut']>.08 or r['straighten']['bottom_body_cut']>.08:
-                r['gates']['flags'].append('curled_or_clipped_body_edge')
-    except Exception as e: r['gates']['flags'].append('straightener_error_'+type(e).__name__)
+    inspected=inspect_straight_crop(raw)
+    r['gates']['flags'].extend(inspected['flags'])
+    r['gates']['neighbour_sliver']=inspected['neighbour_sliver']
+    r['straighten']=inspected['straighten']
+    line=inspected['line']
+    if line is not None:
+        path=directory/(r['id']+'.straight.png');line.image.save(path)
+        r['straight_crop']=str(path.resolve())
+        r['straighten']['page_x_offset']=math.floor(r['bbox'][0])+line.x0
+        r['features']['x_height_estimate']=float(line.xh)
+        r['features']['straight_width']=line.image.width;r['features']['straight_height']=line.image.height
     r['gates']['accepted']=not r['gates']['flags']
     if not r['gates']['accepted']: r.update(tier='rejected',label=None)
     r['straighten_s']=time.perf_counter()-t
@@ -310,6 +366,9 @@ def label(out,cap=3):
     by_id={r['id']:r for r in records};selected=[by_id[i] for i in sampling['ids']]
     if len(selected)>500 or any(r['source']!='Anemi' or not r['gates']['accepted'] or not r['sampled'] for r in selected):
         raise ValueError('sample contract violated')
+    if any(r['gates'].get('gate_revision')!=GATE_REVISION or
+           not isinstance(r['gates'].get('neighbour_sliver'),dict) for r in selected):
+        raise ValueError('stored sample predates H1-fix1 geometry; gate certification required before readers')
     readers=Readers(out/'google',cap);saved=out/'labels';saved.mkdir(exist_ok=True)
     todo=[]
     for r in selected:

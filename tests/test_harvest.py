@@ -54,7 +54,24 @@ def test_table_rules():
     a,i=body()
     for y in (200,400,600):a[y:y+2,50:550]=0
     for x in (100,300,500):a[150:750,x:x+2]=0
+    i=[dict(polygon=rect(x,y,70,18)) for x in (110,310,510) for y in range(100,800,40)]
     assert 'table' in page_gate(a,i)['flags']
+
+def test_rules_without_lattice_are_not_table():
+    a,i=body()
+    for y in (20,400,870): a[y:y+2,20:580]=0
+    for x in (20,300,580): a[20:880,x:x+2]=0
+    assert 'table' not in page_gate(a,i)['flags']
+
+def test_lattice_without_rules_is_not_table():
+    a,i=body()
+    i=[dict(polygon=rect(x,y,70,18)) for x in (100,300,500) for y in range(100,800,40)]
+    pg=page_gate(a,i)
+    assert pg['box_lattice'] and 'table' not in pg['flags']
+
+def test_lattice_requires_repeated_x_alignment():
+    boxes=[[x,y,x+30,y+12] for y in range(100,300,30) for x in (40+y//2,180+y//3,350-y//3)]
+    assert not box_lattice(boxes,600)
 
 @pytest.mark.parametrize('angle',[8,15,90])
 def test_rotation(angle):
@@ -124,8 +141,8 @@ def test_weak_layer_sixty_percent():
 
 @pytest.fixture
 def fetcher():
-    root=Path('/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/scripts/fetch');sys.path.insert(0,str(root))
-    spec=importlib.util.spec_from_file_location('t13_anemi_fetch',Path('docs/harvest/pilot/_fetch/o4b_anemi_pages.py'));m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
+    path=Path(__file__).parent/'fixtures/harvest_fix1/fetch_selection.py'
+    spec=importlib.util.spec_from_file_location('t13_anemi_fetch',path);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
 
 @pytest.mark.parametrize('sizes,n,expected', [([100],15,[list(range(42,57))]),([10,20],15,[list(range(7,10)),list(range(12))]),([5],15,[list(range(5))])])
 def test_fetch_middle_pages(fetcher,sizes,n,expected):
@@ -280,7 +297,8 @@ def test_schema_rejects_malformed_geometry_and_hash(field,value):
 def test_table_lattice_without_rules():
     a=np.full((900,600),255,np.uint8)
     items=[dict(polygon=rect(x,y,55,15)) for y in range(100,700,40) for x in (50,170,300,430)]
-    assert 'table' in page_gate(a,items)['flags']
+    pg=page_gate(a,items)
+    assert pg['box_lattice'] and 'table' not in pg['flags']
 
 def test_neighbour_height_gate():
     a,i=body();pg=page_gate(a,i)

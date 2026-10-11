@@ -1247,3 +1247,26 @@ Outputs: `docs/harvest/PILOT_v1.md`, `pilot_review.html` with adjacent
 receipts, cost, sample, character counts, timings, failure crops and tests.
 Image data stays under `docs/harvest/harvest_big/`; records contain paths.
 The earlier broader pilot is preserved in `pilot/previous_t13/`.
+
+
+## H1 Fix 1 (12 October 2026)
+
+`greekocr/harvest/core.py` derives repeated physical gutters from page ink and
+independent box clusters, clips fused polygons before crop gating, guards
+cross-column reader joins, and requires both long rules and an x/y box lattice
+for the table gate. `pipeline.py` measures retained neighbouring-row pixels
+against crop height and width; split masks preserve the original polygon pixels.
+`readers.py` carries physical column context through single-crop and montage
+joins. `regate.py` performs read-only offline gate replay from an explicit bulk
+root and emits separate `post_fix1_gate` sidecars; it never constructs a reader,
+runs the stack or changes stored labels.
+The reader orchestration refuses stored samples without the `H1-fix1` gate
+revision and neighbour-ink diagnostics, so a legacy cache cannot bypass the fix.
+
+Fixture custody and every file hash are in
+[`tests/fixtures/harvest_fix1/INVENTORY.md`](../tests/fixtures/harvest_fix1/INVENTORY.md)
+and its `manifest.json`: four unchanged reviewer page renders (both column
+pages, the neighbour page and the bordered prose page), one clean polytonic crop,
+and an offline two-function fetch-selection fixture. Tests use repository-relative
+fixture paths. Fix 1 replay outputs and test logs are under `docs/harvest/fix1/`;
+`docs/harvest/pilot_v1/` and the supplied external archive remain unchanged.

@@ -97,7 +97,7 @@ def montage(records, path, *, separator=24):
     out.save(path); atomic(Path(path).with_suffix('.map.json'),mapping)
     return mapping
 
-def split_montage(pieces, mapping):
+def split_montage(pieces, mapping, *, column_context=None):
     groups={m['id']:[] for m in mapping}; errors={m['id']:[] for m in mapping}
     for p in pieces:
         b=p['bbox']; area=max(1,(b[2]-b[0])*(b[3]-b[1])); overlaps=[]
@@ -112,7 +112,7 @@ def split_montage(pieces, mapping):
         groups[m['id']].append(dict(p,bbox=[b[0]-a[0],b[1]-a[1],b[2]-a[0],b[3]-a[1]]))
     results={}
     for ident,group in groups.items():
-        result=list_return(group)
+        result=list_return(group,**(column_context or {}).get(ident,{}))
         if errors[ident]: result.update(rejected=True,text='',flags=result['flags']+errors[ident])
         results[ident]=result
     return results
@@ -163,13 +163,17 @@ class Readers:
             return {e:f.result() for e,f in futures.items()}
     def single(self,r):
         pair=self.pair(r['straight_crop'])
-        return {e:dict(v,**list_return(v['pieces'])) for e,v in pair.items()}
+        context=dict(column_bands=r['gates'].get('column_bands'),
+                     x_offset=(r.get('straighten') or {}).get('page_x_offset',r['bbox'][0])) if 'gates' in r else {}
+        return {e:dict(v,**list_return(v['pieces'],**context)) for e,v in pair.items()}
     def batch(self,records):
         identity=hashlib.sha256('|'.join(r['id'] for r in records).encode()).hexdigest()[:24]
         path=self.root/'montages'/(identity+'.png'); path.parent.mkdir(parents=True,exist_ok=True)
         mapping=montage(records,path); pair=self.pair(path); result={r['id']:{} for r in records}
         for e,v in pair.items():
-            for ident,parsed in split_montage(v['pieces'],mapping).items():
+            context={r['id']:dict(column_bands=r['gates'].get('column_bands'),
+                x_offset=(r.get('straighten') or {}).get('page_x_offset',r['bbox'][0])) for r in records if 'gates' in r}
+            for ident,parsed in split_montage(v['pieces'],mapping,column_context=context).items():
                 confidences=[p['confidence'] for p in parsed['pieces'] if p.get('confidence') is not None]
                 result[ident][e]=dict(v,**parsed,raw_text='\n'.join(p['text'] for p in parsed['pieces']),
                                      mean_confidence=sum(confidences)/len(confidences) if confidences else None,

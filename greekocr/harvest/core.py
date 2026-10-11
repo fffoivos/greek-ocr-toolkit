@@ -7,6 +7,7 @@ import numpy as np
 
 STACK_COMMIT = '52cee3bcc882e7426bdc1018d892cd9b1bf9feac'
 SCHEMA = 'greekocr-harvest-1'
+GATE_REVISION = 'H1-fix1'
 RARE = 'ϗȣϛϲϹϝϙϡ'
 # Explicit observed word substitutions only; no general sigma/accent folding.
 SUBSTITUTIONS = {'κὶ': ('καὶ',), 'κὰ': ('καὶ',), 'κὴ': ('καὶ',),
@@ -53,7 +54,7 @@ def bbox(poly):
 def foreign(text):
     return any(c.isalpha() and not any(k in unicodedata.name(c, '') for k in ('GREEK','LATIN')) for c in text)
 
-def list_return(pieces):
+def list_return(pieces, *, column_bands=None, x_offset=0):
     """Pieces are text + pixel bbox + confidence. Join one overlapping vertical band."""
     pieces = [p for p in pieces if p.get('text','').strip()]
     if not pieces: return dict(text='', flags=['empty'], rejected=True, pieces=[], dropped=[])
@@ -62,6 +63,13 @@ def list_return(pieces):
         if foreign(p['text']) or not any(c.isalnum() for c in p['text']): bad.append(p)
         else: good.append(p)
     if not good: return dict(text='', flags=['garbage'], rejected=True, pieces=pieces, dropped=bad)
+    # Reader boxes are in crop coordinates; physical bands are in page coordinates.
+    # The union also guards two individually valid pieces on opposite sides.
+    extent = [min(p['bbox'][0] for p in good) + x_offset, 0,
+              max(p['bbox'][2] for p in good) + x_offset, 1]
+    if column_bands and (crosses_column(extent,column_bands) or
+                        (len(good)>1 and sum(f>0 for f in column_coverage(extent,column_bands))>1)):
+        return dict(text='', flags=['crosses_column'], rejected=True, pieces=pieces, dropped=bad)
     heights = [p['bbox'][3]-p['bbox'][1] for p in good]
     main = max(good, key=lambda p: sum(c.isalpha() for c in p['text']))
     mb = main['bbox']; flags = ['list_return'] if len(pieces)>1 else []
@@ -79,15 +87,140 @@ def list_return(pieces):
     return dict(text=' '.join(p['text'].strip() for p in sorted(good,key=lambda p:p['bbox'][0])),
                 flags=flags,rejected=False,pieces=pieces,dropped=bad)
 
-def column_bands(boxes, width):
+def column_bands(boxes, width, gray=None):
+    """Physical text bands, using repeated page-ink gutters before fused boxes.
+
+    A gutter must recur in at least five rows and 20% of eligible boxes, with
+    substantial ink on both sides. This tolerates occasional spanning headings
+    and commentary. Word spaces in one row cannot supply page column evidence.
+    """
     long=[b for b in boxes if b[2]-b[0] >= .2*width]
     if not long: return []
-    centres=np.array([(b[0]+b[2])/2 for b in long]); left=centres<width/2
+    if gray is not None:
+        ink=gray < min(220, float(np.percentile(gray,50))-35)
+        height=float(np.median([b[3]-b[1] for b in long]))
+        profiles=[]; gaps=[]; votes=np.zeros(width, dtype=int)
+        # Duplicate/fused detections on one physical row supply only one vote.
+        row_boxes={}
+        for box in sorted(long,key=lambda b:b[2]-b[0],reverse=True):
+            row=round((box[1]+box[3])/2/max(1,.5*height))
+            row_boxes.setdefault(row,box)
+        for x0,y0,x1,y1 in row_boxes.values():
+            if y1-y0 > 2*height: continue
+            a,b=max(0,math.floor(x0)),min(width,math.ceil(x1))
+            on=np.flatnonzero(ink[max(0,math.floor(y0)):min(len(gray),math.ceil(y1)),a:b].any(axis=0))+a
+            if not on.size: continue
+            profiles.append(on)
+            row_gaps=[]
+            for left,right in zip(on[:-1],on[1:]):
+                if right-left > max(.018*width,.6*height) and left-on[0]>.15*width and on[-1]-right>.15*width:
+                    row_gaps.append((int(left+1),int(right)))
+            for a,b in row_gaps: votes[a:b]+=1
+            gaps.extend(row_gaps)
+        threshold=max(5,math.ceil(.2*len(profiles)))
+        candidates=[]
+        while votes.size and votes.max() >= threshold:
+            x=int(votes.argmax())
+            support=[g for g in gaps if g[0]<=x<g[1]]
+            a=float(np.median([g[0] for g in support])); b=float(np.median([g[1] for g in support]))
+            candidates.append((a,b))
+            votes[max(0,int(x-.15*width)):min(width,int(x+.15*width)+1)]=0
+        if candidates:
+            gutters=sorted(candidates)
+            cuts=[0]+[(a+b)/2 for a,b in gutters]+[width]
+            bands=[]
+            for col,(left,right) in enumerate(zip(cuts[:-1],cuts[1:])):
+                spans=[on[(on>=left)&(on<right)] for on in profiles]
+                spans=[on for on in spans if on.size and on[-1]-on[0]>=.12*width]
+                if len(spans)>=5:
+                    start=float(np.percentile([on[0] for on in spans],5))
+                    end=float(np.percentile([on[-1]+1 for on in spans],95))
+                    if col: start=max(start,gutters[col-1][1])
+                    if col<len(gutters): end=min(end,gutters[col][0])
+                    if end>start: bands.append([start,end])
+            if len(bands)>=2: return bands
+    # Spanning headings and a minority of fused rows must not stretch the
+    # independently supported x-extent clusters back into one column.
+    narrow=[b for b in long if b[2]-b[0]<=.6*width]
+    centres=np.array([(b[0]+b[2])/2 for b in narrow]); left=centres<width/2
     if left.sum()>=5 and (~left).sum()>=5 and np.median(centres[~left])-np.median(centres[left])>.3*width:
-        groups=[[b for b,c in zip(long,left) if c==side] for side in (True,False)]
+        groups=[[b for b,c in zip(narrow,left) if c==side] for side in (True,False)]
         bands=[[float(np.percentile([b[0] for b in g],5)),float(np.percentile([b[2] for b in g],95))] for g in groups]
-        if bands[0][1] < bands[1][0]+.03*width: return bands
+        if bands[0][1] < bands[1][0]: return bands
     return [[float(np.percentile([b[0] for b in long],5)),float(np.percentile([b[2] for b in long],95))]]
+
+def column_coverage(box, bands):
+    return [max(0.,min(box[2],b[1])-max(box[0],b[0]))/max(1.,b[1]-b[0]) for b in bands]
+
+def crosses_column(box, bands):
+    return sum(f>.15 for f in column_coverage(box,bands))>1
+
+def split_columns(items, bands, gray=None):
+    """Split fused polygons at the gutter before any crop gate.
+
+    The gutter whitespace is omitted so new pieces retain a margin to the
+    physical column edge. With page pixels, use that polygon's blank corridor
+    around the page gutter: a median gutter edge must not trim a tilted letter.
+    Original geometry remains attached for provenance.
+    """
+    def clip(poly, edge, keep_right):
+        out=[]
+        for a,b in zip(poly,poly[1:]+poly[:1]):
+            ia=a[0]>=edge if keep_right else a[0]<=edge
+            ib=b[0]>=edge if keep_right else b[0]<=edge
+            if ia: out.append(a)
+            if ia!=ib:
+                t=(edge-a[0])/(b[0]-a[0]); out.append([edge,a[1]+t*(b[1]-a[1])])
+        return out
+    result=[]
+    ink=gray < min(220,float(np.percentile(gray,50))-35) if gray is not None else None
+    for index,item in enumerate(items):
+        box=bbox(item['polygon'])
+        if sum(f>0 for f in column_coverage(box,bands))<=1:
+            result.append(dict(item,harvest_parent_index=index)); continue
+        gutters=[(left[1],right[0]) for left,right in zip(bands[:-1],bands[1:])]
+        cuts_ink=False
+        if ink is not None:
+            x0,y0=max(0,math.floor(box[0])),max(0,math.floor(box[1]))
+            x1,y1=min(ink.shape[1],math.ceil(box[2])),min(ink.shape[0],math.ceil(box[3]))
+            mask=np.zeros((max(0,y1-y0),max(0,x1-x0)),np.uint8)
+            if mask.size:
+                cv2.fillPoly(mask,[np.rint(np.asarray(item['polygon'])-[x0,y0]).astype(np.int32)],1)
+                on=np.flatnonzero((ink[y0:y1,x0:x1]&mask.astype(bool)).any(axis=0))+x0
+                for i,(a,b) in enumerate(gutters):
+                    centre=(a+b)/2
+                    left=on[on<centre];right=on[on>=centre]
+                    if not left.size or not right.size: continue
+                    lo,hi=float(left[-1]+1),float(right[0])
+                    if hi-lo>=5: gutters[i]=(lo,hi)
+                    else: cuts_ink=True
+        for col,band in enumerate(bands):
+            if column_coverage(box,[band])[0]<=0: continue
+            # Clip only internal sides. Preserve original exterior ink extents.
+            poly=[list(p) for p in item['polygon']]
+            if col: poly=clip(poly,gutters[col-1][1],True)
+            if col<len(bands)-1 and poly: poly=clip(poly,gutters[col][0],False)
+            if len(poly)>=3 and cv2.contourArea(np.asarray(poly,np.float32))>0:
+                if len(poly)==3: poly.append(poly[-1])
+                result.append(dict(item,polygon=poly,harvest_parent_index=index,
+                    harvest_column_piece=col,harvest_parent_polygon=item['polygon'],
+                    harvest_split_cuts_ink=cuts_ink))
+    return result
+
+def box_lattice(boxes, width):
+    """At least five rows share at least three sustained short-box x clusters."""
+    short=[b for b in boxes if b[2]-b[0]<.18*width]
+    if len(short)<=.55*max(1,len(boxes)): return False
+    def clusters(values,tolerance):
+        groups=[]
+        for value,index in sorted(values):
+            if not groups or value-np.median([v for v,_ in groups[-1]])>tolerance: groups.append([])
+            groups[-1].append((value,index))
+        return groups
+    xs=clusters([((b[0]+b[2])/2,i) for i,b in enumerate(short)],max(6,.025*width))
+    sustained={i:col for col,g in enumerate(xs) if len(g)>=5 for _,i in g}
+    ys=clusters([((b[1]+b[3])/2,i) for i,b in enumerate(short)],max(4,.65*np.median([b[3]-b[1] for b in short])))
+    return sum(len({sustained[i] for _,i in g if i in sustained})>=3 for g in ys)>=5
 
 def page_gate(gray, items, *, bend_fired=False):
     h,w=gray.shape; boxes=[bbox(q['polygon']) for q in items]; flags=[]
@@ -105,23 +238,23 @@ def page_gate(gray, items, *, bend_fired=False):
     def count(mask):
         return cv2.connectedComponentsWithStats(mask)[0]-1
     nh,nv=count(horizontal),count(vertical)
-    short=[b for b in boxes if b[2]-b[0]<.18*w]
-    rowbins=Counter(round((b[1]+b[3])/2/20) for b in short)
-    lattice=sum(n>=3 for n in rowbins.values())>=5 and len(short)>.55*max(1,len(boxes))
-    if (nh>=3 and nv>=2) or lattice: flags.append('table')
+    lattice=box_lattice(boxes,w)
+    if nh>=3 and nv>=2 and lattice: flags.append('table')
     if bend_fired: flags.append('bend_scout')
-    bands=column_bands(boxes,w)
+    bands=column_bands(boxes,w,gray)
+    if len(bands)>2: flags.append('more_than_two_columns')
     # Three sustained narrow-column centre clusters are outside H1's body gate.
     centres=sorted((b[0]+b[2])/2 for b in boxes if .12*w<=b[2]-b[0]<=.38*w)
     clusters=[]
     for centre in centres:
         if not clusters or centre-np.median(clusters[-1])>.15*w: clusters.append([centre])
         else: clusters[-1].append(centre)
-    if sum(len(c)>=5 for c in clusters)>2: flags.append('more_than_two_columns')
+    if sum(len(c)>=5 for c in clusters)>2 and 'more_than_two_columns' not in flags: flags.append('more_than_two_columns')
     if len(items)<6 or not bands: flags.append('non_body_page')
     pitches=[]
+    pitch_boxes=[bbox(q['polygon']) for q in split_columns(items,bands)]
     for band in bands:
-        centres=sorted((b[1]+b[3])/2 for b in boxes if band[0]-10<=(b[0]+b[2])/2<=band[1]+10 and b[2]-b[0]>.2*w)
+        centres=sorted((b[1]+b[3])/2 for b in pitch_boxes if band[0]-10<=(b[0]+b[2])/2<=band[1]+10 and b[2]-b[0]>.2*w)
         delta=np.diff(centres); body_h=np.median([b[3]-b[1] for b in boxes]) if boxes else 10
         usable=delta[(delta>.65*body_h)&(delta<4*body_h)]
         pitches.extend(usable.tolist())
@@ -136,6 +269,9 @@ def crop_gate(box, boxes, pg, size, item=None, *, long_complete=False):
     if height>1.5*pg['body_pitch']: flags.append('height_over_body_pitch')
     neighbours=[b[3]-b[1] for b in boxes if b!=box and abs((b[1]+b[3]-y0-y1)/2)<3*pg['body_pitch'] and min(b[2],x1)>max(b[0],x0)]
     if neighbours and height>1.6*np.median(neighbours): flags.append('taller_than_neighbours')
+    coverage=column_coverage(box,pg['column_bands'])
+    if crosses_column(box,pg['column_bands']): flags.append('crosses_column')
+    if item and item.get('harvest_split_cuts_ink'): flags.append('column_split_cuts_ink')
     band=next((i for i,b in enumerate(pg['column_bands']) if x0>=b[0]-max(10,.02*w) and x1<=b[1]+max(10,.02*w)),None)
     if band is None: flags.append('outside_column_band')
     if x0<.01*w or x1>.99*w or y0<2 or y1>h-2: flags.append('page_edge_touch')
@@ -161,7 +297,8 @@ def crop_gate(box, boxes, pg, size, item=None, *, long_complete=False):
         paragraph_position='first_last' if first and last else 'first' if first else 'last' if last else 'interior'
         if long_complete and ratio<.8: flags.append('short_paragraph_boundary' if first or last else 'width_under_80pct_band')
         elif long_complete and (first or last) and ratio<.9: flags.append('short_paragraph_boundary')
-    return dict(accepted=not flags,flags=flags,column=band,width_band_ratio=ratio,paragraph_position=paragraph_position)
+    return dict(accepted=not flags,flags=flags,column=band,column_coverage=coverage,gate_revision=GATE_REVISION,
+                width_band_ratio=ratio,paragraph_position=paragraph_position)
 
 def body_font_gate(records, pg):
     """Exclude small-type furniture using per-column cheap component x-heights."""

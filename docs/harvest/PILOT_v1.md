@@ -171,3 +171,129 @@ The source fetch script and requested external destination denied writes under t
 Offline validation: **1275 tests passed** (harvest, Google-reader contracts and CLI/API/provenance tests). Artifact audit checks all 14,200 records, 500 gallery IDs, 1,000 crop image references, all reader image hashes and source-secret absence. [Artifact receipt](pilot_v1/artifact_validation.json).
 
 Acquisition verification: 150/150 records, 300/300 pages, 37,296,232 saved PDF bytes; 60 pages reused from verified receipts and 240 newly fetched. New HTTP bodies total 29,936,103 bytes including descriptors/login/robots overhead.
+
+
+## Fix 1 (offline re-gate)
+
+12 October 2026. CP-H1 HIGH 1, HIGH 2, the table-border gate and the portable
+test fixture are fixed in `greekocr/harvest`. This is an offline code/gate replay:
+no pilot preparation, detector inference, acquisition, sampling or Google calls.
+The stored **14,200 original records / 300 pages / 500 sampled lines** remain
+unchanged, including every tier, label and reader response. The input JSONL is
+still SHA-256 `108c3635a5ffc3a424f5810b9491639fdee047fcd926c7423a731ed415b6cbe4`.
+
+Physical columns now use repeated page-ink gutters plus independent box
+x-extent clusters. Duplicate detections on one row contribute one gutter vote;
+a minority of fused boxes cannot stretch the column clusters into one band.
+Fresh extraction splits polygons **before crop gating**. Each split uses the
+polygon's own blank corridor at the page gutter, and its mask preserves the
+original pixels. Splits that would cut ink are rejected. Original crops covering
+more than one column by **>15% of each band width** receive `crosses_column`.
+Reader joins carry page column coordinates, so pieces cannot be joined across
+a gutter. The archived fused originals are rejected; proposed splits carry no
+inherited labels.
+
+The neighbour gate measures actual retained ink above and below the fitted main
+body, independently of a fitted neighbour's visibility. It rejects when either
+side occupies **>12% of crop rows** or its ink x-span covers **>30% of crop width**;
+`neighbour_sliver` includes both measured fractions and the thresholds. Own
+accents and descenders use the glyph fitter's component ownership. The table
+gate now requires **both long horizontal/vertical rules and a repeated short-box
+lattice aligned in x and y**. Rules alone, including a scan frame, do not qualify.
+Reader orchestration refuses legacy samples without `H1-fix1` gate metadata and
+neighbour measurements before constructing a reader.
+
+| Measure | Before (stored pilot) | After Fix 1 |
+| --- | ---: | ---: |
+| Original records evaluated | 14,200 | 14,200 |
+| Page table exclusions | 18 | 1 |
+| Geometry/body-font survivors before straightening | 8,207 | 8,259 |
+| Candidates checked by the straightener | 675 | 8,259 |
+| Gate survivors | 8,032 | 6,126 |
+| Gate rejects | 6,168 | 8,074 |
+| Previously accepted originals newly rejected | — | 2,012 |
+| Previously rejected originals now passing | — | 106 |
+| Sampled lines rejected by geometry gates | 0 | 126 |
+
+The net change is **+1,906 rejected originals**
+(2,012 added minus 106 released).
+The replay runs page/crop gates on every original and body-font/straightener/ink
+gates on every geometry survivor. The original pilot straightened only the
+candidates considered for its 500-line sample. Therefore the increased
+`straightener_multiple_bands` and clipping counts also include previously
+unchecked candidates; they are not all consequences of the new sliver rule.
+
+Flag counts below overlap and must not be added to obtain total rejects.
+
+| Gate flag | Before | After |
+| --- | ---: | ---: |
+| `column_edge_touch` | 51 | 54 |
+| `crosses_column` | 0 | 146 |
+| `curled_or_clipped_body_edge` | 5 | 52 |
+| `height_over_body_pitch` | 1,223 | 1,221 |
+| `neighbour_sliver` | 0 | 1,657 |
+| `ornament_or_short_fragment` | 617 | 617 |
+| `outside_column_band` | 769 | 925 |
+| `page_bend_scout` | 794 | 794 |
+| `page_edge_touch` | 59 | 59 |
+| `page_non_body_page` | 524 | 524 |
+| `page_rotated` | 370 | 370 |
+| `page_table` | 1,560 | 143 |
+| `short_paragraph_boundary` | 2,246 | 2,191 |
+| `small_type_furniture` | 155 | 153 |
+| `straightener_multiple_bands` | 170 | 913 |
+| `taller_than_neighbours` | 141 | 141 |
+| `width_under_80pct_band` | 1,324 | 1,292 |
+
+Of the 126 sampled lines now rejected, the original
+dispositions are tier 1 **39**, tier 2
+**47**, tier 3 **32**, and reader-rejected
+**8**. These are annotations, not revised tiers: the
+historical 188 / 217 / 82 / 13 counts remain unchanged.
+
+The reviewer examples `39efef08… p23 l38`, `p24 l11` and `p24 l12` now carry
+`crosses_column`. `1697d5cc… p106 l41` carries `neighbour_sliver`: retained upper
+ink occupies **5/32 = 15.625%** of crop rows and x-span **572/796 = 71.8593%**.
+The `0cb3f672… p20` prose spread has rules but no lattice and no longer receives
+`page_table`. The column fixtures preserve all **6,196 / 5,846** original dark
+pixels (<200) across their split crops. On p24 the right split starts at x=562
+to retain the first German letter, instead of trimming at median band x=565.
+
+Outputs are separate from `pilot_v1/`:
+
+- [All 14,200 gate annotations](fix1/post_fix1_gate.jsonl), each with
+  `post_fix1_gate`; [500 sampled annotations](fix1/sampled_post_fix1_gate.json).
+- [Before/after counts and code hashes](fix1/summary.json),
+  [page gate replay](fix1/page_gates.json), [replay log](fix1/regate.log),
+  [independent artifact recount/custody checks](fix1/verification.json).
+- [Fixture inventory](../../tests/fixtures/harvest_fix1/INVENTORY.md),
+  [test log](fix1/tests.log), [scoped re-review](../reviews/CP-H1-FIX1.md).
+
+The explicit portable bulk resolver maps old `docs/harvest/<suffix>` paths to
+the supplied `pilot_t13c/<suffix>` archive. It fails on missing files or paths
+escaping that root; no local links or absolute test-fixture dependencies are
+required. The historical gallery's old image references have not been rewritten.
+The archive remains the source for its images and raw responses.
+
+Reproduction (from the repository; the external root is read-only input):
+
+```sh
+HARVEST_BULK="$HOME/Projects/glossapi-ocr-local/experiments/ocr_program_review_20261006/harvest_big/pilot_t13c"
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m greekocr.harvest.regate \
+  --records "$HARVEST_BULK/pilot_v1/records.jsonl" \
+  --page-gates docs/harvest/pilot_v1/page_gates.json \
+  --bulk-root "$HARVEST_BULK" --out docs/harvest/fix1
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests -q -p no:cacheprovider -k harvest
+```
+
+Verification: **119 passed, 2,359 deselected**. A separate recount
+matched every sidecar ID, original gate, transition count and sampled annotation;
+all source code hashes match the final replay. All **532 protected repository
+pilot files** and **6,807 archived page/gallery/Google files** matched the
+read-only snapshots. The existing Google ledger remains at 1,000 reservations,
+500 per engine. No `.git` writes or scale-up were performed.
+
+This implementation includes a scoped self re-review and regression verification;
+independent CP-H1 recertification is still required before scale-up. The separate
+rare-glyph exposure/CLLG qualification and conservative tilted-row height issue
+remain as disclosed in CP-H1; Fix 1 makes no new claims about either.
