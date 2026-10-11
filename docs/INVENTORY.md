@@ -1224,3 +1224,26 @@ New service reader, Anemi-first catalogue runner, three-engine comparison and sy
 | `tests/test_docai.py` | T12 integration change | `99dcf9af677fe0c25bf2ed09c7e898b3b477129a6d9d3f4df5193a043de70407` |
 
 `docs/API.md` is regenerated from the typed registry. The existing failed-line review generator is reused. See [READERS_TRANSKRIBUS.md](READERS_TRANSKRIBUS.md), [THREE_ENGINES_v1.md](harvest/THREE_ENGINES_v1.md), [local review](harvest/three_engines_review.html), [receipt](harvest/transkribus_failed_lines/receipt.json) and [validation](harvest/transkribus_failed_lines/validation.json). Generated provider responses, native images, layout probes and bounded recovery attempts are bound by their receipts and image/response SHA envelopes.
+
+## T13c H1 Anemi harvest pilot (12 October 2026)
+
+`greekocr.harvest` provides `core.py` (page/crop gates, list-return geometry,
+NFD tiering, observed rare substitutions and record validation), `pipeline.py`
+(receipted Anemi inputs, frozen stack, sample and straightening), `readers.py`
+(single-crop Google calls, persistent USD 3 / 1000-call ceilings), `report.py`
+(all sampled cards and evidence tables), and `cli.py` (`greekocr harvest pilot`).
+The top-level CLI registers harvest; `greekocr.pages` is untouched.
+
+The exact line-finder snapshot is exported under
+`docs/harvest/pilot/_stack_52cee3b/prototypes/fast_lines/` from
+`52cee3bcc882e7426bdc1018d892cd9b1bf9feac`. `pilot_v1/stack_verification.json`
+checks all 256 files against Git blob identities; ONNX models come from the
+named worktree and their SHA-256 is on each record. No Git metadata is written.
+The amended fetcher and upstream patch are under `docs/harvest/pilot/` because
+this session cannot write the source fetch repo or external data destination.
+
+Outputs: `docs/harvest/PILOT_v1.md`, `pilot_review.html` with adjacent
+`pilot_review_images/`, and `pilot_v1/` records, summary, page receipts, Google
+receipts, cost, sample, character counts, timings, failure crops and tests.
+Image data stays under `docs/harvest/harvest_big/`; records contain paths.
+The earlier broader pilot is preserved in `pilot/previous_t13/`.

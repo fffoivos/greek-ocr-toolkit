@@ -16,6 +16,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     add_docai_parser(commands)
     from greekocr.pages.cli import add_parser as add_pages_parser
     add_pages_parser(commands)
+    from greekocr.harvest.cli import add_parser as add_harvest_parser
+    add_harvest_parser(commands)
     commands.add_parser('recipes')
     verify = commands.add_parser('verify-recipe'); verify.add_argument('recipe'); verify.add_argument('--sha256')
     score = commands.add_parser('score'); score.add_argument('readings', type=Path)
@@ -76,7 +78,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     records.add_argument('directory', type=Path)
     args = parser.parse_args(argv)
     try:
-        if args.command == 'pages':
+        if args.command == 'harvest':
+            from greekocr.harvest.cli import run as run_harvest
+            result = run_harvest(args)
+        elif args.command == 'pages':
             from greekocr.pages.cli import run as run_pages
             result = run_pages(args)
         elif args.command == 'verify':

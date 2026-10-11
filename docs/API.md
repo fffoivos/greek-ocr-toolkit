@@ -2592,3 +2592,57 @@ checkpoint = verify_init("converted/donor_init.pt")
 from greekocr.warmstart import qualify_parity
 receipt = qualify_parity(donor_spec, "converted/native_before_swap.pt", "100_crops.jsonl", "parity")
 ```
+
+### `greekocr harvest pilot` — H1 Anemi sample
+
+```bash
+.venv/bin/python -m greekocr harvest pilot --stage prepare
+.venv/bin/python -m greekocr harvest pilot --stage sample
+.venv/bin/python -m greekocr harvest pilot --stage label --cap-usd 3
+.venv/bin/python -m greekocr harvest pilot --stage report
+```
+
+`--stage all` executes these stages sequentially. Acquisition is a separate
+plan/fetch/verify operation using the amended fetcher in
+`docs/harvest/pilot/_fetch/o4b_anemi_pages.py`; `--records` accepts the 150-row
+Anemi proposal, and `--page-range middle:2` selects two contiguous middle pages
+across each record's volumes. Its verifier requires only these selected pages.
+Keep the source `scripts/fetch` directory on `PYTHONPATH` for transport imports.
+
+Defaults: outputs `docs/harvest/pilot_v1`, images
+`docs/harvest/harvest_big/t13c`, fetched pages
+`docs/harvest/harvest_big/anemi_wave3_sample_t13c`. The default exact proposal
+is `greek-page-ocr/docs/evidence/o4c/anemi_wave3_proposal.json`.
+`--out`, `--big`, `--anemi`, `--proposal`, `--stack-export`, and `--source-repo`
+override paths; `--max-new-pages` bounds one offline prepare invocation.
+Sampling waits for 300 pages from all 150 books. `--sample-max` is 1–500;
+three lines per eligible book are preferred, at most four in rich books,
+with zero where no candidate passes. A fixed `sampling.json` prevents drift
+on resume. Only this sample reaches the two Google services, as single crops.
+
+`--cap-usd` is positive and at most 3; a separate hard 1000-call ceiling applies.
+Calls are reserved persistently before I/O. Failed or interrupted attempts
+remain reserved and are not retried automatically. Caches bind crop hashes,
+reader settings and saved responses. Credentials are ADC; Anemi credentials
+stay exclusively in process environment/cookie memory.
+
+`greekocr.harvest.core` exports `page_gate(gray, items, bend_fired=False)`,
+`crop_gate(box, boxes, page_gate, size, item=None, long_complete=False)`,
+`body_font_gate(records, page_gate)`, `list_return(pieces)`,
+`tier(vision, docai, layer=None)`, and `validate_record(record)`.
+`long_complete=True` requires width ≥80% of the column text band, excludes
+short paragraph boundaries (<90%), physical page/gutter edge touches,
+tall rows and outside-band geometry. Page bends use the frozen scout's
+nonzero `side` trigger (flat observations do not fire). Straightener candidates
+must have one main band without ≥50%-visible neighbours and no >8% average
+body clipping. These thresholds are pilot heuristics.
+
+Each JSONL record identifies source/book/year/decade/page, source receipt and
+hash, catalogue/rights, stack commit/model/source hashes, polygon/bbox,
+page/line gates, body/width/faintness features, raw/straight crop paths,
+`sampled`, selection metadata, reader boxes/confidences/receipts, tier and label.
+Unsampled rows retain `unread` if geometry passes, `rejected` otherwise; crop
+paths and features never measured are null. Tier 3/rejected/unread have no
+label. Anemi has `text_layer=null`. Tier 1 includes only strict NFD whitespace
+agreement or the documented whole-word substitution exception; tier 2 is
+≤2 NFD edits. No broad case, sigma or accent folding applies.
