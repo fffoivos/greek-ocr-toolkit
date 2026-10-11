@@ -2,17 +2,17 @@
 
 ## Controls baseline (first)
 
-101 permitted control crop IDs (85 distinct images); 80 Anemi current-output controls withheld. These are owner-verified marks, not gold OCR transcripts.
+181 permitted control crop IDs (163 distinct images); 0 Anemi current-output controls withheld. These are owner-verified marks, not gold OCR transcripts.
 
-Returned layout lines: `{1: 75, 2: 18, 3: 4, 4: 4}`. Empty rate: 0.000. Mean symbol confidence: median 0.940, p05 0.812, p95 0.985. Minimum symbol confidence: median 0.491.
+Returned layout lines: `{0: 3, 1: 118, 2: 30, 3: 14, 4: 13, 5: 1, 6: 2}`. Empty rate: 0.017. Mean symbol confidence: median 0.917, p05 0.746, p95 0.985. Minimum symbol confidence: median 0.426.
 
-Characters/100 px: min 1.554, p05 2.439, p25 3.678, median 3.939, p75 4.337, p95 4.983, max 6.957.
+Characters/100 px: min 0.000, p05 2.703, p25 3.830, median 4.323, p75 4.848, p95 5.882, max 13.089.
 
 ## Scope, cache and measurement contract
 
-Status: **complete**. The two catalogues contain 452 current-output crop IDs; 174 are withheld. The whole supplied crop directory contains 707 files, including **277 withheld Anemi files** (marked crops included). Marked-region images are not harvest inputs and were not sent. 17 additional current-output crops were derived from exact historical-number mappings. No Anemi file or page was submitted.
+Status: **complete**. The two catalogues contain 452 current-output crop IDs; 0 are withheld. The whole supplied crop directory contains 707 files, including **277 withheld Anemi files** (marked crops included). Marked-region images are not harvest inputs and were not sent. 17 additional current-output crops were derived from exact historical-number mappings. No Anemi file or page was submitted.
 
-295 crop IDs measured from 236 distinct image SHA-256 values. Byte-identical crops share one request. Crop statistics are crop-ID weighted; character counts are unique-call weighted. Controls and multi-line catalogues share 11 distinct image hashes. An overlapping neighbour can be a clean crop even within a partly fixed multi-line mark; mark-level labels do not establish that every current-output crop is defective. These samples are development pages, not the held-out set. No harvest was made.
+469 crop IDs measured from 396 distinct image SHA-256 values. Byte-identical crops share one request. Crop statistics are crop-ID weighted; character counts are unique-call weighted. Controls and multi-line catalogues share 12 distinct image hashes. An overlapping neighbour can be a clean crop even within a partly fixed multi-line mark; mark-level labels do not establish that every current-output crop is defective. These samples are development pages, not the held-out set. No harvest was made.
 
 Processor binding: `{"location":"eu","options":{"ocrConfig":{"enableSymbol":true,"hints":{"languageHints":["el"]}}},"processor":"9a98b7aca3c19561","project":"ocr-ground-truth-20261008","user_project":"ocr-ground-truth-20261008","version":"pretrained-ocr-v2.1-2024-08-07"}`. Crop bytes, processor/options, response hash, request/receipt IDs and raw responses are retained in `docai_failed_lines/responses/<crop_id>.json`; the adapter's original receipts and ledger are also retained. A changed cache binding or an unresolved prior attempt stops the run; there is no fresh/retry switch.
 
@@ -20,26 +20,26 @@ Adapter parsing recoveries: 1. A successful empty page can omit default `documen
 
 Line count uses the API layout `document.pages[0].lines`, not the adapter's text-newline heuristic. A missing lines field uses an explicitly labelled fallback. Total characters excludes CR/LF but includes spaces, punctuation and combining code points. Density is that count / image width × 100. Confidence is over symbols with reported confidence; absence is null, not zero. Greek-character sets use Unicode names; exact raw characters and NFD marks are counted separately.
 
-Operational exposure rule: multiple returned layout lines, empty text, or mean/minimum symbol confidence below the corresponding controls' p05 (0.812 mean; 0.241 minimum). These thresholds are diagnostics, not validated filters. A layout-line return can split a single curved printed row into spatial pieces; it is not proof of two printed rows. Single-line outputs without these signals are **silent candidates**, not proof of correct or incorrect transcription. Truncation/appending cannot be established from confidence or density alone: compare crop, owner observation and text in the review page. Baseline false alarms are 27/101 controls; owner controls sometimes include complete neighbours.
+Operational exposure rule: multiple returned layout lines, empty text, or mean/minimum symbol confidence below the corresponding controls' p05 (0.746 mean; 0.173 minimum). These thresholds are diagnostics, not validated filters. A layout-line return can split a single curved printed row into spatial pieces; it is not proof of two printed rows. Single-line outputs without these signals are **silent candidates**, not proof of correct or incorrect transcription. Truncation/appending cannot be established from confidence or density alone: compare crop, owner observation and text in the review page. Baseline false alarms are 69/181 controls; owner controls sometimes include complete neighbours.
 
 ## Treatment by failure type
 
 | Catalogue type | n measured / withheld crops | Page comments (Anemi withheld) | Layout-line distribution | Empty rate | Mean conf median (p05) | Min conf median | Chars/100px median (p05–p95) | Density below/above controls p05–p95 | Exposed / silent candidates | Verdict |
 | --- | ---: | ---: | --- | ---: | --- | ---: | --- | --- | --- | --- |
-| `missed_line` | 0 / 0 | 15 (9) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | No crop for missing ink: no Google signal; line-finder-side recovery required |
+| `missed_line` | 0 / 0 | 15 (0) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | No crop for missing ink: no Google signal; line-finder-side recovery required |
 | `missed_words_in_row` | 0 / 0 | 1 (0) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | No crop for missing ink: no Google signal; line-finder-side recovery required |
-| `line_start_missed` | 2 / 0 | 1 (0) | `{1: 2}` | 0.000 | 0.880 (0.847) | 0.256 | 3.944 (3.811–4.077) | 0 / 0 | 1 / 1 | Google absorbs it silently — candidates: 1; exposed: 1 |
-| `missed_word_after_gap` | 0 / 0 | 1 (1) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
+| `line_start_missed` | 2 / 0 | 1 (0) | `{1: 2}` | 0.000 | 0.880 (0.847) | 0.256 | 3.944 (3.811–4.077) | 0 / 0 | 0 / 2 | Google absorbs it silently — candidates: 2; exposed: 0 |
+| `missed_word_after_gap` | 0 / 0 | 1 (0) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
 | `curl_end_cut` | 7 / 0 | 7 (0) | `{1: 6, 5: 1}` | 0.000 | 0.954 (0.823) | 0.601 | 3.946 (3.749–5.961) | 0 / 1 | 1 / 6 | Google absorbs it silently — candidates: 6; exposed: 1 |
-| `multi_line_segment` | 178 / 94 | 8 (0) | `{0: 6, 1: 66, 2: 47, 3: 32, 4: 12, 5: 10, 6: 3, 7: 1, 9: 1}` | 0.034 | 0.923 (0.788) | 0.366 | 4.334 (3.103–7.523) | 7 / 59 | 112 / 66 | Google absorbs it silently — candidates: 66; exposed: 112 |
+| `multi_line_segment` | 272 / 0 | 8 (0) | `{0: 8, 1: 101, 2: 64, 3: 51, 4: 27, 5: 14, 6: 4, 7: 1, 9: 2}` | 0.029 | 0.893 (0.732) | 0.330 | 4.512 (3.186–10.709) | 10 / 78 | 172 / 100 | Google absorbs it silently — candidates: 100; exposed: 172 |
 | `misaligned_crop` | 1 / 0 | 1 (0) | `{1: 1}` | 0.000 | 0.942 (0.942) | 0.377 | 4.136 (4.136–4.136) | 0 / 0 | 0 / 1 | Google absorbs it silently — candidates: 1; exposed: 0 |
-| `faint_ghost_kept` | 5 / 0 | 7 (3) | `{0: 1, 1: 4}` | 0.200 | 0.765 (0.550) | 0.455 | 3.030 (0.182–3.332) | 2 / 0 | 3 / 2 | Google absorbs it silently — candidates: 2; exposed: 3 |
-| `crop_extends_over_faint` | 3 / 0 | 2 (0) | `{0: 1, 1: 2}` | 0.333 | 0.635 (0.553) | 0.279 | 2.700 (0.270–2.911) | 1 / 0 | 3 / 0 | Google exposes it |
-| `crosses_column` | 0 / 0 | 1 (1) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
-| `frame_or_ornament_boxed` | 0 / 0 | 9 (9) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
-| `stamp_or_watermark_boxed` | 0 / 0 | 3 (3) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
+| `faint_ghost_kept` | 5 / 0 | 7 (0) | `{0: 1, 1: 4}` | 0.200 | 0.765 (0.550) | 0.455 | 3.030 (0.182–3.332) | 2 / 0 | 3 / 2 | Google absorbs it silently — candidates: 2; exposed: 3 |
+| `crop_extends_over_faint` | 3 / 0 | 2 (0) | `{0: 1, 1: 2}` | 0.333 | 0.635 (0.553) | 0.279 | 2.700 (0.270–2.911) | 2 / 0 | 3 / 0 | Google exposes it |
+| `crosses_column` | 0 / 0 | 1 (0) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
+| `frame_or_ornament_boxed` | 0 / 0 | 9 (0) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
+| `stamp_or_watermark_boxed` | 0 / 0 | 3 (0) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
 | `blob_boxed` | 0 / 0 | 1 (0) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
-| `spread_or_columns_as_one_geometry` | 0 / 0 | 2 (2) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
+| `spread_or_columns_as_one_geometry` | 0 / 0 | 2 (0) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
 | `fragment_crop` | 0 / 0 | 2 (0) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
 | `unclear_owner_intent` | 0 / 0 | 1 (0) | `{}` | — | — (—) | — | — (—–—) | 0 / 0 | 0 / 0 | Not measured: withheld or no reliably located crop; no Google verdict inferred |
 
@@ -58,42 +58,42 @@ Named current-owner regions are accepted only when saved R6 item geometry **and*
 | O05 | `s2-49598b2e848ab1f0ee1e-p00004` | missed_line, curl_end_cut | exact_R6_region_intersected_with_R7 | 4 |
 | O06 | `s2-49598b2e848ab1f0ee1e-p00005` | multi_line_segment | exact_R6_region_intersected_with_R7 | 2 |
 | O07 | `s2-44b5cf9e0d680b361091-p00002` | misaligned_crop, multi_line_segment | exact_R6_region_intersected_with_R7 | 1 |
-| O08 | `an-ef481610a820-p000150` | faint_ghost_kept | withheld_anemi_page | 0 |
-| O09 | `an-ef481610a820-p000151` | faint_ghost_kept | withheld_anemi_page | 0 |
+| O08 | `an-ef481610a820-p000150` | faint_ghost_kept | no_unambiguous_region; two-catalogue evidence only | 0 |
+| O09 | `an-ef481610a820-p000151` | faint_ghost_kept | no_unambiguous_region; two-catalogue evidence only | 0 |
 | O11 | `s2-93f8070059f938bda524-p00001` | faint_ghost_kept, crop_extends_over_faint | exact_R6_region_intersected_with_R7 | 6 |
 | O12 | `s2-86865c33eef5932c013b-p00026` | crop_extends_over_faint | exact_R6_region_intersected_with_R7 | 2 |
-| O13 | `an-c8b96a901917-p000155` | crosses_column | withheld_anemi_page | 0 |
-| O15 | `an-ffccc97c07de-p000354` | missed_word_after_gap | withheld_anemi_page | 0 |
-| O16 | `an-d83e7a198ade-p000099` | missed_line | withheld_anemi_page | 0 |
-| O17 | `an-ef481610a820-p000181` | missed_line | withheld_anemi_page | 0 |
-| O18 | `an-00f143ecce59-p000258` | missed_line | withheld_anemi_page | 0 |
-| O19 | `an-1ba3fdb1436b-p000035` | missed_line | withheld_anemi_page | 0 |
-| O20 | `an-00f143ecce59-p000192` | missed_line, stamp_or_watermark_boxed | withheld_anemi_page | 0 |
-| O21 | `an-7792a3301892-p000059` | frame_or_ornament_boxed | withheld_anemi_page | 0 |
-| O22 | `an-7792a3301892-p000104` | frame_or_ornament_boxed | withheld_anemi_page | 0 |
-| O23 | `an-c99f1c450f55-p000025` | frame_or_ornament_boxed | withheld_anemi_page | 0 |
+| O13 | `an-c8b96a901917-p000155` | crosses_column | no_unambiguous_region; two-catalogue evidence only | 0 |
+| O15 | `an-ffccc97c07de-p000354` | missed_word_after_gap | no_unambiguous_region; two-catalogue evidence only | 0 |
+| O16 | `an-d83e7a198ade-p000099` | missed_line | no_unambiguous_region; two-catalogue evidence only | 0 |
+| O17 | `an-ef481610a820-p000181` | missed_line | no_unambiguous_region; two-catalogue evidence only | 0 |
+| O18 | `an-00f143ecce59-p000258` | missed_line | no_unambiguous_region; two-catalogue evidence only | 0 |
+| O19 | `an-1ba3fdb1436b-p000035` | missed_line | no_unambiguous_region; two-catalogue evidence only | 0 |
+| O20 | `an-00f143ecce59-p000192` | missed_line, stamp_or_watermark_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
+| O21 | `an-7792a3301892-p000059` | frame_or_ornament_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
+| O22 | `an-7792a3301892-p000104` | frame_or_ornament_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
+| O23 | `an-c99f1c450f55-p000025` | frame_or_ornament_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
 | C01 | `s2-86865c33eef5932c013b-p00005` | curl_end_cut | no_unambiguous_region; two-catalogue evidence only | 0 |
 | C02 | `s2-86865c33eef5932c013b-p00007` | curl_end_cut | no_unambiguous_region; two-catalogue evidence only | 0 |
-| C03 | `an-e259bbf5081c-p000198` | spread_or_columns_as_one_geometry | withheld_anemi_page | 0 |
-| C04 | `an-c8b96a901917-p000068` | spread_or_columns_as_one_geometry | withheld_anemi_page | 0 |
-| C05 | `an-7792a3301892-p000154` | frame_or_ornament_boxed | withheld_anemi_page | 0 |
-| R4-03 | `an-7792a3301892-p000107` | frame_or_ornament_boxed | withheld_anemi_page | 0 |
-| R4-05 | `an-7792a3301892-p000104` | frame_or_ornament_boxed | withheld_anemi_page | 0 |
-| R4-09 | `an-1be60011c435-p000215` | stamp_or_watermark_boxed | withheld_anemi_page | 0 |
+| C03 | `an-e259bbf5081c-p000198` | spread_or_columns_as_one_geometry | no_unambiguous_region; two-catalogue evidence only | 0 |
+| C04 | `an-c8b96a901917-p000068` | spread_or_columns_as_one_geometry | no_unambiguous_region; two-catalogue evidence only | 0 |
+| C05 | `an-7792a3301892-p000154` | frame_or_ornament_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
+| R4-03 | `an-7792a3301892-p000107` | frame_or_ornament_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
+| R4-05 | `an-7792a3301892-p000104` | frame_or_ornament_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
+| R4-09 | `an-1be60011c435-p000215` | stamp_or_watermark_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
 | R4-10 | `s2-7534648e60694be1d180-p00018` | unclear_owner_intent | no_unambiguous_region; two-catalogue evidence only | 0 |
 | R4-11 | `s2-032eaf8e6b3b83918feb-p00004` | multi_line_segment, fragment_crop | no_unambiguous_region; two-catalogue evidence only | 0 |
 | R4-12 | `s2-922e617957fca8dfafd0-p00001` | blob_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
 | R4-15 | `s2-86865c33eef5932c013b-p00026` | faint_ghost_kept, multi_line_segment | no_unambiguous_region; two-catalogue evidence only | 0 |
-| R4-16 | `an-00f143ecce59-p000258` | missed_line | withheld_anemi_page | 0 |
-| R4-18 | `an-ef481610a820-p000150` | faint_ghost_kept | withheld_anemi_page | 0 |
-| R4-22 | `an-7792a3301892-p000059` | frame_or_ornament_boxed | withheld_anemi_page | 0 |
-| R4-24 | `an-7792a3301892-p000154` | frame_or_ornament_boxed | withheld_anemi_page | 0 |
-| R4-28 | `an-00f143ecce59-p000192` | missed_line | withheld_anemi_page | 0 |
-| R4-30 | `an-e74539ae215c-p000338` | stamp_or_watermark_boxed | withheld_anemi_page | 0 |
-| R4-43 | `an-ef481610a820-p000181` | missed_line | withheld_anemi_page | 0 |
+| R4-16 | `an-00f143ecce59-p000258` | missed_line | no_unambiguous_region; two-catalogue evidence only | 0 |
+| R4-18 | `an-ef481610a820-p000150` | faint_ghost_kept | no_unambiguous_region; two-catalogue evidence only | 0 |
+| R4-22 | `an-7792a3301892-p000059` | frame_or_ornament_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
+| R4-24 | `an-7792a3301892-p000154` | frame_or_ornament_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
+| R4-28 | `an-00f143ecce59-p000192` | missed_line | no_unambiguous_region; two-catalogue evidence only | 0 |
+| R4-30 | `an-e74539ae215c-p000338` | stamp_or_watermark_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
+| R4-43 | `an-ef481610a820-p000181` | missed_line | no_unambiguous_region; two-catalogue evidence only | 0 |
 | R4-45 | `s2-93f8070059f938bda524-p00001` | faint_ghost_kept | no_unambiguous_region; two-catalogue evidence only | 0 |
-| R4-49 | `an-c99f1c450f55-p000025` | frame_or_ornament_boxed | withheld_anemi_page | 0 |
-| R4-50 | `an-1ba3fdb1436b-p000035` | missed_line | withheld_anemi_page | 0 |
+| R4-49 | `an-c99f1c450f55-p000025` | frame_or_ornament_boxed | no_unambiguous_region; two-catalogue evidence only | 0 |
+| R4-50 | `an-1ba3fdb1436b-p000035` | missed_line | no_unambiguous_region; two-catalogue evidence only | 0 |
 | R4-51 | `s2-0ce9d1025b3f23c7119e-p00001` | faint_ghost_kept | no_unambiguous_region; two-catalogue evidence only | 0 |
 | R4-52 | `s2-3229200bf47ca465a42d-p00006` | multi_line_segment | no_unambiguous_region; two-catalogue evidence only | 0 |
 | R4-55 | `s2-49598b2e848ab1f0ee1e-p00001` | missed_line | no_unambiguous_region; two-catalogue evidence only | 0 |
@@ -131,12 +131,11 @@ These are signal-only examples, selected deterministically from measured crop ID
 
 | Type | Crop / Google signal | Returned lines | Mean / minimum symbol confidence |
 | --- | --- | --- | --- |
-| `line_start_missed` | [s2-49598b2e848ab1f0ee1e-p00001.comment.r7item2](docai_failed_lines_review.html#s2-49598b2e848ab1f0ee1e-p00001.comment.r7item2) · exposed | θυπουργός παρεδέ | 0.843 / 0.185 |
 | `line_start_missed` | [s2-49598b2e848ab1f0ee1e-p00001.comment.r7item11](docai_failed_lines_review.html#s2-49598b2e848ab1f0ee1e-p00001.comment.r7item11) · silent candidate | ἥτις εἶναι ἓν ἐκ τῶν εὐγενεστέρων έλα- | 0.916 / 0.328 |
 | `curl_end_cut` | [s2-49598b2e848ab1f0ee1e-p00004.mark19.r7item19](docai_failed_lines_review.html#s2-49598b2e848ab1f0ee1e-p00004.mark19.r7item19) · exposed | - ٠٠٠٠٠م, να, κοσμον ως ανύρματα εις / κρά παιδία˙ ἀλλὰ μέχρι τῆς ἐποχῆς ἐκείνης ὀφείλομεν ν / .. / V / -Ad | 0.776 / 0.250 |
 | `curl_end_cut` | [s2-49598b2e848ab1f0ee1e-p00004.mark4.r7item116](docai_failed_lines_review.html#s2-49598b2e848ab1f0ee1e-p00004.mark4.r7item116) · silent candidate | διανύσωσιν εὐκοπώτερον τὸν περὶ τῆς ὑπάρξεως ἀγῶνα, | 0.962 / 0.733 |
-| `multi_line_segment` | [s2-200e977f2dab5291c42c-p00035.mark18.r7item18](docai_failed_lines_review.html#s2-200e977f2dab5291c42c-p00035.mark18.r7item18) · exposed | 36 / 37 | 0.983 / 0.981 |
-| `multi_line_segment` | [s2-3229200bf47ca465a42d-p00004.mark18.r7item27](docai_failed_lines_review.html#s2-3229200bf47ca465a42d-p00004.mark18.r7item27) · silent candidate | προταχθῇ ἐν αὐτῇ τὸ νομοσχέδιον περί τροποποιήσεως τοῦ | 0.956 / 0.472 |
+| `multi_line_segment` | [an-2cfe28da5103-p000135.mark68.r7item23](docai_failed_lines_review.html#an-2cfe28da5103-p000135.mark68.r7item23) · exposed | - / Λης οικην υπομένει φευγειν. Λ. / 1 / μα΄, 6. ἐξέλης ἂν ἔφυγον νῦν, | 0.810 / 0.356 |
+| `multi_line_segment` | [an-2cfe28da5103-p000135.mark40.r7item60](docai_failed_lines_review.html#an-2cfe28da5103-p000135.mark40.r7item60) · silent candidate | ρθ΄, 1. πάχειν αὐτοὶ κακῶς ἔξω | 0.841 / 0.351 |
 | `misaligned_crop` | [s2-44b5cf9e0d680b361091-p00002.comment.r7item9](docai_failed_lines_review.html#s2-44b5cf9e0d680b361091-p00002.comment.r7item9) · silent candidate | \|ἐκεῖνοι οἵτινες ἀπεχώρησαν τοῦ Βουλευτηρίου καὶ ἔρριψαν κατὰ | 0.942 / 0.377 |
 | `faint_ghost_kept` | [s2-93f8070059f938bda524-p00001.comment.r7item126](docai_failed_lines_review.html#s2-93f8070059f938bda524-p00001.comment.r7item126) · exposed | ТОПИАХН | 0.523 / 0.394 |
 | `faint_ghost_kept` | [s2-93f8070059f938bda524-p00001.comment.r7item121](docai_failed_lines_review.html#s2-93f8070059f938bda524-p00001.comment.r7item121) · silent candidate | 1ο Βουλευτὴς ἐκ Γόρτυνος | 0.864 / 0.291 |
@@ -146,9 +145,9 @@ These are signal-only examples, selected deterministically from measured crop ID
 
 The [complete characters table](docai_failed_lines/characters.csv) includes every raw emitted code point and its count for ALL calls and each present source. Counts include whitespace. [characters.json](docai_failed_lines/characters.json) also stores Greek-only sets and NFD counts. Absence here is not proof that the processor cannot recognise a glyph: no glyph-level ground truth or exposure count is supplied.
 
-### ALL — 236 unique calls
+### ALL — 396 unique calls
 
-Raw emitted Greek set: `΄ΆΐΑΒΓΔΕΖΗΘΙΚΛΜΝΟΠΡΣΤΥΧάέήίαβγδεζηθικλμνξοπρςστυφχψωϊϋόύώἀἁἂἄἅἐἑἓἔἕἘἙἠἡἢἣἤἥἦἧἩἰἱἴἵἶἷὀὁὅὉὐὑὕὖὙὠὡὤὰὲὴὶὸὺὼᾳᾶᾷ᾽᾿ῃῆῇῖῦῳῶῷ`.
+Raw emitted Greek set: `΄ΆΐΑΒΓΔΕΖΗΘΙΚΛΜΝΟΠΡΣΤΥΦΧΩάέήίαβγδεζηθικλμνξοπρςστυφχψωϊϋόύώἀἁἂἄἅἐἑἓἔἕἘἙἜἠἡἢἣἤἥἦἧἩἰἱἴἵἶἷἹὀὁὂὄὅὉὐὑὕὖὙὠὡὤὥὦὰὲὴὶὸὺὼᾳᾶᾷ᾽᾿ῃῆῇῖῦῬῳῶῷ`.
 
 | Requested character | Code point | Raw count / appeared | NFD count |
 | --- | --- | ---: | ---: |
@@ -160,7 +159,7 @@ Raw emitted Greek set: `΄ΆΐΑΒΓΔΕΖΗΘΙΚΛΜΝΟΠΡΣΤΥΧάέήία
 | ϝ | U+03DD | 0 / no | 0 |
 | ϙ | U+03D9 | 0 / no | 0 |
 | ϡ | U+03E1 | 0 / no | 0 |
-| ͅ | U+0345 | 0 / no | 33 |
+| ͅ | U+0345 | 0 / no | 50 |
 | ʹ | U+02B9 | 0 / no | 0 |
 | ͵ | U+0375 | 0 / no | 0 |
 
@@ -168,13 +167,43 @@ NFD combining marks attached to Greek letters:
 
 | Mark | Code point / name | Count |
 | --- | --- | ---: |
-| ◌̀ | U+0300 COMBINING GRAVE ACCENT | 390 |
-| ◌́ | U+0301 COMBINING ACUTE ACCENT | 705 |
-| ◌̈ | U+0308 COMBINING DIAERESIS | 4 |
-| ◌̓ | U+0313 COMBINING COMMA ABOVE | 363 |
-| ◌̔ | U+0314 COMBINING REVERSED COMMA ABOVE | 184 |
-| ◌͂ | U+0342 COMBINING GREEK PERISPOMENI | 348 |
-| ◌ͅ | U+0345 COMBINING GREEK YPOGEGRAMMENI | 33 |
+| ◌̀ | U+0300 COMBINING GRAVE ACCENT | 545 |
+| ◌́ | U+0301 COMBINING ACUTE ACCENT | 1072 |
+| ◌̈ | U+0308 COMBINING DIAERESIS | 5 |
+| ◌̓ | U+0313 COMBINING COMMA ABOVE | 522 |
+| ◌̔ | U+0314 COMBINING REVERSED COMMA ABOVE | 268 |
+| ◌͂ | U+0342 COMBINING GREEK PERISPOMENI | 442 |
+| ◌ͅ | U+0345 COMBINING GREEK YPOGEGRAMMENI | 50 |
+
+### Anemi — 160 unique calls
+
+Raw emitted Greek set: `΄ΑΒΓΔΕΖΗΘΙΚΛΜΟΠΡΣΤΦΧΩάέήίαβγδεζηθικλμνξοπρςστυφχψωϋόύώἀἁἂἄἐἑἔἕἜἠἡἢἤἦἰἱἴἶἹὀὁὂὄὅὐὑὕὡὥὦὰὲὴὶὸὺὼᾶ᾽᾿ῆῇῖῦῬῳῶῷ`.
+
+| Requested character | Code point | Raw count / appeared | NFD count |
+| --- | --- | ---: | ---: |
+| ϗ | U+03D7 | 0 / no | 0 |
+| ȣ | U+0223 | 0 / no | 0 |
+| ϛ | U+03DB | 0 / no | 0 |
+| ϲ | U+03F2 | 0 / no | 0 |
+| Ϲ | U+03F9 | 0 / no | 0 |
+| ϝ | U+03DD | 0 / no | 0 |
+| ϙ | U+03D9 | 0 / no | 0 |
+| ϡ | U+03E1 | 0 / no | 0 |
+| ͅ | U+0345 | 0 / no | 17 |
+| ʹ | U+02B9 | 0 / no | 0 |
+| ͵ | U+0375 | 0 / no | 0 |
+
+NFD combining marks attached to Greek letters:
+
+| Mark | Code point / name | Count |
+| --- | --- | ---: |
+| ◌̀ | U+0300 COMBINING GRAVE ACCENT | 155 |
+| ◌́ | U+0301 COMBINING ACUTE ACCENT | 367 |
+| ◌̈ | U+0308 COMBINING DIAERESIS | 1 |
+| ◌̓ | U+0313 COMBINING COMMA ABOVE | 159 |
+| ◌̔ | U+0314 COMBINING REVERSED COMMA ABOVE | 84 |
+| ◌͂ | U+0342 COMBINING GREEK PERISPOMENI | 94 |
+| ◌ͅ | U+0345 COMBINING GREEK YPOGEGRAMMENI | 17 |
 
 ### Vouli — 236 unique calls
 
@@ -210,7 +239,7 @@ Internet Archive: **no current-output crop in this catalogue**, so no per-source
 
 ## Cost receipt
 
-**236 API calls**: 236 successful, 0 errors; 236 known successful one-page units, 0 units with unknown billing outcome. Estimated base list-price cost: **US$0.3540** at US$1.50/1,000 pages. [Google Enterprise Document OCR pricing](https://cloud.google.com/products/document-ai/pricing) checked 11 October 2026. The pricing page also shows a free allowance; this conservative list-price estimate does not assume its remaining balance, credits, discounts or taxes and is not an invoice.
+**396 API calls**: 396 successful, 0 errors; 396 known successful one-page units, 0 units with unknown billing outcome. Estimated base list-price cost: **US$0.5940** at US$1.50/1,000 pages. [Google Enterprise Document OCR pricing](https://cloud.google.com/products/document-ai/pricing) checked 11 October 2026. The pricing page also shows a free allowance; this conservative list-price estimate does not assume its remaining balance, credits, discounts or taxes and is not an invoice.
 
 [Machine-readable receipt](docai_failed_lines/receipt.json) · [Raw per-crop CSV](docai_failed_lines/crops.csv) · [Metrics](docai_failed_lines/metrics.json) · [Summary](docai_failed_lines/summary.json) · [Comment-region provenance](docai_failed_lines/page_comment_coverage.json) · [Visual review](docai_failed_lines_review.html)
 

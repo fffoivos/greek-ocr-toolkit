@@ -59,7 +59,12 @@ def atomic_json(path: Path, value) -> None:
     tmp.replace(path)
 
 
+ALLOW_ANEMI = False  # owner, 11 Oct 2026: Anemi crops may be sent to Google for labels (licence restricts redistribution, not labelling)
+
+
 def is_anemi(page: str, crop: str | Path) -> bool:
+    if ALLOW_ANEMI:
+        return False
     return page.startswith('an-') or Path(crop).name.startswith('an-')
 
 
@@ -667,7 +672,10 @@ def main(argv=None):
     parser.add_argument('--catalogue', type=Path, default=DEFAULT_CATALOGUE)
     parser.add_argument('--out', type=Path, default=DEFAULT_OUT)
     parser.add_argument('--offline', action='store_true', help='rebuild from saved responses; no ADC or API calls')
+    parser.add_argument('--include-anemi', action='store_true', help='send Anemi crops too (owner authorised 11 Oct 2026)')
     args=parser.parse_args(argv)
+    global ALLOW_ANEMI
+    ALLOW_ANEMI = bool(args.include_anemi)
     result=run(args.catalogue,args.out,offline=args.offline)
     return 0 if result['status']=='complete' else 1
 
