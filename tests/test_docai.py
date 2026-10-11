@@ -381,7 +381,7 @@ def test_docai_public_api_typed_documented_and_packaged():
     root = Path(__file__).resolve().parents[1]
     docs = (root / 'docs/API.md').read_text()
     entries = [entry for entry in api_entries() if entry[0].startswith('greekocr.readers.services')]
-    assert len(entries) == 21  # load_service + 13 DocAI + 7 Vision API entries
+    assert len(entries) == 31  # load_service + 13 DocAI + 7 Vision + 10 Transkribus entries
     for module, name, node, owner in entries:
         qualified = module + '.' + (owner + '.' if owner else '') + name
         assert '### `' + qualified + '`' in docs and name in CALLS

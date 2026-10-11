@@ -240,6 +240,9 @@ def crop_metrics(raw: dict, width: int, height: int, *, engine: str = 'docai') -
         raise ValueError('crop dimensions must be positive')
     if engine == 'vision':
         return vision_crop_metrics(raw, width, height)
+    if engine == 'transkribus':
+        from prototypes.harvest.transkribus_failed_lines import transkribus_crop_metrics
+        return transkribus_crop_metrics(raw, width, height)
     if engine != 'docai':
         raise ValueError('unknown engine')
     reading = _reading(raw, dict(raw_json_path='', request_id=None, latency_s=0,
@@ -269,7 +272,7 @@ def crop_metrics(raw: dict, width: int, height: int, *, engine: str = 'docai') -
 
 def response_path(output: Path, row: dict, engine: str = 'docai') -> Path:
     """DocAI keeps its historical crop-ID paths; Vision uses image SHA paths."""
-    return output / 'responses' / ((row['crop_sha256'] if engine == 'vision' else row['crop_id']) + '.json')
+    return output / 'responses' / ((row['crop_sha256'] if engine in ('vision', 'transkribus') else row['crop_id']) + '.json')
 
 
 def vision_crop_metrics(raw: dict, width: int, height: int) -> dict:
@@ -330,7 +333,7 @@ def distribution(values: list) -> dict:
                 p75=q(.75), p95=q(.95), max=values[-1], mean=statistics.mean(values))
 
 
-def summarise(rows: list[dict], failure_types: list[str]) -> dict:
+def summarise(rows: list[dict], failure_types: list[str], *, engine_name='Google') -> dict:
     controls = [r for r in rows if r['status']=='ok' and r['failure_type']=='control_owner_verified']
     baseline = distribution([r['mean_symbol_confidence'] for r in controls])
     threshold = baseline['p05']
@@ -342,7 +345,7 @@ def summarise(rows: list[dict], failure_types: list[str]) -> dict:
         low = threshold is not None and row['mean_symbol_confidence'] is not None and row['mean_symbol_confidence'] < threshold
         low_min = min_threshold is not None and row['min_symbol_confidence'] is not None and row['min_symbol_confidence'] < min_threshold
         row['exposure_signals'] = (['multiple_layout_lines'] if row['lines_returned'] > 1 else []) + (['empty'] if row['empty'] else []) + (['low_mean_symbol_confidence'] if low else []) + (['low_min_symbol_confidence'] if low_min else [])
-        row['treatment'] = 'Google exposes it' if row['exposure_signals'] else 'Google absorbs it silently (candidate; visual confirmation needed)'
+        row['treatment'] = f'{engine_name} exposes it' if row['exposure_signals'] else f'{engine_name} absorbs it silently (candidate; visual confirmation needed)'
     summaries = {}
     for kind in ['control_owner_verified'] + failure_types:
         members = [r for r in rows if kind in r['failure_types']]
@@ -380,6 +383,11 @@ def cached_response(row: dict, output: Path, reader: DocAIReader | VisionReader,
     if sha256(Path(row['crop_path'])) != crop_sha:
         raise ValueError('crop changed since inventory; no call made')
     path = response_path(output, row, engine)
+    if engine == 'transkribus':
+        if reader.responses_dir != (output/'responses').resolve():
+            raise ValueError('Transkribus cache directory must match engine output')
+        reader.read_annotation(row['crop_path'],expected_sha256=crop_sha,offline=offline)
+        return json.loads(path.read_text())
     if engine == 'vision':
         if reader.responses_dir != (output / 'responses').resolve():
             raise ValueError('Vision reader cache directory must match the engine output')
@@ -502,6 +510,9 @@ def write_csv(path, rows):
 
 
 def build_artifacts(rows, comments, directory, out, rec):
+    if rec.get('engine') == 'transkribus':
+        from prototypes.harvest.transkribus_failed_lines import build_artifacts as build_transkribus_artifacts
+        return build_transkribus_artifacts(rows,comments,directory,out,rec)
     if rec.get('engine') == 'vision':
         from prototypes.harvest.vision_comparison import build_vision_artifacts
         return build_vision_artifacts(rows, comments, directory, out, rec)
@@ -621,7 +632,7 @@ def build_artifacts(rows, comments, directory, out, rec):
     build_review(rows, summary, comments, out, rec)
 
 
-def build_review(rows, summary, comments, out, rec, *, engine='docai', comparison=None):
+def build_review(rows, summary, comments, out, rec, *, engine='docai', comparison=None, three_way=None):
     """Continuous strip/card format and palette from scripts/glyphs/pages_review.html."""
     esc = lambda s: html.escape(str(s), quote=True)
     images = out/f'{engine}_failed_lines/images'
@@ -631,7 +642,8 @@ def build_review(rows, summary, comments, out, rec, *, engine='docai', compariso
         destination = images/(row['crop_id']+'.png')
         if not destination.exists() or sha256(destination) != row['crop_sha256']:
             shutil.copyfile(row['crop_path'], destination)
-        groups[row['failure_type']].append(row)
+        group = row['source'] + ' · ' + row['failure_type'] if three_way is not None else row['failure_type']
+        groups[group].append(row)
     parts = ['<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
         '<title>Document AI · Known failed lines · T10</title>',
         '''<style>:root{--bg:#f3f5f6;--surface:#fff;--fg:#1a1f25;--muted:#5a6470;--rule:#d6dce1;--accent:#0d6e72;--cut:#b42318;--feature:#fff4d6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,Arial,sans-serif}.wrap{max-width:1640px;margin:auto;padding:28px 20px 64px;display:grid;gap:28px;min-width:0}h1,h2{font-family:Georgia,serif;font-weight:500;overflow-wrap:anywhere}h1{font-size:1.9rem;margin:0}h2{font-size:1.35rem;border-top:2px solid var(--accent);padding-top:12px}.intro,section{display:grid;gap:12px;min-width:0}.line{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:16px;display:grid;gap:10px;min-width:0}.line.silent{box-shadow:inset 4px 0 var(--cut)}.id{font-family:ui-monospace,Menlo,monospace;font-size:.85rem;overflow-wrap:anywhere}.note{background:var(--feature);padding:10px 12px;border-radius:4px;white-space:pre-wrap;overflow-wrap:anywhere}.muted{color:var(--muted)}.events{font-size:.85rem;display:flex;flex-wrap:wrap;gap:4px 18px}.ocr{font:1.1rem/1.7 Georgia,serif;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding-left:24px}.crop{display:block;width:auto;max-width:100%;height:auto;background:#fff}a{color:var(--accent);overflow-wrap:anywhere}nav{display:flex;flex-wrap:wrap;gap:8px 16px}p{margin:0;overflow-wrap:anywhere}code{overflow-wrap:anywhere;white-space:normal}@media(max-width:600px){.wrap{padding:16px 10px 40px;gap:18px}.line{padding:12px}h1{font-size:1.5rem}.ocr{font-size:1rem}}@media print{.line{break-inside:avoid;box-shadow:none}body{background:#fff}}</style>''',
@@ -642,11 +654,15 @@ def build_review(rows, summary, comments, out, rec, *, engine='docai', compariso
         '<p><a href="DOCAI_FAILED_LINES_v1.md">Report and coverage limits</a> · <a href="docai_failed_lines/crops.csv">Per-crop CSV</a> · <a href="docai_failed_lines/characters.csv">Emitted characters</a> · <a href="docai_failed_lines/receipt.json">Receipt</a></p>',
         '<nav aria-label="Failure groups">']
     order = ['control_owner_verified'] + sorted(k for k in groups if k!='control_owner_verified')
+    if three_way is not None:
+        order = sorted(groups, key=lambda k: (not k.startswith('Anemi'), not k.endswith('control_owner_verified'), k))
     for kind in order:
-        parts.append(f'<a href="#{esc(kind)}">{esc(kind)} ({len(groups[kind])})</a>')
+        group_id=kind.replace(' · ','-').replace(' ','-') if three_way is not None else kind
+        parts.append(f'<a href="#{esc(group_id)}">{esc(kind)} ({len(groups[kind])})</a>')
     parts.append('</nav></header>')
     for kind in order:
-        parts.append(f'<section id="{esc(kind)}"><h2>{esc(kind)}</h2>')
+        group_id=kind.replace(' · ','-').replace(' ','-') if three_way is not None else kind
+        parts.append(f'<section id="{esc(group_id)}"><h2>{esc(kind)}</h2>')
         for row in groups[kind]:
             silent = row['status']=='ok' and not row['exposure_signals']
             parts += [f'<article class="line {"silent" if silent else ""}" id="{esc(row["crop_id"])}">',
@@ -676,11 +692,24 @@ def build_review(rows, summary, comments, out, rec, *, engine='docai', compariso
                 if pair['docai_status'] == 'ok':
                     parts.append(f'<p class="ocr" lang="el">{esc(pair["docai_text"])}</p>')
                     parts.append(f'<p class="muted">Mean symbol confidence {fmt(pair["docai_mean_symbol_confidence"])} · minimum {fmt(pair["docai_min_symbol_confidence"])} · {pair["docai_lines_returned"]} layout lines</p>')
+                    if three_way is not None:
+                        parts.append(f'<p class="muted">Line confidences {esc(pair["docai_line_confidences"])}</p>')
                     parts.append(f'<p>{esc(pair["docai_treatment"])} · {esc(", ".join(pair["docai_exposure_signals"]))}</p>')
                     parts.append(f'<a href="__DOCAI__/responses/{esc(row["crop_id"])}.json">DocAI raw response and SHA receipt</a>')
                     parts.append(f'<p>Strict NFD CER (DocAI reference): {fmt(pair["nfd_cer_docai_reference"])} · NFD identical: {pair["nfd_equal"]}</p>')
                 else:
                     parts.append(f'<p>{esc(pair["docai_status"])}</p>')
+                parts.append('</div>')
+            if three_way is not None:
+                pair = three_way[row['crop_id']]
+                parts.append('<div class="vision-reading"><h4>Cloud Vision</h4>')
+                if pair['vision_status'] == 'ok':
+                    parts.append(f'<p class="ocr" lang="el">{esc(pair["vision_text"])}</p>')
+                    parts.append(f'<p class="muted">Mean symbol confidence {fmt(pair["vision_mean_symbol_confidence"])} · minimum {fmt(pair["vision_min_symbol_confidence"])} · line confidences {esc(pair["vision_line_confidences"])}</p>')
+                    parts.append(f'<a href="__VISION__/responses/{row["crop_sha256"]}.json">Vision raw response</a>')
+                    parts.append(f'<p>Majority exact / NFD / NFD without line breaks: {pair["majority_raw"]} / {pair["majority_nfd"]} / {pair["majority_nfd_without_cr_lf"]}</p>')
+                else:
+                    parts.append(f'<p>{esc(pair["vision_status"])}</p>')
                 parts.append('</div>')
             parts.append('</article>')
         parts.append('</section>')
@@ -697,11 +726,25 @@ def build_review(rows, summary, comments, out, rec, *, engine='docai', compariso
             text = text.replace('vision_failed_lines/responses/' + esc(row['crop_id']) + '.json', 'vision_failed_lines/responses/' + row['crop_sha256'] + '.json')
         text = text.replace('<ol class="ocr" lang="el">', '<h4>Cloud Vision</h4><ol class="ocr" lang="el">')
         text = text.replace('__DOCAI__/', 'docai_failed_lines/')
-    (out/('vision_vs_docai_review.html' if comparison is not None else f'{engine}_failed_lines_review.html')).write_text(text, encoding='utf-8')
+    if engine == 'transkribus':
+        text = text.replace('Document AI · Known failed lines · T10', 'Three OCR engines · Failed lines · T12').replace('How Google treats the line finder’s failures', 'Transkribus, Document AI and Vision: Anemi first').replace('Google', 'Transkribus').replace('docai_failed_lines/', 'transkribus_failed_lines/').replace('DOCAI_FAILED_LINES_v1.md', 'THREE_ENGINES_v1.md')
+        text = text.replace('estimated US$0.0000', f'credits used {rec["credits_used"]}')
+        text = text.replace('T10 visual observation', 'T12 native crop observation')
+        text = text.replace('A single confident line can still omit or append text.', 'A single returned line can still omit or append text. Transkribus line count is imposed by supplied geometry; missing confidence is shown as unavailable.')
+        for row in rows:
+            text = text.replace('transkribus_failed_lines/responses/' + esc(row['crop_id']) + '.json', 'transkribus_failed_lines/responses/' + row['crop_sha256'] + '.json')
+        text = text.replace('<ol class="ocr" lang="el">', f'<h4>Transkribus · {esc(rec["binding"]["mode"])} · model {rec["binding"]["model_id"]}</h4><ol class="ocr" lang="el">')
+        text = text.replace('__DOCAI__/', 'docai_failed_lines/').replace('__VISION__/', 'vision_failed_lines/')
+        text = text.replace('Strict NFD CER (DocAI reference)', 'DocAI–Transkribus NFD CER (DocAI denominator)')
+    filename = 'three_engines_review.html' if three_way is not None else ('vision_vs_docai_review.html' if comparison is not None else f'{engine}_failed_lines_review.html')
+    (out/filename).write_text(text, encoding='utf-8')
 
 
-def run(directory: Path, out: Path, *, offline=False, reader=None, engine='docai', language_hints=None):
+def run(directory: Path, out: Path, *, offline=False, reader=None, engine='docai', language_hints=None, retry_unresolved=False):
     directory, out = directory.resolve(), out.resolve()
+    if engine == 'transkribus':
+        from prototypes.harvest.transkribus_failed_lines import run_transkribus
+        return run_transkribus(directory, out, offline=offline, reader=reader, retry_unresolved=retry_unresolved)
     if engine not in ('docai', 'vision'):
         raise ValueError('unknown engine')
     output = out/f'{engine}_failed_lines'
@@ -741,14 +784,17 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--catalogue', type=Path, default=DEFAULT_CATALOGUE)
     parser.add_argument('--out', type=Path, default=DEFAULT_OUT)
-    parser.add_argument('--engine', choices=('docai', 'vision'), default='docai')
+    parser.add_argument('--engine', choices=('docai', 'vision', 'transkribus'), default='docai')
     parser.add_argument('--language-hints', nargs='*', default=None, help='Vision hints (default el grc)')
     parser.add_argument('--offline', action='store_true', help='rebuild from saved responses; no ADC or API calls')
     parser.add_argument('--include-anemi', action='store_true', help='send Anemi crops too (owner authorised 11 Oct 2026)')
+    parser.add_argument('--retry-unresolved', action='store_true', help='Transkribus only: at most one separately receipted retry of a submission without a process ID, under the credit floor')
     args=parser.parse_args(argv)
     global ALLOW_ANEMI
     ALLOW_ANEMI = bool(args.include_anemi)
-    result=run(args.catalogue,args.out,offline=args.offline,engine=args.engine,language_hints=args.language_hints)
+    if args.retry_unresolved and (args.engine!='transkribus' or args.offline):
+        parser.error('--retry-unresolved requires live --engine transkribus')
+    result=run(args.catalogue,args.out,offline=args.offline,engine=args.engine,language_hints=args.language_hints,retry_unresolved=args.retry_unresolved)
     return 0 if result['status']=='complete' else 1
 
 

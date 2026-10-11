@@ -5,6 +5,14 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 CALLS={
+'TranskribusReader':'reader = TranskribusReader(model_id=148525, responses_dir="responses", mode="single_line")',
+'TranskribusError':'error = TranskribusError("retained processing refusal")',
+'CreditFloorError':'error = CreditFloorError("next image would breach the credit floor")',
+'load_transkribus':'reader = load_transkribus(enabled=True, model_id=148525, responses_dir="responses")',
+'credit_balance':'balance = reader.credit_balance()',
+'read_many':'readings = list(reader.read_many(source_crop_rows, offline=True))',
+'TranskribusReader.read':'reading = reader.read("crop.png", offline=True)',
+'TranskribusReader.binding':'binding = reader.binding()',
 'VisionReader':'reader = VisionReader("quota-project", language_hints=("el", "grc"))',
 'VisionReading':'reading = VisionReading(**recorded_vision_values)',
 'VisionError':'error = VisionError("retained service refusal")',

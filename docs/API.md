@@ -1353,7 +1353,7 @@ figure = render_book_statistics(book["stats"])
 
 ### `greekocr.pages.structure.build_structure`
 
-`def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[int], *, gutters: Sequence=(), rules: Sequence[dict]=(), boundaries: Sequence[dict]=(), fold: dict | bool | None=None, page: Image.Image | np.ndarray | None=None) -> dict`
+`def build_structure(lines: list[dict], pieces: list[dict], image_size: Sequence[int], *, gutters: Sequence=(), rules: Sequence[dict]=(), boundaries: Sequence[dict]=(), fold: dict | bool | None=None, page: Image.Image | np.ndarray | None=None, _original_ink: np.ndarray | None=None) -> dict`
 
 Add addresses to line/cell records in place without changing geometry.
 
@@ -1439,7 +1439,7 @@ pieces = table_text_pieces(image, (10, 20, 800, 900))
 
 ### `greekocr.pages.tables.recognition_pieces`
 
-`def recognition_pieces(page: Image.Image | NDArray[Any], lines: list[LineSegment], table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, supplement: bool=True) -> tuple[list[TextPiece], list, PageSegmentation | None]`
+`def recognition_pieces(page: Image.Image | NDArray[Any], lines: list[LineSegment], table_regions: Sequence[tuple[str, Sequence[float]]]=(), *, supplement: bool=True, _original_ink: NDArray[Any] | None=None) -> tuple[list[TextPiece], list, PageSegmentation | None]`
 
 Shared delivery path for the plugin and offline review harness.
 
@@ -1644,6 +1644,159 @@ reading = reader.read("crop.png")
 ```python
 from greekocr.readers.services.google_docai import DocAIReader
 readings = reader.read_batch(["crop.png"], concurrency=4)
+```
+
+### `greekocr.readers.services.google_vision.VisionError`
+
+A retained service failure; the same crop is never automatically retried.
+
+```python
+from greekocr.readers.services.google_vision import VisionError
+error = VisionError("retained service refusal")
+```
+
+### `greekocr.readers.services.google_vision.VisionReading`
+
+```python
+from greekocr.readers.services.google_vision import VisionReading
+reading = VisionReading(**recorded_vision_values)
+```
+
+### `greekocr.readers.services.google_vision.VisionReader`
+
+Construct explicitly; ADC and requests are loaded only on a cache miss.
+
+```python
+from greekocr.readers.services.google_vision import VisionReader
+reader = VisionReader("quota-project", language_hints=("el", "grc"))
+```
+
+### `greekocr.readers.services.google_vision.VisionReader.binding`
+
+`def binding(self) -> dict[str, Any]`
+
+Return defensive request settings, including hints and unpinned model.
+
+```python
+from greekocr.readers.services.google_vision import VisionReader
+binding = reader.binding()
+```
+
+### `greekocr.readers.services.google_vision.VisionReader.read`
+
+`def read(self, path: str | Path) -> str`
+
+Return NFD text, retaining whitespace and all reported lines.
+
+```python
+from greekocr.readers.services.google_vision import VisionReader
+text = reader.read("crop.png")
+```
+
+### `greekocr.readers.services.google_vision.VisionReader.read_annotation`
+
+`def read_annotation(self, path: str | Path, *, expected_sha256: str | None=None) -> VisionReading`
+
+Return full annotation, flattened hierarchy, confidence and receipt.
+
+```python
+from greekocr.readers.services.google_vision import VisionReader
+reading = reader.read_annotation("crop.png")
+```
+
+### `greekocr.readers.services.google_vision.load_google_vision`
+
+`def load_google_vision(*, enabled: bool=False, user_project: str | None=None, language_hints: Iterable[str]=('el', 'grc'), responses_dir: str | Path=DEFAULT_RESPONSES) -> VisionReader`
+
+Factory gated by explicit opt-in or GREEKOCR_ENABLE_GOOGLE_VISION=1, then ADC.
+
+```python
+from greekocr.readers.services.google_vision import load_google_vision
+reader = load_google_vision(enabled=True, user_project="quota-project")
+```
+
+### `greekocr.readers.services.transkribus.TranskribusError`
+
+```python
+from greekocr.readers.services.transkribus import TranskribusError
+error = TranskribusError("retained processing refusal")
+```
+
+### `greekocr.readers.services.transkribus.CreditFloorError`
+
+```python
+from greekocr.readers.services.transkribus import CreditFloorError
+error = CreditFloorError("next image would breach the credit floor")
+```
+
+### `greekocr.readers.services.transkribus.Reading`
+
+```python
+from greekocr.readers.services.transkribus import Reading
+reading = Reading(**recorded_reading_values)
+```
+
+### `greekocr.readers.services.transkribus.TranskribusReader`
+
+```python
+from greekocr.readers.services.transkribus import TranskribusReader
+reader = TranskribusReader(model_id=148525, responses_dir="responses", mode="single_line")
+```
+
+### `greekocr.readers.services.transkribus.TranskribusReader.binding`
+
+`def binding(self) -> dict[str, Any]`
+
+```python
+from greekocr.readers.services.transkribus import TranskribusReader
+binding = reader.binding()
+```
+
+### `greekocr.readers.services.transkribus.TranskribusReader.credit_balance`
+
+`def credit_balance(self) -> float`
+
+```python
+from greekocr.readers.services.transkribus import TranskribusReader
+balance = reader.credit_balance()
+```
+
+### `greekocr.readers.services.transkribus.TranskribusReader.read_many`
+
+`def read_many(self, rows: Iterable[dict[str, Any]], *, offline: bool=False, window: int=6) -> Iterator[tuple[dict[str, Any], Reading]]`
+
+Bounded one-image queue, reserving one maximum charge per pending job.
+
+```python
+from greekocr.readers.services.transkribus import TranskribusReader
+readings = list(reader.read_many(source_crop_rows, offline=True))
+```
+
+### `greekocr.readers.services.transkribus.TranskribusReader.read_annotation`
+
+`def read_annotation(self, crop: PathLike, *, expected_sha256: str | None=None, offline: bool=False) -> Reading`
+
+```python
+from greekocr.readers.services.transkribus import TranskribusReader
+reading = reader.read_annotation("crop.png")
+```
+
+### `greekocr.readers.services.transkribus.TranskribusReader.read`
+
+`def read(self, crop: PathLike, *, expected_sha256: str | None=None, fresh: bool=False, offline: bool=False) -> Reading`
+
+```python
+from greekocr.readers.services.transkribus import TranskribusReader
+reading = reader.read("crop.png", offline=True)
+```
+
+### `greekocr.readers.services.transkribus.load_transkribus`
+
+`def load_transkribus(*, enabled: bool=False, responses_dir: PathLike, **kwargs: Any) -> TranskribusReader`
+
+```python
+from greekocr.readers.services.transkribus import load_transkribus
+reader = load_transkribus(enabled=True, model_id=148525, responses_dir="responses")
 ```
 
 ### `greekocr.real.adjudicate.adjudicate_lines`
@@ -2439,113 +2592,3 @@ checkpoint = verify_init("converted/donor_init.pt")
 from greekocr.warmstart import qualify_parity
 receipt = qualify_parity(donor_spec, "converted/native_before_swap.pt", "100_crops.jsonl", "parity")
 ```
-
-## Failed-line Document AI audit (T10 prototype)
-
-`prototypes.harvest.google_failed_lines` audits the R7 owner's crop catalogue before any harvest. It uses the existing `DocAIReader`, Greek hints and symbol output, excludes Anemi by both page ID and filename before adapter access, and binds response envelopes to image SHA-256 plus processor/options. Byte-identical crops reuse one request. No `.git` writes, crop straightening, held-out processing or training-data harvest are performed.
-
-```sh
-.venv/bin/python scripts/harvest/google_failed_lines.py
-.venv/bin/python scripts/harvest/google_failed_lines.py --offline
-```
-
-Options: `--catalogue DIRECTORY`, `--out DIRECTORY`, `--offline`. Defaults are the supplied sibling `greek-ocr-toolkit-ff-merged/.astra/fast_lines/out/stack/r7/failed_lines` catalogue and this repository's `docs/harvest`. Offline regeneration reads saved envelopes without ADC or network. A missing cache stops; it never silently calls Google.
-
-- `load_catalogues(directory) -> list[dict]`: flatten the two JSON catalogues' `current_output_items`, validate paths, retain owner metadata, dimensions, SHA and withheld rows. Marked-region crops are excluded from calls.
-- `derive_comment_crops(directory, rows, output) -> list[dict]`: bind explicit current-owner box numbers only when saved R6 item geometry and display order equal R7; intersect exact polygons and crop native grayscale pixels. Reuse existing catalogue items, preserve association and source hashes. Ambiguous historical/page-wide comments remain unmeasured.
-- `crop_metrics(raw, width, height) -> dict`: actual layout-line count/text, line confidence, symbol confidence, empty flag, characters excluding CR/LF, characters per 100 image-width pixels, and raw Greek code-point set. If layout lines are absent the text-split fallback is labelled.
-- `characters_table(rows) -> dict`: ALL and each present source, exact emitted code-point counts, requested historical-character observations, and NFD combining marks attached to Greek letters; deduplicate image SHA values.
-- `cached_response(row, output, reader, offline=False) -> dict`: response envelope with raw response and hash, image hash, binding and adapter receipt. Never calls Anemi. Changed bindings/hashes or unresolved attempts fail closed. No fresh/retry option is exposed.
-- `run(directory, out, offline=False, reader=None) -> dict`: sequential audit; durable attempt journal, adapter receipts/ledger, response envelopes, CSV/JSON metrics, character tables, per-type report, local-file-image review HTML and cost receipt. Stops on the first request error, including permission/billing errors, preserving a partial report.
-
-Outputs: `DOCAI_FAILED_LINES_v1.md`, `docai_failed_lines_review.html`, and `docai_failed_lines/{responses,adapter_receipts,attempts,derived_crops,images,inventory.json,metrics.json,crops.csv,characters.csv,characters.json,summary.json,page_comment_coverage.json,receipt.json}`. Receipt cost is a base list-price estimate, not a billing statement. Confidence exposure thresholds are diagnostic and single-line silent candidates require visual confirmation against source geometry.
-
-Validate the frozen v1 artifacts without network:
-
-```sh
-.venv/bin/python scripts/harvest/validate_google_failed_lines.py
-```
-
-The validator recomputes all crop metrics and character counts, verifies raw responses/image hashes/CSV IDs/cards/links and one API call per image SHA, and writes `docai_failed_lines/validation.json`. It checks responsive CSS constraints; it does not claim a rendered desktop/phone viewport check. Hash-bound manual observations are retained in `visual_findings.json` and shown on the corresponding cards.
-
-## Cloud Vision service reader (T11)
-
-Explicit opt-in and ADC; raw SHA-cached annotations plus NFD public text. See [READERS_VISION.md](READERS_VISION.md).
-
-### `greekocr.readers.services.google_vision.VisionError`
-
-A retained service failure; the same crop is never automatically retried.
-
-```python
-from greekocr.readers.services.google_vision import VisionError
-error = VisionError("retained service refusal")
-```
-
-### `greekocr.readers.services.google_vision.VisionReading`
-
-```python
-from greekocr.readers.services.google_vision import VisionReading
-reading = VisionReading(**recorded_vision_values)
-```
-
-### `greekocr.readers.services.google_vision.VisionReader`
-
-Construct explicitly; ADC and requests are loaded only on a cache miss.
-
-```python
-from greekocr.readers.services.google_vision import VisionReader
-reader = VisionReader("quota-project", language_hints=("el", "grc"))
-```
-
-### `greekocr.readers.services.google_vision.VisionReader.binding`
-
-`def binding(self) -> dict[str, Any]`
-
-Return defensive request settings, including hints and unpinned model.
-
-```python
-from greekocr.readers.services.google_vision import VisionReader
-binding = reader.binding()
-```
-
-### `greekocr.readers.services.google_vision.VisionReader.read`
-
-`def read(self, path: str | Path) -> str`
-
-Return NFD text, retaining whitespace and all reported lines.
-
-```python
-from greekocr.readers.services.google_vision import VisionReader
-text = reader.read("crop.png")
-```
-
-### `greekocr.readers.services.google_vision.VisionReader.read_annotation`
-
-`def read_annotation(self, path: str | Path, *, expected_sha256: str | None=None) -> VisionReading`
-
-Return full annotation, flattened hierarchy, confidence and receipt.
-
-```python
-from greekocr.readers.services.google_vision import VisionReader
-reading = reader.read_annotation("crop.png")
-```
-
-### `greekocr.readers.services.google_vision.load_google_vision`
-
-`def load_google_vision(*, enabled: bool=False, user_project: str | None=None, language_hints: Iterable[str]=('el', 'grc'), responses_dir: str | Path=DEFAULT_RESPONSES) -> VisionReader`
-
-Factory gated by explicit opt-in or GREEKOCR_ENABLE_GOOGLE_VISION=1, then ADC.
-
-```python
-from greekocr.readers.services.google_vision import load_google_vision
-reader = load_google_vision(enabled=True, user_project="quota-project")
-```
-
-### Failed-line engine comparison
-
-```sh
-python scripts/harvest/google_failed_lines.py --engine vision --include-anemi
-python scripts/harvest/google_failed_lines.py --engine vision --include-anemi --offline
-```
-
-`--engine docai` remains the default. Vision accepts `--language-hints el grc` (the default); empty hints are possible with `--language-hints`. All responses bind the hints. `--out` is the parent report directory; data go into `<out>/vision_failed_lines/`, while comparison reads the existing `<out>/docai_failed_lines/` cache. No DocAI request is made for comparison. See [VISION_VS_DOCAI_v1.md](harvest/VISION_VS_DOCAI_v1.md).

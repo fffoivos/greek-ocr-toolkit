@@ -1201,3 +1201,26 @@ Newly authored synthetic offline REST contracts, not live provider output. The i
 | --- | --- | --- |
 | `tests/data/vision_failed_lines/README.md` | T11 synthetic offline fixture | `22ee71fff17282203c9a6d9eab40db3a425ddef242605daba78f3b725972853f` |
 | `tests/data/vision_failed_lines/response.json` | T11 synthetic offline fixture | `d7396b08cdbf830c83be20931f8074e0637c47934aea38ea067918da20789903` |
+
+
+## T12 Transkribus reader and audit (12 October 2026)
+
+New service reader, Anemi-first catalogue runner, three-engine comparison and synthetic offline contracts. Original catalogue crops remain external and unchanged; Anemi review assets are internal only. No production page or held-out data is changed.
+
+| File | Origin | SHA-256 |
+| --- | --- | --- |
+| `greekocr/readers/services/transkribus.py` | T12 implementation, documentation or synthetic fixture | `9764a7e05d03240926b5a208bb1bcc9ddcab20c24219b9a98cb505eae949b928` |
+| `prototypes/harvest/transkribus_failed_lines.py` | T12 implementation, documentation or synthetic fixture | `b2b22d91f6d39f10c6a221515d6b1f21c83d3ede5d0c50688f403f3610af6643` |
+| `scripts/harvest/validate_three_engines.py` | T12 implementation, documentation or synthetic fixture | `3aa787df938a5dfc516c9c38e14fc11071df0c288b2bfc6a63a6cff29e1f6d90` |
+| `tests/test_transkribus.py` | T12 implementation, documentation or synthetic fixture | `98776d7604541852c558fb45193dfa3e90e4c06315f612f122ef2d11cc6d4af6` |
+| `docs/READERS_TRANSKRIBUS.md` | T12 implementation, documentation or synthetic fixture | `50bbc101934c5a8d92f035c1dcffbfed86dd663b6f72cc3b75d9f55ba1813b87` |
+| `tests/data/transkribus/README.md` | T12 implementation, documentation or synthetic fixture | `d6389fdf685b5c66ceae3d75d4c2e3aa756ab8a3d286eab864bb316bc7f7ef78` |
+| `tests/data/transkribus/credits.json` | T12 implementation, documentation or synthetic fixture | `8c27649f5ca398b4365fa1c037a17904500eb66e63ed6653e87174c11ea92fc8` |
+| `tests/data/transkribus/page.xml` | T12 implementation, documentation or synthetic fixture | `7b6e01dfeddb3575602a9430cd377ea7e323cfca70f56fe89708b52bf432001c` |
+| `tests/data/transkribus/response.json` | T12 implementation, documentation or synthetic fixture | `cffeaf4d33663d9c203626260c10d3ae84acea27d757b41d9a90834742c7dabe` |
+| `tests/data/transkribus/token.json` | T12 implementation, documentation or synthetic fixture | `d9d37d40a7dc9d50bb305a39750365a5067b05a6f046fd1eb2a49ced180a7b5e` |
+| `prototypes/harvest/google_failed_lines.py` | T12 integration change | `7b2310ae4f0fd5e3130725155953ce87a35fbd8fb9d7e77fc400b048d848d3ab` |
+| `scripts/generate_api_docs.py` | T12 integration change | `598fb6e6a24f3f5bc5fdb490dafac1883b2b9a81a82c77f5b4523c70db67327c` |
+| `tests/test_docai.py` | T12 integration change | `99dcf9af677fe0c25bf2ed09c7e898b3b477129a6d9d3f4df5193a043de70407` |
+
+`docs/API.md` is regenerated from the typed registry. The existing failed-line review generator is reused. See [READERS_TRANSKRIBUS.md](READERS_TRANSKRIBUS.md), [THREE_ENGINES_v1.md](harvest/THREE_ENGINES_v1.md), [local review](harvest/three_engines_review.html), [receipt](harvest/transkribus_failed_lines/receipt.json) and [validation](harvest/transkribus_failed_lines/validation.json). Generated provider responses, native images, layout probes and bounded recovery attempts are bound by their receipts and image/response SHA envelopes.
