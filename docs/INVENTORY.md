@@ -1312,3 +1312,24 @@ passed** test log are under `docs/harvest/fix2/`. The before/after and all 500
 sampled-line reason counts are in the “Fix 2 (offline re-gate)” addendum of
 [`docs/harvest/PILOT_v1.md`](harvest/PILOT_v1.md). Replay source-code hashes are
 bound in `fix2/summary.json`.
+
+
+## T14 native-pixel montage verification (12 October 2026)
+
+New offline `greekocr.harvest.montage` builds N=10/20/40 native-pixel bands, white padding, 60px-or-native-height gaps and 2px grey rules, writes SHA-bound box maps, and splits at hard 2,600px width / 10,000px height / 8MB encoded PNG ceilings. It assigns reported Google line/symbol boxes by 70% vertical overlap, audits merged/lost/split independently, reuses the pilot side-by-side join rule, and scores exact NFD equality/CER plus symbol-weighted confidence. No production defaults or historical pilot records were changed.
+
+The explicit `--run` driver uses the frozen 40/40/20 tier sample; all 200 single-reader responses are reused and SHA-verified, with zero new single-crop calls. 18 montage files contain 17 unique PNG hashes; the identical N=20/N=40 tail reuses both reader responses. Both engines made 17 requests each: **34 calls, USD 0.051 standard list price**, below USD 1. Persistent reservations prevent repeated calls after errors/interruption. Source files and baseline hashes bind the run.
+
+No N qualifies: Vision identical 63% / 63% / 60%, DocAI 82% / 81% / 76% at N=10/20/40; merged/lost are zero throughout. Median NFD CER is zero; splits are Vision 2/1/0 and DocAI 0/0/1. The task does not promote montage reads.
+
+Artifacts: [report](harvest/MONTAGE_v1.md), [100-crop review](harvest/montage_review.html), [sample](harvest/montage_v1/sample.json), [maps/manifest](harvest/montage_v1/manifest.json), [600 comparisons](harvest/montage_v1/comparisons.jsonl), [summary](harvest/montage_v1/summary.json), [cost/call receipt](harvest/montage_v1/receipt.json), [offline validation](harvest/montage_v1/validation.json), [test results](harvest/montage_v1/tests.xml), [gallery QA limits](harvest/montage_v1/gallery_qa.json). Per-engine line/symbol assignment audits are in `docs/harvest/montage_v1/assignments/`. Bulk PNGs and unchanged raw/parsed Google responses are ignored under `docs/harvest/harvest_big/montage_v1/`, inside this writable workspace. Original single inputs remain at the supplied external `glossapi-ocr-local/.../harvest_big/pilot_t13c/` root.
+
+Validation: 32 new T14 tests; **247 total passed** across montage, existing harvest gates, Google readers and typed/documented API. Offline raw replay verifies all 600 comparisons and native pixels in all 18 maps, without new network calls. Static checks verify 100 cards, 100 crop paths and every local link. The first montage was viewed at native resolution. Desktop/narrow browser rendering and dynamic filter execution remain unverified: Chromium launch was denied by the macOS sandbox, and computer use was not approved for Firefox.
+
+| File | Provenance / role | SHA-256 |
+| --- | --- | --- |
+| `greekocr/harvest/montage.py` | New T14 native layout/offline contract, experiment driver, validator or API registry integration | `80797049a81c1c8e5110c55e332276cc97187e8b1cdee1d07c33c5a29813e6e8` |
+| `scripts/harvest/montage_pilot.py` | New T14 native layout/offline contract, experiment driver, validator or API registry integration | `860e813308a4db2167a4407d0fa73bfd638fd831d64f09b4a8851d9218f5c47d` |
+| `scripts/harvest/validate_montage.py` | New T14 native layout/offline contract, experiment driver, validator or API registry integration | `f81236601865bf6c9f4210bdf952cd09a4ebe5107662909f4d90c53bc70e432b` |
+| `tests/test_montage.py` | New T14 native layout/offline contract, experiment driver, validator or API registry integration | `6f9cdce46ff2a101ac8f45539b3245f90ae00c14cb454447e18d151265bb929b` |
+| `scripts/generate_api_docs.py` | New T14 native layout/offline contract, experiment driver, validator or API registry integration | `6b3da127e8715ec479a8ca33e588588343711dae533949f2148e7c281baeab1f` |

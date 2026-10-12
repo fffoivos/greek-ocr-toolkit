@@ -2646,3 +2646,100 @@ paths and features never measured are null. Tier 3/rejected/unread have no
 label. Anemi has `text_layer=null`. Tier 1 includes only strict NFD whitespace
 agreement or the documented whole-word substitution exception; tier 2 is
 ≤2 NFD edits. No broad case, sigma or accent folding applies.
+
+### T14 montage verification (offline API and explicit network driver)
+
+No production montage setting is enabled. See [MONTAGE_v1.md](harvest/MONTAGE_v1.md). Bands, padding and rules preserve native pixels. The driver uses the frozen 100-line pilot sample and its cached single responses; only generated montage images can reach the readers.
+
+### `greekocr.harvest.montage.build_montages`
+
+`def build_montages(records: Iterable[dict[str, Any]], n: int, images_dir: str | Path, maps_dir: str | Path, *, max_width: int=2600, max_height: int=10000, max_png_bytes: int=8000000) -> list[dict[str, Any]]`
+
+Stack up to N crops, preserving pixels; split on height or encoded size.
+
+```python
+from greekocr.harvest.montage import build_montages
+maps = build_montages(cached_crop_records, 20, "harvest_big/montages", "montage_maps")
+```
+
+### `greekocr.harvest.montage.response_lines`
+
+`def response_lines(engine: str, raw: dict[str, Any], size: tuple[int, int]) -> list[dict[str, Any]]`
+
+Engine lines: DocAI line layouts; Vision detectedBreak symbol box unions.
+
+```python
+from greekocr.harvest.montage import response_lines
+lines = response_lines("vision", cached_raw_response, (1268, 3900))
+```
+
+### `greekocr.harvest.montage.assign_lines`
+
+`def assign_lines(lines: Iterable[dict[str, Any]], mapping: dict[str, Any], *, threshold: float=0.7) -> dict[str, Any]`
+
+Assign >=70% box height to a crop; cross-band boxes mark every hit merged.
+
+```python
+from greekocr.harvest.montage import assign_lines
+assigned = assign_lines(engine_lines, montage_box_map)
+```
+
+### `greekocr.harvest.montage.response_symbols`
+
+`def response_symbols(engine: str, raw: dict[str, Any], size: tuple[int, int]) -> list[dict[str, Any]]`
+
+Extract symbol text, native boxes and confidence from unchanged raw JSON.
+
+```python
+from greekocr.harvest.montage import response_symbols
+symbols = response_symbols("docai", cached_raw_response, (1268, 3900))
+```
+
+### `greekocr.harvest.montage.assign_symbols`
+
+`def assign_symbols(symbols: Iterable[dict[str, Any]], mapping: dict[str, Any], *, threshold: float=0.7) -> dict[str, Any]`
+
+Apply the same band rule independently to symbol-confidence observations.
+
+```python
+from greekocr.harvest.montage import assign_symbols
+assigned = assign_symbols(engine_symbols, montage_box_map)
+```
+
+### `greekocr.harvest.montage.compare_nfd`
+
+`def compare_nfd(single: str, montage: str) -> dict[str, Any]`
+
+Exact NFD codepoint equality and Levenshtein CER, without whitespace folding.
+
+```python
+from greekocr.harvest.montage import compare_nfd
+comparison = compare_nfd("ἅλφα", "ἅλφα")
+```
+
+### `greekocr.harvest.montage.summarise`
+
+`def summarise(comparisons: Iterable[dict[str, Any]], montage_count: int) -> dict[str, Any]`
+
+Aggregate a reader/N cohort, including symbol-weighted confidence means.
+
+```python
+from greekocr.harvest.montage import summarise
+rates = summarise(score)
+```
+
+The map has `boxes[crop_id] = {x0, x1, y0, y1, width, height, crop, crop_sha256}` plus image SHA, actual N, dimensions, PNG bytes, separator intervals and split reasons. Coordinates are half-open native pixels. N is 10, 20 or 40. Oversized singletons fail; no scaling is permitted.
+
+`assign_lines` returns per-crop text/status, independent merged/lost/split booleans, assigned line count, raw pieces, dropped pieces and list-return flags, plus the full per-line assignment audit. Merged/lost counts may overlap. Side-by-side pieces join in x order; stacked splits retain LF-separated readings and rejection flags. `assign_symbols` uses the same height rule for confidence observations. `compare_nfd` keeps whitespace and reports exact equality, edits, reference length and CER. `summarise` applies the requested 97% / zero merged / zero lost gate.
+
+Driver (run from this repo; `--run` is the only network opt-in):
+
+```bash
+.venv/bin/python scripts/harvest/montage_pilot.py --prepare
+.venv/bin/python scripts/harvest/montage_pilot.py --run
+.venv/bin/python scripts/harvest/montage_pilot.py
+```
+
+`--records`, `--evidence-dir` and `--bulk-dir` override paths. The no-flag invocation recomputes all metrics/reports from cached montage raw responses without invoking readers. Persistent budget reservations enforce USD 1 and the planned call count, refuse interrupted re-calls and deduplicate identical PNG hashes across N. Single inputs and their raw cache receipts are SHA-checked before and after the run; their text is never requested again.
+
+`.venv/bin/python scripts/harvest/validate_montage.py` replays the frozen raw evidence without network, verifies image/map custody and native pixels, recomputes every assignment and metric, checks the call ledgers and local gallery assets, and writes `montage_v1/validation.json`.
