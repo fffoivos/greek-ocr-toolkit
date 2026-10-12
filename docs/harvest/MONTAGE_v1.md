@@ -57,3 +57,74 @@ Visual inspection of the native first montage confirms the separated crop bands 
 Final validation: **247 passed** (32 T14 tests plus existing harvest/reader/API contracts); all 600 comparisons and assignments replayed offline with zero additional API calls. No N qualifies, so final-line identical percentages refer to the largest tested N, **40**.
 
 T14: done | N_adopt: none | identical_vision: 60.0% | identical_docai: 76.0% | calls: 34 | tests: 247 passed
+
+## Controls
+
+**T14b verdict: the readers reproduced every single crop, while montages still changed text. Recommended N for adoption: none.** N=20 remains the tested candidate size; removing the grey rule does not qualify it. The single-vs-single baseline is **100% exact NFD and 100% letters+marks for both readers (30/30)**, including unchanged raw text. This control provides no evidence that reader nondeterminism explains T14's montage differences.
+
+### Frozen sample and fresh calls
+
+30 of T14's 100 crops: **15 with identical Vision N=20 reads and 15 with differing reads**. Sort IDs within strata, use `random.Random(1402)`, retain the one crop containing the reported `*` in the differing stratum, sample the other 14 differing crops, and preserve T14 order after selection. The strata contain 63 identical / 37 differing crops in the original pilot. This outcome-stratified, artifact-inclusive control is not a population agreement estimate; its 50% ruled Vision baseline is fixed by selection. Compare all three modes on this same 30-crop cohort. [Frozen IDs, original crop/raw-response hashes and bindings](montage_v1/determinism/sample.json).
+
+Each native single crop was read **once more by each reader: 60 fresh calls**. Historical caches were deliberately bypassed using the separate `montage_v1/determinism/google/` namespace. Adapter ledgers verify one uncached successful response per image/reader, distinct receipt IDs from the cached single reads, unchanged image bytes and identical reader settings. Vision: DOCUMENT_TEXT_DETECTION, `el` + `grc`, unpinned provider default. DocAI: the same EU processor and `pretrained-ocr-v2.1-2024-08-07`, `el`, symbols enabled. Existing crop-gate context and list-return cleanup were applied to the new single reads. Raw single-vs-single text also matches 30/30 in each reader, so cleanup did not conceal differences. [New singles](montage_v1/determinism/singles.jsonl).
+
+The same 30 crops form two no-rule images, **20 + 10 crops**, read once per reader: **four calls**. Native pixels, alignment, padding, limits and gap formula are unchanged: each gap is `max(60, left native height, right native height)` and entirely white 255. No scaling, no grey pixels added in a gap. The 10-crop tail is a partial N=20 batch. [Images and box maps](montage_v1/determinism/norule/manifest.json). Regrouping the selected crops changes their neighbors relative to the original 100-crop T14 montages. Thus this is not a perfectly paired separator-only ablation; the results support rejection of equivalence, but do not isolate the rule's contribution to the agreement changes.
+
+### Agreement
+
+Exact means equality after NFD decomposition of cleaned readings, with whitespace and punctuation preserved. Letters+marks means apostrophe variants first unified, then NFD Unicode L/M codepoints retained; case, base-letter variants and combining marks remain distinct. Punctuation (including edge punctuation), whitespace, numbers and symbols are ignored in that diagnostic. It does not establish word-boundary or punctuation preservation. The same helper recounts the full original N=20 cohort as **63% exact / 70% letters+marks for Vision and 81% / 89% for DocAI**, matching the coordinator's letters+marks recount.
+
+| Comparison | Reader | Exact vs cached single | Letters+marks vs cached single | Exact vs new single | Letters+marks vs new single |
+| --- | --- | --- | --- | --- | --- |
+| single-vs-single | Vision | **100.0% (30/30)** | **100.0% (30/30)** | — | — |
+| single-vs-single | DocAI | **100.0% (30/30)** | **100.0% (30/30)** | — | — |
+| montage(rule)-vs-single | Vision | 50.0% (15/30) | 60.0% (18/30) | 50.0% (15/30) | 60.0% (18/30) |
+| montage(rule)-vs-single | DocAI | 70.0% (21/30) | 83.3% (25/30) | 70.0% (21/30) | 83.3% (25/30) |
+| montage(no rule)-vs-single | Vision | **53.3% (16/30)** | **60.0% (18/30)** | **53.3% (16/30)** | **60.0% (18/30)** |
+| montage(no rule)-vs-single | DocAI | **73.3% (22/30)** | **83.3% (25/30)** | **73.3% (22/30)** | **83.3% (25/30)** |
+
+All cached/new montage-reference metrics agree because the new single texts equal the cached texts. Per-crop text, exact/letters+marks comparisons, minimum-edit alignments and both strata's summaries are retained in [300 comparisons](montage_v1/determinism/comparisons.jsonl) and [summary.json](montage_v1/determinism/summary.json).
+
+| No-rule assignment, N=20 | Merged | Lost | Split | Rejected |
+| --- | --- | --- | --- | --- |
+| Vision | 0 | 0 | 0 | 0 |
+| DocAI | 0 | 0 | 0 | 0 |
+
+### Difference kinds
+
+Counts below are **changed NFD codepoints on both sides** of one minimum-Levenshtein alignment; a substitution contributes two codepoints and an insertion/deletion one. Edit-operation counts are separate. Alignment ties resolve diagonal, deletion, insertion. Cached and new references give the same histograms. Every per-crop operation and kind transition is machine-readable in the comparisons.
+
+| Comparison | Reader | Letters | Marks | Numbers | Punctuation | Symbols | Whitespace | Other | Delete / insert / substitute edits |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| single-vs-single | Vision | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 0 / 0 |
+| single-vs-single | DocAI | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 0 / 0 |
+| montage(rule)-vs-single | Vision | 11 | 10 | 2 | 6 | 1 | 4 | 0 | 5 / 11 / 9 |
+| montage(rule)-vs-single | DocAI | 7 | 11 | 0 | 6 | 5 | 1 | 0 | 6 / 4 / 10 |
+| montage(no rule)-vs-single | Vision | 17 | 12 | 4 | 8 | 3 | 5 | 0 | 10 / 17 / 11 |
+| montage(no rule)-vs-single | DocAI | 5 | 11 | 0 | 1 | 5 | 0 | 0 | 6 / 6 / 5 |
+
+The no-rule montage still changes letters and marks. Its exact agreement is only one crop higher per reader than the historical ruled comparison in this selected cohort; letters+marks agreement is unchanged.
+
+### The asterisk control
+
+**The Vision `*` does not disappear.** Crop `anemi-b8b71bfd410ddd2e68429ffe-vda613211-p000022-l0044` has no asterisk in either Vision single read, but one leading `*` in both montage reads. There is exactly one `*` in the complete new Vision montage raw text, so it was not merely dropped during assignment. DocAI emits `**` on this same crop in both single reads and both montage reads.
+
+The original ruled Vision symbol box is `[0, 766, 7, 791]` inside crop band `[765, 793)`. The no-rule box is `[0, 391, 7, 416]` inside band `[390, 418)`. Both map to the same crop-relative box `[0, 1, 7, 26]`, rather than a separator gap. Native visual inspection shows small leading ink at that location; its intended glyph is not adjudicated here. The original claim that this particular asterisk was the grey separator is unsupported by its geometry and its persistence without any rule. [Raw-bound symbol geometry](montage_v1/determinism/asterisk_geometry.json).
+
+### Adoption decision and limits
+
+The conditional proposal is **“no merged/lost and agreement ≥ single-vs-single − 3 points.”** With the observed 100% single-vs-single baseline, its threshold is **97%** for both exact and letters+marks agreement. Both no-rule readers fail by large margins: exact deficits are **46.7 points (Vision)** and **26.7 points (DocAI)**; letters+marks deficits are **40.0** and **16.7 points**. Neither montage layout is equivalent to single reads on this control. There is no basis to relax the adoption gate or promote N=20. The original 97% exact gate remains applicable to these results; no production setting is enabled.
+
+One fresh repeat on 30 crops establishes observed repeatability under the recorded settings, not universal determinism or permanence of Vision's unpinned model. Neither cached nor new single readings are ground truth. N=10 and N=40 were not freshly controlled; their historical T14 results also failed the 97% gate. Therefore the adoption recommendation remains **none**, with **N=20** retained only as the candidate size for any later separately authorized evaluation.
+
+### Cost, custody and validation
+
+**64 successful uncached calls, USD 0.0960 conservative base list-price estimate; cap USD 0.50.** Vision 32 calls and DocAI 32 calls. Rates of USD 1.50 / 1,000 image-feature or page units were checked 12 October 2026 against [Vision pricing](https://cloud.google.com/vision/pricing) and [Document AI pricing](https://cloud.google.com/products/document-ai/pricing). Free allowances and account discounts are not deducted; this is not a billing invoice. A local driver metadata error stopped after the first successful pair; resumption reused both saved responses and introduced no duplicate calls. Persistent reservations prevent automatic retries. The subsequent offline report rebuild and both validators made zero additional service calls.
+
+All new singles, raw and parsed responses, budgets/adapter ledgers, no-rule images/maps, assignments and reports are under `docs/harvest/montage_v1/determinism/`. Original pilot crops/records/caches and frozen T14 comparisons are SHA-verified unchanged. Historical T14 source hashes remain in the parent receipt; a separate current replay-source binding records the optional no-rule extension. [Control receipt](montage_v1/determinism/receipt.json), [updated parent receipt](montage_v1/receipt.json), [inventory](../INVENTORY.md#t14b-montage-controls-12-october-2026).
+
+**277 tests passed**, including 30 new offline T14b cases and the 247 existing montage/harvest/Google-reader/API cases. Tests cover L/RGB native pixels, unchanged bands and gap sizes, all-white padding/gaps, rule coordinates absent, N=20 partial batches/height splits, boolean validation, exact NFD, apostrophe variants, retained accents/case/sigma differences, every character kind, minimum-edit histogram semantics, aggregation, interrupted-attempt refusal, the 64-call budget ceiling, and distinguishing shared other-worktree Git changes from main-worktree metadata. [JUnit results](montage_v1/determinism/tests.xml).
+
+The offline control validator checks 60 distinct fresh single receipts, four fresh montage receipts, all 300 comparisons and both references, raw-response hashes, native pixels and white gaps in both images, line assignment, original input custody and unchanged main-worktree Git metadata. The historical T14 validator also replayed all 600 comparisons and 18 maps with the extended module's unchanged default layout. [Control validation](montage_v1/determinism/validation.json), [T14 replay validation](montage_v1/validation.json). No `.git` writes were performed by this task. A later final audit detected changes to the other `ff-plan` worktree, its `astra/ff-plan` branch/reflog, and shared objects; the reflog records a concurrent commit there. Main HEAD/index/branch metadata remained unchanged. Shared activity is recorded in [Git audit](montage_v1/determinism/git_audit.json), so the final receipt does not claim global `.git` metadata was unchanged.
+
+T14B: done | single_vs_single_exact_vision: 100.0% | single_vs_single_exact_docai: 100.0% | montage_norule_vs_single_vision: 53.3% | montage_norule_vs_single_docai: 73.3% | calls: 64 | tests: 277 passed

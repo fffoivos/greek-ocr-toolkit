@@ -2653,7 +2653,7 @@ No production montage setting is enabled. See [MONTAGE_v1.md](harvest/MONTAGE_v1
 
 ### `greekocr.harvest.montage.build_montages`
 
-`def build_montages(records: Iterable[dict[str, Any]], n: int, images_dir: str | Path, maps_dir: str | Path, *, max_width: int=2600, max_height: int=10000, max_png_bytes: int=8000000) -> list[dict[str, Any]]`
+`def build_montages(records: Iterable[dict[str, Any]], n: int, images_dir: str | Path, maps_dir: str | Path, *, max_width: int=2600, max_height: int=10000, max_png_bytes: int=8000000, grey_rule: bool=True) -> list[dict[str, Any]]`
 
 Stack up to N crops, preserving pixels; split on height or encoded size.
 
@@ -2743,3 +2743,42 @@ Driver (run from this repo; `--run` is the only network opt-in):
 `--records`, `--evidence-dir` and `--bulk-dir` override paths. The no-flag invocation recomputes all metrics/reports from cached montage raw responses without invoking readers. Persistent budget reservations enforce USD 1 and the planned call count, refuse interrupted re-calls and deduplicate identical PNG hashes across N. Single inputs and their raw cache receipts are SHA-checked before and after the run; their text is never requested again.
 
 `.venv/bin/python scripts/harvest/validate_montage.py` replays the frozen raw evidence without network, verifies image/map custody and native pixels, recomputes every assignment and metric, checks the call ledgers and local gallery assets, and writes `montage_v1/validation.json`.
+
+### T14b controls (offline helpers and bounded experimental runner)
+
+`build_montages(..., grey_rule=False)` preserves the native crop bands, white padding and gap formula while leaving each complete gap paper-white (255). Separator intervals remain recorded; rule coordinates are `None`. The default layout and its bytes remain unchanged.
+
+### `greekocr.harvest.montage_controls.letters_marks`
+
+`def letters_marks(text: str) -> str`
+
+Unify spacing apostrophe variants, decompose NFD, then retain only Unicode L/M codepoints. Case, letter variants and combining marks are preserved. Punctuation, whitespace, digits and symbols are ignored; this is a diagnostic, so exact NFD remains the preservation measure.
+
+```python
+from greekocr.harvest.montage_controls import letters_marks
+text = letters_marks("* ν᾿ ἄλφα!")
+```
+
+### `greekocr.harvest.montage_controls.compare_control`
+
+`def compare_control(reference: str, prediction: str) -> dict[str, Any]`
+
+Return exact NFD and letters+marks identity, edit counts/CER, and one minimum-edit alignment with char-kind, operation and transition histograms. Ties resolve diagonal, deletion, insertion. Changed-codepoint histograms count both sides of substitutions; edit-operation histograms count each edit once.
+
+```python
+from greekocr.harvest.montage_controls import compare_control
+comparison = compare_control("ἅλφα", "* ἅλφα")
+```
+
+### `greekocr.harvest.montage_controls.summarise_controls`
+
+`def summarise_controls(comparisons: Iterable[dict[str, Any]]) -> dict[str, Any]`
+
+Aggregate crop-level exact/letters+marks identity counts and percentages, and difference histograms. Refuse empty cohorts.
+
+```python
+from greekocr.harvest.montage_controls import summarise_controls
+summary = summarise_controls(control_comparisons)
+```
+
+`.venv/bin/python scripts/harvest/montage_controls.py --prepare` freezes the 15/15 T14 Vision N=20 cohort and builds 20+10 crops without rules, offline. `--run` deliberately bypasses the historical caches by using the separate `montage_v1/determinism/google/` namespace: 60 fresh single calls and four montage calls, USD 0.50 cap, 64-call maximum. SHA-bound control responses and persistent reservations prevent automatic repeats. No-flag invocation rebuilds from those control responses with no reader calls. Original pilot records, crops, cached responses and T14 comparisons remain unchanged. All new readings are stored under `docs/harvest/montage_v1/determinism/`.

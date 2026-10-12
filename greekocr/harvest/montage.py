@@ -22,7 +22,7 @@ __all__ = ["build_montages", "assign_lines", "response_lines", "response_symbols
            "assign_symbols", "compare_nfd", "summarise"]
 
 
-def _render(records):
+def _render(records, *, grey_rule=True):
     images = []
     for record in records:
         with Image.open(record["straight_crop"]) as source:
@@ -46,9 +46,11 @@ def _render(records):
         if i < len(gaps):
             gap = gaps[i]
             rule_y = y + (gap - 2) // 2
-            draw.rectangle((0, rule_y, width - 1, rule_y + 1),
-                           fill=153 if mode == "L" else (153, 153, 153))
-            separators.append(dict(y0=y, y1=y + gap, rule_y0=rule_y, rule_y1=rule_y + 2))
+            if grey_rule:
+                draw.rectangle((0, rule_y, width - 1, rule_y + 1),
+                               fill=153 if mode == "L" else (153, 153, 153))
+            separators.append(dict(y0=y, y1=y + gap,
+                rule_y0=rule_y if grey_rule else None, rule_y1=rule_y + 2 if grey_rule else None))
             y += gap
     stream = io.BytesIO()
     image.save(stream, format="PNG")
@@ -58,16 +60,20 @@ def _render(records):
 
 def build_montages(records: Iterable[dict[str, Any]], n: int, images_dir: str | Path,
                    maps_dir: str | Path, *, max_width: int = 2600,
-                   max_height: int = 10000, max_png_bytes: int = 8_000_000) -> list[dict[str, Any]]:
+                   max_height: int = 10000, max_png_bytes: int = 8_000_000,
+                   grey_rule: bool = True) -> list[dict[str, Any]]:
     """Stack up to N crops, preserving pixels; split on height or encoded size.
 
     N is 10, 20 or 40. Bands and rules use half-open coordinates. Each gap is
     max(60, the two adjacent native crop heights); a centred 2px 40%-black rule
-    is grey 153 on white 255. A too-large singleton fails instead of resizing.
+    is grey 153 on white 255. With grey_rule=False, the same gaps are pure white
+    and rule coordinates are None. A too-large singleton fails instead of resizing.
     Returns maps, also saved separately from the bulk PNG files.
     """
     if isinstance(n, bool) or not isinstance(n, int) or n not in (10, 20, 40):
         raise ValueError("N must be 10, 20 or 40")
+    if not isinstance(grey_rule, bool):
+        raise ValueError("grey_rule must be boolean")
     records = list(records)
     if len({record["id"] for record in records}) != len(records):
         raise ValueError("crop IDs must be unique")
@@ -96,7 +102,7 @@ def build_montages(records: Iterable[dict[str, Any]], n: int, images_dir: str | 
             emit(group[:midpoint], split_reasons + ["height"])
             emit(group[midpoint:], split_reasons + ["height"])
             return
-        data, layout = _render(group)
+        data, layout = _render(group, grey_rule=grey_rule)
         if layout["height"] > max_height or len(data) > max_png_bytes:
             if len(group) == 1:
                 raise ValueError("native singleton exceeds montage height/PNG limit")
