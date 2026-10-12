@@ -130,7 +130,7 @@ def extract_page(inp,stack,big,source):
     render_s=time.perf_counter()-start; gray=np.asarray(image)
     t=time.perf_counter(); result=stack.run(page_path,gray); stack_s=time.perf_counter()-t
     t=time.perf_counter(); pg=page_gate(gray,result['items'],bend_fired=any(f['side']!=0 for f in result['harvest_bend']))
-    items=split_columns(result['items'],pg['column_bands'],gray)
+    items=split_columns(result['items'],pg,gray)
     gates_s=time.perf_counter()-t; boxes=[bbox(q['polygon']) for q in items]
     records=[];crop_s=0.; code_hash={p.name:digest(p) for p in sorted(Path(__file__).parent.glob('*.py'))}
     for i,(item,box) in enumerate(zip(items,boxes)):
@@ -144,7 +144,6 @@ def extract_page(inp,stack,big,source):
         crop_s+=time.perf_counter()-t
         ident=inp['id']+f"-l{item['harvest_parent_index']+1:04d}"
         if 'harvest_column_piece' in item: ident+=f"-c{item['harvest_column_piece']+1}"
-        gate['column_bands']=pg['column_bands']
         record=dict(schema=SCHEMA,id=ident,page_id=inp['id'],source='Anemi',
             book=inp['book'],year=inp['year'],decade=inp['decade'],page=inp['page'],
             provenance=dict(pdf=inp['pdf'],pdf_sha256=pdf_sha,source_url=inp['source_url'],
@@ -240,29 +239,68 @@ def sample_order(rows,seed=13):
     return ordered
 
 def neighbour_ink(line):
-    """Measure retained neighbour pixels, excluding the main row's own marks.
+    """Own accent-to-descender zone, anchored to the straightener's baseline.
 
-    Component ownership is fitted with the main baseline pinned by the
-    straightener. Above/below neighbours are measured independently, including
-    partial bodies that never reach 50% visibility. Denominators are the actual
-    reader-facing crop height and width, not a neighbour's fitted body height.
+    The body-band roles only seed guide fitting; they do not decide ownership.
+    The centroid and extent tests are applied to every measured component.
     """
     from greekocr.glyphs.components import line_glyphs
+    from greekocr.glyphs.page_font import DEFAULTS, fit_guides
+    from greekocr.glyphs.page_text_lines import LineSegment
+    from types import SimpleNamespace
     g=line_glyphs(line.image,xh_prior=line.xh,
                   focus=(line.baseline_row-2,line.baseline_row+2))
-    yy=np.arange(g.height)[:,None]
-    result={}
-    for side,region in (('above',yy<g.band.top[None,:]),('below',yy>=g.band.bottom[None,:])):
-        ids=[c.index for c in g.components if c.role=='neighbour' and
-             (c.rel_cy<0 if side=='above' else c.rel_cy>0)]
-        mask=np.isin(g.labels,ids)&region if ids else np.zeros_like(g.ink)
+    base=g.band.bottom.copy();xh=float(line.xh)
+    evidence=np.asarray([(c.x0,c.y0,c.x1,c.y1,c.area,c.index,c.darkness)
+        for c in g.components if c.role not in ('neighbour','rule','large')],float).reshape(-1,7)
+    guides=LineSegment(0,g.width,base,base-1.5*xh,base-xh,base+.5*xh,
+        base-2.8*xh,base+1.3*xh,xh,support=g.band.n_support,
+        component_ids=tuple(evidence[:,5].astype(int)))
+    fit_guides(SimpleNamespace(components=evidence,labels=g.labels,xheight=xh),[guides])
+    accent=guides.accent_top
+    # A partly unsupported accent band must borrow the complete band. Mixing
+    # a fused capital's top contact with an imputed accent bottom shrinks the
+    # envelope onto the ascenders and excludes real clipped diacritics.
+    borrowed_accent=bool({'accent_top','accent_bottom'}&set(guides.borrowed))
+    if borrowed_accent: accent=guides.baseline+DEFAULTS['accent_top']*xh
+    top=accent-.15*xh;bottom=guides.font_bottom+.15*xh
+    owned={'above':[],'below':[]};components=[]
+    for c in g.components:
+        # True ink centroid, rather than the centre of a bounding rectangle.
+        sub=g.labels[c.y0:c.y1,c.x0:c.x1]==c.index
+        ys,xs=np.nonzero(sub)
+        cx=float(xs.mean()+c.x0);cy=float(ys.mean()+c.y0)+.5
+        x=int(np.clip(round(cx),0,g.width-1))
+        overlap=max(0.,min(c.y1,bottom[x])-max(c.y0,top[x]))
+        fraction=overlap/max(1,c.h)
+        if (cy<top[x] or cy>bottom[x]) and fraction<=.25:
+            side='above' if cy<top[x] else 'below';owned[side].append(c.index)
+            pixel_x=xs+c.x0;pixel_y=ys+c.y0+.5
+            # Extents decide ownership; contact requires retained ink inside
+            # the fitted zone, not a fractional empty corner of its rectangle.
+            touches=bool(np.any((pixel_y>=top[pixel_x])&(pixel_y<=bottom[pixel_x])))
+            components.append(dict(index=c.index,side=side,centroid=[cx,cy],
+                bbox=[c.x0,c.y0,c.x1,c.y1],overlap_fraction=float(fraction),touches_zone=touches))
+    result={};masks=[]
+    for side in ('above','below'):
+        ids=owned[side]
+        mask=np.isin(g.labels,ids) if ids else np.zeros_like(g.ink)
+        masks.append(mask)
         rows=np.flatnonzero(mask.any(axis=1));cols=np.flatnonzero(mask.any(axis=0))
         result[side]=dict(height_fraction=len(rows)/g.height,
             x_span_fraction=float(cols[-1]-cols[0]+1)/g.width if cols.size else 0.,
             ink_pixels=int(mask.sum()),component_count=len(ids))
-    result['height_limit']=.12;result['x_span_limit']=.30
-    result['rejected']=any(result[s]['height_fraction']>.12 or result[s]['x_span_fraction']>.30
-                           for s in ('above','below'))
+    mask=masks[0]|masks[1];rows=np.flatnonzero(mask.any(axis=1));cols=np.flatnonzero(mask.any(axis=0))
+    hf=len(rows)/g.height;wf=float(cols[-1]-cols[0]+1)/g.width if cols.size else 0.
+    touches=any(c['touches_zone'] for c in components)
+    sample_x=np.unique(np.r_[np.arange(0,g.width,32),g.width-1]).astype(int)
+    result.update(height_limit=.12,x_span_limit=.20,overlap_limit=.25,
+        combined=dict(height_fraction=hf,x_span_fraction=wf,ink_pixels=int(mask.sum())),
+        components=components,touches_zone=touches,
+        own_zone=dict(sample_x=sample_x.tolist(),accent_top=accent[sample_x].tolist(),
+            descender_bottom=guides.font_bottom[sample_x].tolist(),baseline=guides.baseline[sample_x].tolist(),x_height=xh,padding_xh=.15,
+            borrowed_guides=list(guides.borrowed),borrowed_accent_band=borrowed_accent),
+        rejected=bool((hf>=.12 and wf>=.20) or touches))
     return result
 
 def inspect_straight_crop(raw):
@@ -368,7 +406,7 @@ def label(out,cap=3):
         raise ValueError('sample contract violated')
     if any(r['gates'].get('gate_revision')!=GATE_REVISION or
            not isinstance(r['gates'].get('neighbour_sliver'),dict) for r in selected):
-        raise ValueError('stored sample predates H1-fix1 geometry; gate certification required before readers')
+        raise ValueError(f'stored sample predates {GATE_REVISION} geometry; gate certification required before readers')
     readers=Readers(out/'google',cap);saved=out/'labels';saved.mkdir(exist_ok=True)
     todo=[]
     for r in selected:

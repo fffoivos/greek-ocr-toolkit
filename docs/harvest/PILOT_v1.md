@@ -297,3 +297,91 @@ This implementation includes a scoped self re-review and regression verification
 independent CP-H1 recertification is still required before scale-up. The separate
 rare-glyph exposure/CLLG qualification and conservative tilted-row height issue
 remain as disclosed in CP-H1; Fix 1 makes no new claims about either.
+
+## Fix 2 (offline re-gate)
+
+Fix 2 uses each straightened line's fitted baseline and x-height with the existing glyph guide fitter to define its own zone: **accent_top − 0.15·xh through descender_bottom + 0.15·xh**. A component belongs to a neighbour only when its true ink centroid is outside that zone and its vertical extent overlaps no more than 25% of its own height. Reject when the neighbouring-component union occupies **at least 12% of crop rows AND spans at least 20% of crop width**, or when a neighbouring component retains actual ink inside the zone. Empty corners of component bounding rectangles do not establish contact. Guide samples, borrowed guides, component centroids/extents/overlap and union measurements are recorded in the sidecars. When either accent guide lacks support, the complete accent band borrows the existing fitter's prior; an imputed accent bottom is not mixed with a fused capital's top to shrink the zone.
+
+Column bands are computed for consecutive physical rows with the same local column pattern. A continuous row spanning more than 70% of page width gets its own full-width region. A fused pair's outer width alone does not establish a spanning row: repeated gutters and independent left/right detections establish multi-column regions. Short continuations stay in their region; small ornaments and non-row shapes do not stretch its bands. Vertical gaps separate blocks such as headings and poem stanzas. Extraction splits before gating using the local region, crop gates use the same bands, and reader joins receive those local coordinates. The page-wide bands are a summary.
+
+Long horizontal and vertical rules enclosing **at least two internal closed cells** now cause `page_table`, independently of the box-lattice test. Rule segments allow mild skew and require retained ink along their length. A page frame is not an internal cell lattice.
+
+The replay evaluated all **14,200 stored originals / 300 pages**, with no detector run, new sampling, Google calls or changes to historical labels. Body-font and straightener/ownership gates ran on every geometry survivor; the original pilot only straightened candidates considered for its sample. New splits remain unlabelled and do not inherit their fused parent's reader output.
+
+| Measure | Stored pilot | Fix 1 | Fix 2 |
+| --- | ---: | ---: | ---: |
+| Original records evaluated | 14,200 | 14,200 | 14,200 |
+| Gate survivors | 8,032 | 6,126 | 7,545 |
+| Gate rejects | 6,168 | 8,074 | 6,655 |
+| Pages excluded as table | 18 | 1 | 12 |
+| Previously accepted pilot originals newly rejected | — | 2,012 | 1,083 |
+| Previously rejected pilot originals now passing | — | 106 | 596 |
+| Sampled geometry rejects (of 500) | 0 | 126 | 37 |
+| Tier-1 sampled geometry rejects (of 188) | 0 | 39 | 13 |
+
+Relative to Fix 1, **1,606** rejected originals now pass and **187** previously passing originals now reject. The net rejection change is **-1,419** relative to Fix 1 and **+487** relative to the stored pilot.
+
+Flag counts overlap; neither table below should be summed to obtain total rejected records.
+
+| Gate flag over all originals | Stored pilot | Fix 1 | Fix 2 |
+| --- | ---: | ---: | ---: |
+| `column_edge_touch` | 51 | 54 | 52 |
+| `crosses_column` | 0 | 146 | 38 |
+| `curled_or_clipped_body_edge` | 5 | 52 | 62 |
+| `height_over_body_pitch` | 1,223 | 1,221 | 1,213 |
+| `neighbour_sliver` | 0 | 1,657 | 263 |
+| `ornament_or_short_fragment` | 617 | 617 | 617 |
+| `outside_column_band` | 769 | 925 | 724 |
+| `page_bend_scout` | 794 | 794 | 794 |
+| `page_edge_touch` | 59 | 59 | 59 |
+| `page_non_body_page` | 524 | 524 | 524 |
+| `page_rotated` | 370 | 370 | 370 |
+| `page_table` | 1,560 | 143 | 829 |
+| `short_paragraph_boundary` | 2,246 | 2,191 | 1,941 |
+| `small_type_furniture` | 155 | 153 | 170 |
+| `straightener_multiple_bands` | 170 | 913 | 948 |
+| `taller_than_neighbours` | 141 | 141 | 140 |
+| `width_under_80pct_band` | 1,324 | 1,292 | 1,231 |
+
+For the **500 fixed sampled lines**, the number now rejected by each reason is:
+
+| Reason | Fix 1 sampled rejects | Fix 2 sampled rejects | Fix 2 tier-1 rejects with this reason |
+| --- | ---: | ---: | ---: |
+| `crosses_column` | 14 | 5 | 3 |
+| `neighbour_sliver` | 112 | 17 | 5 |
+| `outside_column_band` | 14 | 5 | 3 |
+| `page_table` | 0 | 6 | 2 |
+| `short_paragraph_boundary` | 0 | 5 | 1 |
+| `width_under_80pct_band` | 0 | 5 | 2 |
+
+**Tier-1 rejections: 13 / 188**, compared with 39 after Fix 1. The expected near-zero count was not achieved; the remaining IDs and their exact reasons are listed in [verification.json](fix2/verification.json). All 37 current sampled geometry rejects comprise historical tier 1 **13**, tier 2 **15**, tier 3 **8**, and reader-rejected **1**. These annotations leave the historical **188 / 217 / 82 / 13** tiers and original labels unchanged.
+
+Regression outcomes:
+
+- `ffe26907… p159 l24` and `e28081a0… p93 l38` pass with no neighbour-ownership rejection. The cycle-2 own-accent and scan-grain controls also pass.
+- The cycle-1 `1697d5cc… p106 l41` sliver rejects. The ownership-filtered neighbour union measures **4/32 = 12.5%** of crop rows and **414/796 = 52.0101%** of crop-width span, **95 pixels**, with actual zone contact. The former 158-pixel body-band mask included components that do not meet the new ownership rule.
+- On `d163abb4… p112`, upper prose `l30–l37` passes intact; lower fused `l5/l8/l14/l16` splits in its glossary region without dark-pixel loss. The original cycle-1 physical-column cases still reject fused parents and split before gating.
+- `8e3c482e… p24 l26/l27` stays intact without an invented column. Facing-page continuations, poetry blocks and prose beside illustration fragments have added regression fixtures.
+- `d80c7cca… p49` now excludes as a table with **two closed cells**. The cycle-1 framed prose control still passes.
+
+Outputs and custody:
+
+- [All 14,200 annotations](fix2/post_fix2_gate.jsonl) and [500 sampled annotations](fix2/sampled_post_fix2_gate.json), each carrying `post_fix2_gate`, its local bands and original tier.
+- [Counts and gate source-code hashes](fix2/summary.json), [page/region/rule replay](fix2/page_gates.json), [replay log](fix2/regate.log).
+- [Independent artifact recount](fix2/verification.json), [before/after input-custody receipt](fix2/input_custody.json), [143-pass test log](fix2/tests.log).
+- [Fixture inventory and hashes](../../tests/fixtures/harvest_fix2/INVENTORY.md); six byte-identical archived pages and four polygon-masked controls, with the original Fix 1 controls reused.
+
+Verification independently reparsed every annotation and matched all IDs, original gates, tier fields, transitions, sampled reason counts and final code hashes. All **532 protected pilot files**, **47,431 archived files** and **seven Fix 1 artifacts** match the pre-edit content snapshots; the input-custody receipt binds each entire relative-path/hash manifest. The original Google receipts/ledger remain covered by those unchanged snapshots. **No network calls, Google calls, pilot rerun or `.git` writes.** The regression suite passes **143 tests, 2,359 deselected**, using the requested command. This is offline geometry verification, not new reader qualification or independent CP-H1 recertification.
+
+Reproduction:
+
+```sh
+HARVEST_BULK="$HOME/Projects/glossapi-ocr-local/experiments/ocr_program_review_20261006/harvest_big/pilot_t13c"
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m greekocr.harvest.regate \
+  --records "$HARVEST_BULK/pilot_v1/records.jsonl" \
+  --page-gates docs/harvest/pilot_v1/page_gates.json \
+  --bulk-root "$HARVEST_BULK" \
+  --previous-gates docs/harvest/fix1/post_fix1_gate.jsonl \
+  --out docs/harvest/fix2
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest tests -q -p no:cacheprovider -k harvest
+```

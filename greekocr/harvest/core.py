@@ -7,7 +7,7 @@ import numpy as np
 
 STACK_COMMIT = '52cee3bcc882e7426bdc1018d892cd9b1bf9feac'
 SCHEMA = 'greekocr-harvest-1'
-GATE_REVISION = 'H1-fix1'
+GATE_REVISION = 'H1-fix2'
 RARE = 'ϗȣϛϲϹϝϙϡ'
 # Explicit observed word substitutions only; no general sigma/accent folding.
 SUBSTITUTIONS = {'κὶ': ('καὶ',), 'κὰ': ('καὶ',), 'κὴ': ('καὶ',),
@@ -155,7 +155,125 @@ def column_coverage(box, bands):
 def crosses_column(box, bands):
     return sum(f>.15 for f in column_coverage(box,bands))>1
 
-def split_columns(items, bands, gray=None):
+def column_regions(items, gray):
+    """Consecutive physical rows with the same ink/box column pattern.
+
+    A broad row is spanning only when it has no sustained internal gutter.
+    Thus a fused pair's outer extent cannot masquerade as spanning prose.
+    Isolated word spaces cannot establish a multi-column region.
+    """
+    h,w=gray.shape
+    boxes=[bbox(q['polygon']) for q in items]
+    if not boxes: return []
+    height=float(np.median([b[3]-b[1] for b in boxes]))
+    ink=gray<min(220,float(np.percentile(gray,50))-35)
+    rows=[]
+    for index in sorted(range(len(boxes)),key=lambda i:(boxes[i][1]+boxes[i][3])/2):
+        box=boxes[index];cy=(box[1]+box[3])/2
+        if not rows or abs(cy-np.median(rows[-1]['centres']))>.55*height:
+            rows.append(dict(indices=[],centres=[]))
+        rows[-1]['indices'].append(index);rows[-1]['centres'].append(cy)
+    for row in rows:
+        on=np.zeros(w,bool)
+        # Small ornaments on the opposite facing page must not stretch a
+        # body row's apparent ink span into a full-width region.
+        structural=[i for i in row['indices'] if boxes[i][2]-boxes[i][0]>max(.03*w,3*height)
+                    and boxes[i][3]-boxes[i][1]<=1.5*height]
+        for i in structural or row['indices']:
+            x0,y0,x1,y1=boxes[i]
+            a,b=max(0,math.floor(x0)),min(w,math.ceil(x1))
+            t,d=max(0,math.floor(y0)),min(h,math.ceil(y1))
+            if b>a and d>t:
+                mask=np.zeros((d-t,b-a),np.uint8)
+                cv2.fillPoly(mask,[np.rint(np.asarray(items[i]['polygon'])-[a,t]).astype(np.int32)],1)
+                on[a:b]|=(ink[t:d,a:b]&mask.astype(bool)).any(axis=0)
+        xs=np.flatnonzero(on)
+        gaps=[]
+        bs=[boxes[i] for i in row['indices']]
+        for a,b in zip(xs[:-1],xs[1:]):
+            if b-a<=max(.018*w,.6*height): continue
+            # Independent detections establish the same column pattern when
+            # one side is a short paragraph ending. Their outer union is not
+            # a continuous full-width row.
+            paired=(any(q[2]<=a+1+.25*height and q[2]-q[0]>1.1*height for q in bs) and
+                    any(q[0]>=b-.25*height and q[2]-q[0]>1.1*height for q in bs))
+            minimum=.03*w if paired else .12*w
+            if a-xs[0]>minimum and xs[-1]-b>minimum: gaps.append((a+1,b))
+        row['gutter']=max(gaps,key=lambda g:g[1]-g[0],default=None)
+        row['span']=float(xs[-1]-xs[0]+1)/w if xs.size else 0.
+        row['extent']=(int(xs[0]),int(xs[-1])+1) if xs.size else (0,0)
+    for i,row in enumerate(rows):
+        gap=row['gutter']
+        support=1 if gap else 0
+        if gap:
+            for direction in (-1,1):
+                a,b=gap;skipped=0
+                for j in range(i+direction,i+9*direction,direction):
+                    if not 0<=j<len(rows): break
+                    other=rows[j];candidate=other['gutter']
+                    if candidate and min(b,candidate[1])>max(a,candidate[0]):
+                        a,b=max(a,candidate[0]),min(b,candidate[1]);support+=1;skipped=0
+                    elif candidate or other['span']>.70 or skipped>=2: break
+                    else: skipped+=1
+        row['multi']=support>=3
+    # Partial continuation rows in a glossary retain the nearby established
+    # pattern; a continuous spanning row always terminates that region.
+    for i,row in enumerate(rows):
+        if row['multi'] or row['span']>.70 or row['gutter']: continue
+        nearby=[r for r in rows[max(0,i-2):i+3] if r['multi'] and
+                (row['extent'][1]<=r['gutter'][0]+.02*w or row['extent'][0]>=r['gutter'][1]-.02*w)]
+        if nearby:
+            row['multi']=True;row['gutter']=min((r['gutter'] for r in nearby),key=lambda g:g[1]-g[0])
+    groups=[]
+    for row in rows:
+        pattern=row['gutter'] if row['multi'] else None
+        full=row['span']>.70 and not row['multi']
+        cy=float(np.median(row['centres']))
+        same=groups and cy-groups[-1]['last_y']<=1.8*height and not full and not groups[-1]['full_width'] and (
+            (pattern is None and groups[-1]['pattern'] is None) or
+            (pattern is not None and groups[-1]['pattern'] is not None and
+             min(pattern[1],groups[-1]['pattern'][1])>max(pattern[0],groups[-1]['pattern'][0])))
+        if not same: groups.append(dict(indices=[],pattern=pattern,full_width=full,gaps=[]))
+        groups[-1]['last_y']=cy
+        groups[-1]['indices'].extend(row['indices'])
+        if row['multi']:
+            groups[-1]['gaps'].append(row['gutter'])
+            groups[-1]['pattern']=(max(pattern[0],groups[-1]['pattern'][0]),min(pattern[1],groups[-1]['pattern'][1]))
+    regions=[]
+    for index,group in enumerate(groups):
+        bs=[boxes[i] for i in group['indices']]
+        structural=[b for b in bs if b[2]-b[0]>max(.03*w,3*height) and b[3]-b[1]<=1.5*height]
+        bs=structural or bs
+        if group['gaps']:
+            # Each physical row supplies its own gutter evidence; even a short
+            # local glossary must not borrow bands from prose elsewhere.
+            a,b=group['pattern']
+            spans=[[],[]]
+            for box in bs:
+                for col,(lo,hi) in enumerate(((box[0],min(box[2],a)),(max(box[0],b),box[2]))):
+                    if hi-lo>=.12*w: spans[col].append((lo,hi))
+            bands=[[float(np.percentile([p[0] for p in sp],5)),float(np.percentile([p[1] for p in sp],95))]
+                   for sp in spans if sp]
+        else:
+            bands=[[float(min(p[0] for p in bs)),float(max(p[2] for p in bs))]]
+        regions.append(dict(id=index,y0=min(b[1] for b in bs),y1=max(b[3] for b in bs),
+            item_indices=group['indices'],column_bands=bands,full_width=group['full_width'],
+            pattern='multi_column' if len(bands)>1 else 'full_width' if group['full_width'] else 'single_column'))
+    return regions
+
+def region_for_box(box, pg, item=None):
+    regions=pg.get('column_regions',[])
+    if not regions: return None
+    if item and 'harvest_region' in item:
+        return next(r for r in regions if r['id']==item['harvest_region'])
+    cy=(box[1]+box[3])/2
+    return min(regions,key=lambda r:(abs(cy-(r['y0']+r['y1'])/2)
+                                   if r['y0']<=cy<=r['y1'] else h_distance(cy,r)+1e6))
+
+def h_distance(cy, region):
+    return min(abs(cy-region['y0']),abs(cy-region['y1']))
+
+def split_columns(items, bands, gray=None, *, _ink=None):
     """Split fused polygons at the gutter before any crop gate.
 
     The gutter whitespace is omitted so new pieces retain a margin to the
@@ -163,6 +281,17 @@ def split_columns(items, bands, gray=None):
     around the page gutter: a median gutter edge must not trim a tilted letter.
     Original geometry remains attached for provenance.
     """
+    if isinstance(bands,dict):
+        pg=bands;result=[]
+        ink=_ink if _ink is not None else gray < min(220,float(np.percentile(gray,50))-35) if gray is not None else None
+        for index,item in enumerate(items):
+            region=region_for_box(bbox(item['polygon']),pg,item)
+            local=region['column_bands'] if region else pg['column_bands']
+            for piece in split_columns([item],local,gray,_ink=ink):
+                piece['harvest_parent_index']=index
+                if region: piece['harvest_region']=region['id']
+                result.append(piece)
+        return result
     def clip(poly, edge, keep_right):
         out=[]
         for a,b in zip(poly,poly[1:]+poly[:1]):
@@ -173,7 +302,7 @@ def split_columns(items, bands, gray=None):
                 t=(edge-a[0])/(b[0]-a[0]); out.append([edge,a[1]+t*(b[1]-a[1])])
         return out
     result=[]
-    ink=gray < min(220,float(np.percentile(gray,50))-35) if gray is not None else None
+    ink=_ink if _ink is not None else gray < min(220,float(np.percentile(gray,50))-35) if gray is not None else None
     for index,item in enumerate(items):
         box=bbox(item['polygon'])
         if sum(f>0 for f in column_coverage(box,bands))<=1:
@@ -222,6 +351,34 @@ def box_lattice(boxes, width):
     ys=clusters([((b[1]+b[3])/2,i) for i,b in enumerate(short)],max(4,.65*np.median([b[3]-b[1] for b in short])))
     return sum(len({sustained[i] for _,i in g if i in sustained})>=3 for g in ys)>=5
 
+def ruled_cells(ink):
+    """Long near-axis rules enclosing at least two internal cells, skew allowed."""
+    h,w=ink.shape;scale=min(h,w)
+    lines=cv2.HoughLinesP(ink,1,np.pi/360,threshold=max(25,int(.025*scale)),
+        minLineLength=max(20,int(.04*scale)),maxLineGap=max(4,int(.025*scale)))
+    masks=[np.zeros_like(ink),np.zeros_like(ink)];counts=[0,0]
+    for x0,y0,x1,y1 in lines.reshape(-1,4) if lines is not None else []:
+        dx,dy=abs(x1-x0),abs(y1-y0)
+        col=0 if dx>=.05*w and dy<=.09*dx else 1 if dy>=.08*h and dx<=.09*dy else None
+        if col is not None:
+            # Hough votes from a text baseline are discontinuous. A rule must
+            # have actual ink along at least three quarters of its length.
+            xx=np.rint(np.linspace(x0,x1,max(dx,dy)+1)).astype(int)
+            yy=np.rint(np.linspace(y0,y1,max(dx,dy)+1)).astype(int)
+            if np.mean(ink[yy,xx])<.75: continue
+            cv2.line(masks[col],(x0,y0),(x1,y1),1,max(3,round(.002*scale)));counts[col]+=1
+    rules=masks[0]|masks[1]
+    contours,hierarchy=cv2.findContours(rules,cv2.RETR_CCOMP,cv2.CHAIN_APPROX_SIMPLE)
+    cells=[]
+    for i,contour in enumerate(contours):
+        if hierarchy[0,i,3]<0: continue
+        x,y,cw,ch=cv2.boundingRect(contour);area=cv2.contourArea(contour)
+        # Remove only speck-sized closures. Large table cells remain cells;
+        # a single surrounding frame cannot reach the two-cell threshold.
+        if .0003*w*h<area and .04*w<cw and .01*h<ch:
+            cells.append([x,y,x+cw,y+ch])
+    return dict(closed_cells=len(cells),cells=cells,horizontal_segments=counts[0],vertical_segments=counts[1])
+
 def page_gate(gray, items, *, bend_fired=False):
     h,w=gray.shape; boxes=[bbox(q['polygon']) for q in items]; flags=[]
     angles=[]
@@ -239,9 +396,11 @@ def page_gate(gray, items, *, bend_fired=False):
         return cv2.connectedComponentsWithStats(mask)[0]-1
     nh,nv=count(horizontal),count(vertical)
     lattice=box_lattice(boxes,w)
-    if nh>=3 and nv>=2 and lattice: flags.append('table')
+    cells=ruled_cells(ink)
+    if (nh>=3 and nv>=2 and lattice) or (cells['horizontal_segments'] and cells['vertical_segments'] and cells['closed_cells']>=2): flags.append('table')
     if bend_fired: flags.append('bend_scout')
     bands=column_bands(boxes,w,gray)
+    regions=column_regions(items,gray)
     if len(bands)>2: flags.append('more_than_two_columns')
     # Three sustained narrow-column centre clusters are outside H1's body gate.
     centres=sorted((b[0]+b[2])/2 for b in boxes if .12*w<=b[2]-b[0]<=.38*w)
@@ -252,7 +411,7 @@ def page_gate(gray, items, *, bend_fired=False):
     if sum(len(c)>=5 for c in clusters)>2 and 'more_than_two_columns' not in flags: flags.append('more_than_two_columns')
     if len(items)<6 or not bands: flags.append('non_body_page')
     pitches=[]
-    pitch_boxes=[bbox(q['polygon']) for q in split_columns(items,bands)]
+    pitch_boxes=[bbox(q['polygon']) for q in split_columns(items,dict(column_bands=bands,column_regions=regions))]
     for band in bands:
         centres=sorted((b[1]+b[3])/2 for b in pitch_boxes if band[0]-10<=(b[0]+b[2])/2<=band[1]+10 and b[2]-b[0]>.2*w)
         delta=np.diff(centres); body_h=np.median([b[3]-b[1] for b in boxes]) if boxes else 10
@@ -260,11 +419,13 @@ def page_gate(gray, items, *, bend_fired=False):
         pitches.extend(usable.tolist())
     pitch=float(np.median(pitches)) if pitches else float(np.median([b[3]-b[1] for b in boxes])*1.5) if boxes else 0
     return dict(accepted=not flags,flags=flags,page_class=f'body_{len(bands)}column' if not flags else 'excluded',
-                column_bands=bands,body_pitch=pitch,angle_histogram=np.histogram(angles,bins=[-90,-10,-5,0,5,10,90])[0].tolist(),
-                rule_counts=dict(horizontal=nh,vertical=nv),box_lattice=bool(lattice),bend_scout_fired=bool(bend_fired))
+                column_bands=bands,column_regions=regions,body_pitch=pitch,angle_histogram=np.histogram(angles,bins=[-90,-10,-5,0,5,10,90])[0].tolist(),
+                rule_counts=dict(horizontal=nh,vertical=nv),ruled_cells=cells,box_lattice=bool(lattice),bend_scout_fired=bool(bend_fired))
 
 def crop_gate(box, boxes, pg, size, item=None, *, long_complete=False):
     x0,y0,x1,y1=box; w,h=size; flags=[]; height=y1-y0
+    region=region_for_box(box,pg,item)
+    if region: pg=dict(pg,column_bands=region['column_bands'])
     if not pg['accepted']: flags += ['page_'+s for s in pg['flags']]
     if height>1.5*pg['body_pitch']: flags.append('height_over_body_pitch')
     neighbours=[b[3]-b[1] for b in boxes if b!=box and abs((b[1]+b[3]-y0-y1)/2)<3*pg['body_pitch'] and min(b[2],x1)>max(b[0],x0)]
@@ -298,7 +459,8 @@ def crop_gate(box, boxes, pg, size, item=None, *, long_complete=False):
         if long_complete and ratio<.8: flags.append('short_paragraph_boundary' if first or last else 'width_under_80pct_band')
         elif long_complete and (first or last) and ratio<.9: flags.append('short_paragraph_boundary')
     return dict(accepted=not flags,flags=flags,column=band,column_coverage=coverage,gate_revision=GATE_REVISION,
-                width_band_ratio=ratio,paragraph_position=paragraph_position)
+                width_band_ratio=ratio,paragraph_position=paragraph_position,column_bands=pg['column_bands'],
+                column_region=region['id'] if region else None,region_pattern=region['pattern'] if region else None)
 
 def body_font_gate(records, pg):
     """Exclude small-type furniture using per-column cheap component x-heights."""

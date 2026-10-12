@@ -102,7 +102,7 @@ def test_harvest_legacy_gate_cache_cannot_reach_readers(tmp_path,monkeypatch):
     (tmp_path/'sampling.json').write_text(json.dumps({'ids':['legacy']}))
     def forbidden(*args,**kwargs): raise AssertionError('legacy gates constructed a reader')
     monkeypatch.setattr(Readers,'__init__',forbidden)
-    with pytest.raises(ValueError,match='predates H1-fix1'):
+    with pytest.raises(ValueError,match='predates H1-fix2'):
         pipeline.label(tmp_path)
 
 
@@ -115,9 +115,10 @@ def test_harvest_reviewer_neighbour_sliver_pre_reader(tmp_path,monkeypatch):
     assert not straighten_candidate(r,tmp_path)
     assert 'neighbour_sliver' in r['gates']['flags']
     measured=r['gates']['neighbour_sliver']['above']
-    assert measured['height_fraction']==pytest.approx(5/32)
-    assert measured['x_span_fraction']==pytest.approx(572/796)
-    assert measured['ink_pixels']==158
+    assert measured['height_fraction']>=.12
+    assert measured['x_span_fraction']>=.20
+    assert measured['ink_pixels']>0
+    assert r['gates']['neighbour_sliver']['touches_zone']
     assert r['tier']=='rejected' and r['label'] is None
 
 
@@ -129,17 +130,21 @@ def test_harvest_clean_polytonic_keeps_own_marks():
 
 
 @pytest.mark.parametrize('side', ['above','below'])
-@pytest.mark.parametrize('height,span,rejected',[(12,30,False),(13,10,True),(1,31,True)])
+@pytest.mark.parametrize('height,span,rejected',[(12,20,True),(13,10,False),(1,31,False)])
 def test_harvest_neighbour_pixel_fraction_thresholds(monkeypatch,side,height,span,rejected):
     from greekocr.glyphs import components
+    from greekocr.glyphs import page_font
     labels=np.zeros((100,100),np.int32)
     start=0 if side=='above' else 100-height
     # Count ink rows rather than the component's larger bounding rectangle.
     labels[start:start+height,:span]=1
-    g=SimpleNamespace(labels=labels,ink=labels>0,width=100,height=100,
-        components=[SimpleNamespace(index=1,role='neighbour',rel_cy=-2 if side=='above' else 2)],
-        band=SimpleNamespace(top=np.full(100,40),bottom=np.full(100,60)))
+    c=SimpleNamespace(index=1,role='neighbour',x0=0,x1=span,y0=start,y1=start+height,h=height)
+    g=SimpleNamespace(labels=labels,ink=labels>0,width=100,height=100,components=[c],
+        band=SimpleNamespace(top=np.full(100,40),bottom=np.full(100,60),n_support=20))
     monkeypatch.setattr(components,'line_glyphs',lambda *args,**kwargs:g)
+    def fit(p,lines):
+        lines[0].accent_top=np.full(100,40.);lines[0].font_bottom=np.full(100,60.)
+    monkeypatch.setattr(page_font,'fit_guides',fit)
     result=neighbour_ink(SimpleNamespace(image=None,xh=20,baseline_row=60))
     assert result[side]['height_fraction']==height/100
     assert result[side]['x_span_fraction']==span/100
@@ -174,8 +179,8 @@ def test_harvest_offline_replay_preserves_sources_and_sample_labels(tmp_path,mon
     assert summary['records']==len(rows) and summary['sampled_now_rejected']==1
     assert summary['google_calls']==0 and summary['no_detector_run']
     assert hashes==[hashlib.sha256(p.read_bytes()).hexdigest() for p in (records,receipts,bulk/'pages'/case['page'])]
-    sidecar=json.loads((tmp_path/'out/sampled_post_fix1_gate.json').read_text())[0]
-    assert 'crosses_column' in sidecar['post_fix1_gate']['flags']
+    sidecar=json.loads((tmp_path/'out/sampled_post_fix2_gate.json').read_text())[0]
+    assert 'crosses_column' in sidecar['post_fix2_gate']['flags']
     assert len(sidecar['split_candidates'])==2
     assert all(p['label'] is None for p in sidecar['split_candidates'])
     assert all(r['tier']=='tier1' and r['label']=='unchanged' for r in [json.loads(s) for s in records.read_text().splitlines()])
@@ -223,4 +228,4 @@ def test_harvest_extraction_gates_column_pieces_not_fused_parent(tmp_path,monkey
     target=[r for r in records if r.get('pre_split_polygon')==case['target_polygon']]
     assert len(target)==2 and {r['id'] for r in target}=={'p-l0038-c1','p-l0038-c2'}
     assert all(r['gates']['accepted'] and r['label'] is None and r['tier']=='unread' for r in target)
-    assert all(r['gates']['column_bands']==receipt['page_gate']['column_bands'] for r in target)
+    assert all(r['gates']['column_bands']==receipt['page_gate']['column_regions'][r['gates']['column_region']]['column_bands'] for r in target)

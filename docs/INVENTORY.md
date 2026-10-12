@@ -1270,3 +1270,45 @@ pages, the neighbour page and the bordered prose page), one clean polytonic crop
 and an offline two-function fetch-selection fixture. Tests use repository-relative
 fixture paths. Fix 1 replay outputs and test logs are under `docs/harvest/fix1/`;
 `docs/harvest/pilot_v1/` and the supplied external archive remain unchanged.
+
+## H1 Fix 2 (12 October 2026)
+
+`greekocr/harvest/core.py` groups physical rows into vertical column regions;
+continuous rows wider than 70% of the page get their own full-width region.
+Independent detections, short continuations, vertical block gaps and non-row
+shapes participate in region inference. Extraction, crop gates and reader
+column context use the region's bands. The page-wide bands remain a summary.
+Long skew-tolerant horizontal and vertical rules enclosing at least two
+internal cells now exclude a table independently of the detector-box lattice.
+
+`greekocr/harvest/pipeline.py` uses the straightener's baseline/x-height and the
+existing glyph guide fitter for an accent-to-descender zone padded by 0.15
+x-heights. Every component's ink centroid and vertical overlap establish
+ownership; the neighbouring-component union must reach both 12% of crop height
+and 20% of crop-width span, or retain ink inside that zone. Unsupported accent
+bands borrow the existing complete accent-band prior. Diagnostics include
+guide samples, borrowed guides, component extents, overlap and actual contact.
+The reader cache revision is now `H1-fix2`.
+
+`greekocr/harvest/regate.py` writes only separate `post_fix2_gate` annotations,
+including historical tiers, sampled rejections by reason, an explicit tier-1
+count and a Fix 1 comparison. Split candidates have no inherited labels.
+The original records, pilot outputs, external archive and Fix 1 artifacts are
+read-only inputs. The replay does not construct readers or run the detector.
+
+Fixture custody and SHA-256 values are in
+[`tests/fixtures/harvest_fix2/INVENTORY.md`](../tests/fixtures/harvest_fix2/INVENTORY.md)
+and its `manifest.json`: six archived pages and four polygon-masked clean
+controls, with all original polygons and page hashes. The existing Fix 1
+sliver, border and physical-column fixtures remain active. Tests add ownership,
+contact, local-region, short-continuation, poem/illustration, closed-cell and
+read-only replay contracts in `tests/test_harvest_fix2.py`; superseded Fix 1
+threshold/cache/output assertions are updated in `tests/test_harvest_fix1.py`.
+`tests/test_harvest.py` distinguishes a closed grid without a box lattice from a
+single surrounding frame. Large-cell tests cover both row and column divisions.
+
+Results, input-custody receipt, independent artifact recount and the **143
+passed** test log are under `docs/harvest/fix2/`. The before/after and all 500
+sampled-line reason counts are in the “Fix 2 (offline re-gate)” addendum of
+[`docs/harvest/PILOT_v1.md`](harvest/PILOT_v1.md). Replay source-code hashes are
+bound in `fix2/summary.json`.

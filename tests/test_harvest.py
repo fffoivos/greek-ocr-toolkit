@@ -57,10 +57,18 @@ def test_table_rules():
     i=[dict(polygon=rect(x,y,70,18)) for x in (110,310,510) for y in range(100,800,40)]
     assert 'table' in page_gate(a,i)['flags']
 
-def test_rules_without_lattice_are_not_table():
+def test_closed_rule_cells_without_lattice_are_table():
     a,i=body()
     for y in (20,400,870): a[y:y+2,20:580]=0
     for x in (20,300,580): a[20:880,x:x+2]=0
+    pg=page_gate(a,i)
+    assert not pg['box_lattice']
+    assert pg['ruled_cells']['closed_cells']>=2 and 'table' in pg['flags']
+
+def test_single_surrounding_frame_without_lattice_is_not_table():
+    a,i=body()
+    for y in (20,870): a[y:y+2,20:580]=0
+    for x in (20,580): a[20:880,x:x+2]=0
     assert 'table' not in page_gate(a,i)['flags']
 
 def test_lattice_without_rules_is_not_table():
