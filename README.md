@@ -1,33 +1,108 @@
 # Greek OCR toolkit
 
-The private standard for Greek OCR tooling: typed APIs, preserved source logic, byte-bound provenance and offline tests. Python 3.11 or newer; CLI: `greekocr`.
+Tools for reading printed Greek, especially polytonic Greek from 19th- and 20th-century books, with OCR.
+
+The toolkit covers the whole path from page image to text:
+
+- finding the text lines on a page;
+- cutting them into recognition pieces;
+- making synthetic training lines and collecting real ones;
+- running and comparing line readers;
+- scoring the results;
+- plugging a reader into [Docling](https://github.com/docling-project/docling).
+
+Everything sits behind one typed Python package, `greekocr`, with a command-line tool of the same name and an offline test suite.
+
+> **Status: in active development.** APIs, file formats and results still change between commits. Experimental work
+> lives on branches before it reaches `main`.
+
+## Principles
+
+- **A PDF text layer is another OCR, not ground truth.** It is never a reference, a judge input or a calibration target.
+- **Provenance is recorded.** Data, recipes and results carry the hashes and receipts needed to reproduce them.
+- **Fast methods are checked against slow, explicit ones.** A heuristic stays only if it tracks a real feature of the
+  page and agrees with the explicit method.
+- **Offline by default.** Network calls (source discovery, cloud OCR services, pod operations) happen only when the
+  matching function is called explicitly. The tests use recorded responses and mocks.
+
+## Install
+
+Python 3.11 or newer.
 
 ```sh
-UV_CACHE_DIR=/tmp/greekocr-uv-cache uv venv --python 3.11 .venv
-UV_CACHE_DIR=/tmp/greekocr-uv-cache uv pip install --python .venv/bin/python -e '.[test]'
+uv venv --python 3.11 .venv
+uv pip install --python .venv/bin/python -e '.[test]'
 .venv/bin/python -m pytest -q
-.venv/bin/greekocr recipes
+```
+
+The base install covers pages, manifests, tags, scoring and text-layer extraction. Heavier dependencies are extras:
+
+| Extra | Use |
+| --- | --- |
+| `readers` | local recognition models |
+| `warmstart` | converting and checking donor model weights |
+| `docling` | the Docling plugin and computed layout |
+| `docai` | Google Document AI crop reader |
+| `web` | rendering HTML pages as exact label data |
+| `test` | everything the test suite needs |
+
+## Quick start
+
+Find the lines on a page image:
+
+```python
+from PIL import Image
+from greekocr.pages import process_page
+
+result = process_page(Image.open("page.png"), page_key="page-1")
+print(len(result.lines), len(result.pieces))
+```
+
+Tag a string by script and word type:
+
+```sh
 .venv/bin/greekocr annotate 'ἅλφα Latin'
 ```
 
-The base install supports manifest custody, tags, scoring and text-layer extraction. Reader, warm-start and Docling dependencies are optional extras. Linux worker environment plans isolate Kraken and Paddle; CUDA/Paddle runtimes are not installed by importing this package.
+List the synthetic-data recipes:
 
-- `greekocr.synth`: captured v5/v7/v8 recipe identity, existing Rust factory calls, HEAD-bound mixes and deterministic sampling.
-- `greekocr.real`: reviewed work partitions, PDF/DjVu text layers, Polyton-DB/GRPOLY and other native formats, two-reader adjudication and Rust real import.
-- `greekocr.real.sources`: recorded parsers and explicit discovery/fetch APIs, with original rate state and transfer receipts.
-- `greekocr.annotate`: frozen script, word and overlapping diagnostic line tags.
-- `greekocr.readers`: our raw evaluation reader, Kalchas, persistent CLLG worker, native R01/R03 references and explicit service stubs.
-- `greekocr.score`: strict atom CER, bake-off NFD scoring, mark F1/homoglyph diagnostics and by-category summaries.
-- `greekocr.warmstart`: exact donor mappings, conversion, state verification and native parity gates.
-- `greekocr.deploy`: Docling `glossapi` entry point, reviewable node setup plans and injected Prime Intellect pod operations.
-- `greekocr.ops`: atomic receipts, hash verification, environment secrets, rate locks and bounded liveness.
+```sh
+.venv/bin/greekocr recipes
+```
 
-[API examples](docs/API.md), [standard](docs/STANDARD.md), [inventory](docs/INVENTORY.md), [validation](docs/VALIDATION.md).
+## What is in the package
 
-For real lines: stage recorded source metadata and reviewed rights; build a canonical-work map with explicit held-out exposure evidence; extract/import candidate crops; adjudicate independently; run `import_real_shards`; then build a manifest with exact receipts. Do not split related works by line. Missing text layers are recorded, not reconstructed by OCR.
+| Module | What it does |
+| --- | --- |
+| `greekocr.pages` | Page analysis: text lines, their geometry and recognition pieces (`process_page`, `process_book`). |
+| `greekocr.glyphs` | Glyph-level measurements of line crops (letters, accents, ink) without a reference text. |
+| `greekocr.readers` | Local line readers and explicitly enabled service readers (Document AI, Cloud Vision, Transkribus). |
+| `greekocr.score` | Strict character error rate, accent F1, look-alike diagnostics and per-category summaries. |
+| `greekocr.synth` | Synthetic-line recipes, calls to the Rust line factory, and reproducible data mixes. |
+| `greekocr.real` | Collecting real lines: source parsers, text-layer extraction, two-reader adjudication, import. |
+| `greekocr.annotate` | Script, word and line tags, plus line metadata. |
+| `greekocr.verify` | Independent checks of image readability and text quality. |
+| `greekocr.harvest` | Provenance-preserving harvesting of pilot labels. |
+| `greekocr.warmstart` | Converting donor model weights and checking numerical parity. |
+| `greekocr.deploy` | The Docling `glossapi` OCR plugin and reviewable deployment plans. |
+| `greekocr.ops` | Receipts, hash checks, rate limits, secrets from the environment, bounded job watching. |
 
-The Rust factory stays in its source project. `build_shards` requires an existing binary, an ingested pool and the worker's fonts/assets/cwd. Recipes here are copied unchanged. Mix APIs require the custody repository explicitly; the exact recipe bytes must be committed at its HEAD. This scaffold has no Git writes; the coordinator commits it and configures repository visibility.
+`greekocr/_vendor` holds the original source logic that the typed APIs wrap, kept byte-for-byte with its origin
+recorded in [docs/INVENTORY.md](docs/INVENTORY.md). `prototypes/` holds experimental code that is not yet part of the
+package.
 
-Discovery is offline by default. Its bridge stages byte-identical native CLIs and redirects their evidence root to the caller's directory, retaining shared ledger/rate locks and adjacent optional S17 exclusions. Fetch/service/pod APIs perform their named external action only when called; this phase exercises them through mocks. The original pod launcher and historical launch shells are archived reference files.
+## Documentation
 
-The CPU suite verifies source hashes, custody refusal, recorded discovery replay, import/adjudication edges, strict scoring, persistent-worker behavior, real fixture-model loading/conversion, Docling replacement contracts and operational terminal states. Real released-model recognition, production datasets, Linux/CUDA environments and the original full Corpus cohort are separate qualification work.
+- [Working with page images](docs/PAGES_GUIDE.md), [page pipeline](docs/PAGES_PIPELINE.md),
+  [output format](docs/PAGES_OUTPUT_FORMAT.md), [line-finding algorithm](docs/PAGE_LINES_ALGORITHM.md)
+- [API examples](docs/API.md), [line metadata](docs/LINE_METADATA.md)
+- Service readers: [Document AI](docs/READERS_DOCAI.md), [Cloud Vision](docs/READERS_VISION.md),
+  [Transkribus](docs/READERS_TRANSKRIBUS.md)
+- [Readability checks](docs/VERIFY.md), [rendered web pages as label data](docs/WEB_RENDER.md)
+- [Repository standard](docs/STANDARD.md), [validation](docs/VALIDATION.md)
+- Research notes and reviews: [docs/research](docs/research), [docs/reviews](docs/reviews)
+
+## Test material
+
+The test fixtures include line and page crops from third-party digitised books and datasets. They are here only so
+the tests can run, and they keep their sources' rights. Do not reuse them as a dataset.
