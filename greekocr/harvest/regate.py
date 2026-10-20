@@ -38,7 +38,7 @@ def resolve_artifact(stored, bulk_root):
 def run(records_path, page_receipts, bulk_root, out, *, previous_gates=None, progress=print):
     records_path=Path(records_path).resolve();page_receipts=Path(page_receipts).resolve()
     bulk_root=Path(bulk_root).resolve();out=Path(out).resolve()
-    protected=Path(__file__).resolve().parents[2]/'docs/harvest/pilot_v1'
+    protected=Path(__file__).resolve().parents[2]/'docs/records/harvest/pilot_v1'
     previous_root=protected.parent/'fix1'
     if out.is_relative_to(bulk_root) or out.is_relative_to(protected) or out.is_relative_to(previous_root) or out==records_path.parent:
         raise ValueError('replay output must be separate from protected bulk/pilot inputs')

@@ -1,0 +1,43 @@
+.................F......................................                 [100%]
+=================================== FAILURES ===================================
+____________ test_multishard_manifest_census_and_alias_aggregation _____________
+
+tmp_path = PosixPath('/private/var/folders/5q/65_c_z89577cz_zxgkpkz36m0000gn/T/pytest-of-foivoskarounos-zamparloukos/pytest-1871/test_multishard_manifest_censu0')
+
+    def test_multishard_manifest_census_and_alias_aggregation(tmp_path):
+        args = fixture(tmp_path)
+        out = tmp_path / 'out'
+        r.recompose(**args, out=out, workers=2)
+        manifests = [r.load(p) for p in sorted((out / 'shards').glob('*/release/release_presence.json'))]
+        merged = r.load(out / 'release/release_presence.json')
+        assert merged['release'] == 'v2-corrected-presence-sf5'
+        for i, m in enumerate(manifests):
+            # Deliberately nonuniform aliases expose first-shard-only aggregation.
+            m['alias_only'] = i + 2
+            m['coverage_per_wave']['wave1c']['alias_only'] = i + 2
+            m['coverage_per_source']['test']['alias_only'] = i + 2
+            p = out / 'shards' / f'shard-{i:05d}' / 'release/release_presence.json'
+            r.write_json(p, m)
+        # Existing aggregate remains immutable; exercise merge into a fresh location.
+        import shutil
+        other = tmp_path / 'merge'
+        shutil.copytree(out / 'shards', other / 'shards')
+        shutil.copyfile(out / 'input_verification.json', other / 'input_verification.json')
+        shards = [r.load(p) for p in sorted((other / 'shards').glob('*/receipt.json'))]
+        r.merge_shards(other, shards, args['selection'], list(r.rows(args['selection'])), r.VARIANTS)
+        merged = r.load(other / 'release/release_presence.json')
+        assert merged['alias_only'] == 5
+        assert merged['coverage_per_wave']['wave1c']['alias_only'] == 5
+        assert merged['coverage_per_source']['test']['alias_only'] == 5
+        assert merged['elision_census']['aligned_lines'] == 2
+>       assert merged['elision_census_released']['both_deleted'] == 0
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'both_deleted'
+
+tests/labelfix/test_l1r2.py:99: KeyError
+----------------------------- Captured stdout call -----------------------------
+L1R_SHARD 0 lines=1 seconds=0.009
+L1R_SHARD 1 lines=1 seconds=0.008
+=========================== short test summary info ============================
+FAILED tests/labelfix/test_l1r2.py::test_multishard_manifest_census_and_alias_aggregation
+1 failed, 55 passed in 2.39s

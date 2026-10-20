@@ -1,6 +1,6 @@
 """Descriptive glyph, page, book and corpus statistics over immutable Q1 geometry.
 
-Definitions and a-priori thresholds: docs/reviews/PAGE_LINES_Q2_STATISTICS.md.
+Definitions and a-priori thresholds: docs/records/reviews/PAGE_LINES_Q2_STATISTICS.md.
 Candidate provenance is measured evidence, never a trained or confirmed label.
 """
 from __future__ import annotations

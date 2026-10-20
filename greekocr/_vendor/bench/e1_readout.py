@@ -16,8 +16,7 @@ MARKS = {'acute': '\u0301', 'grave': '\u0300', 'circumflex': '\u0342\u0302',
          'smooth_breathing': '\u0313', 'rough_breathing': '\u0314',
          'iota_subscript': '\u0345', 'dialytika': '\u0308'}
 # Explicit diagnostic groups, case-sensitive. No scoring folds.
-HOMOGLYPHS = ('ΑAА', 'ΒBВ', 'ΕEЕ', 'ΖZ', 'ΗHН', 'ΙIІ', 'ΚKК', 'ΜMМ', 'ΝN',
-              'ΟOО', 'ΡPР', 'ΤTТ', 'ΥY', 'ΧXХ', 'ϹCС', 'οoо', 'ρpр', 'νv', 'аa', 'сc', 'еe', 'хx', 'іi')
+from greekocr.harvest.lookalikes import HOMOGLYPHS
 DIMENSIONS = ('font_status', 'font', 'severity', 'bg_type', 'polarity', 'width_bucket', 'length_bucket', 'crop_augmentation')
 SCRIPTS = ('greek', 'latin', 'cyrillic')
 

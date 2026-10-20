@@ -4,6 +4,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 from .contracts import bbox
+from .geometry_memo import entry
 
 def quantize(length): return max(1,int(round(length)))
 
@@ -16,8 +17,13 @@ def mask(items,shape,page_size):
     h,w=shape; pw,ph=page_size; out=np.zeros(shape,np.uint8)
     for q in items:
         if q.get('discounted'): continue
-        p=np.rint(np.asarray(q['polygon'])*[w/pw,h/ph]).astype(np.int32)
-        cv2.fillPoly(out,[p],1)
+        if q.get('raster_edges'):
+            from .geometry_bands import crop_mask
+            scaled=dict(q,polygon=np.asarray(q['polygon'])*[w/pw,h/ph])
+            out|=crop_mask(shape,scaled)
+        else:
+            p=np.rint(np.asarray(q['polygon'])*[w/pw,h/ph]).astype(np.int32)
+            cv2.fillPoly(out,[p],1)
     return out
 
 def robust_fit(x,y,degree=1):
@@ -29,17 +35,28 @@ def robust_fit(x,y,degree=1):
         weights=np.minimum(1,1.5*scale/np.maximum(abs(r),1e-6))
     return coef
 
+def minor_height(item):
+    cache=entry(item['polygon'])
+    if cache is not None and 'minor_height' in cache:return cache['minor_height']
+    value=min(cv2.minAreaRect(np.asarray(item['polygon'],np.float32))[1])
+    if cache is not None:cache['minor_height']=value
+    return value
+
 def height_proxy(items,size):
-    hs=[min(cv2.minAreaRect(np.asarray(q['polygon'],np.float32))[1]) for q in items]
+    hs=[minor_height(q) for q in items]
     h=float(np.median(hs)) if hs else min(size)/100
     return max(min(size)/1000,h*.5) # provisional, NOT measured xheight
 
 def line_axis(item):
+    cache=entry(item['polygon'])
+    if cache is not None and 'axis' in cache:return cache['axis'].copy()
     p=np.asarray(item['polygon'],np.float32); b=bbox(item)
     left=p[np.argsort(p[:,0])[:2]].mean(0); right=p[np.argsort(p[:,0])[-2:]].mean(0)
-    if right[0]-left[0]<1e-6: return np.array([b[1]+(b[3]-b[1])/2,0.])
-    slope=(right[1]-left[1])/(right[0]-left[0])
-    return np.array([left[1]-slope*left[0],slope])
+    if right[0]-left[0]<1e-6:out=np.array([b[1]+(b[3]-b[1])/2,0.])
+    else:
+        slope=(right[1]-left[1])/(right[0]-left[0]);out=np.array([left[1]-slope*left[0],slope])
+    if cache is not None:cache['axis']=out
+    return out.copy()
 
 def sample_strip(array,item,page_size,height,nx=41,ny=41,extend=1.):
     b=bbox(item); axis=line_axis(item); W,H=page_size; ah,aw=array.shape

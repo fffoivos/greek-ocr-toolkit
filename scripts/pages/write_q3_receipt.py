@@ -11,11 +11,12 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+from greekocr.ops.data_root import input_path as _data_input
 from scripts.pages.check_stage_equivalence import MODULES, normalise
 
 
 def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
 
 
 def main():
@@ -61,7 +62,7 @@ def main():
             for item in page[kind]:
                 if 'file' in item:
                     item['file'] = Path(item['file']).name
-    destination = ROOT / 'docs/reviews'
+    destination = ROOT / 'docs/records/reviews'
     diff_path = destination / 'PAGE_LINES_Q3_DIFFERENCES.json.gz'
     buffer = io.BytesIO()
     with gzip.GzipFile(filename='', mode='wb', fileobj=buffer, mtime=0) as stream:

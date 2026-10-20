@@ -3,11 +3,28 @@ import json
 import os
 from pathlib import Path
 import socket
+import sys
 import urllib.request
 import pytest
 
+from tests._paths import install_record_loader
+
+_restore_record_loader = install_record_loader()
+
+def pytest_unconfigure(config):
+    _restore_record_loader()
+
+sys.dont_write_bytecode = True
 os.environ.update(HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1', GIT_OPTIONAL_LOCKS='0',
+                  PYTHONDONTWRITEBYTECODE='1',
                   CUDA_VISIBLE_DEVICES='', TOKENIZERS_PARALLELISM='false')
+
+# Child Python processes must import this checkout, rather than the editable
+# install belonging to the shared test interpreter's original worktree.
+_repo_root = str(Path(__file__).resolve().parents[1])
+os.environ['PYTHONPATH'] = os.pathsep.join(
+    [_repo_root, *filter(None, os.environ.get('PYTHONPATH', '').split(os.pathsep))]
+)
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
@@ -16,6 +33,19 @@ def offline(monkeypatch):
     monkeypatch.setattr(socket.socket, 'connect', blocked)
     monkeypatch.setattr(socket.socket, 'connect_ex', blocked)
     monkeypatch.setattr(urllib.request, 'urlopen', blocked)
+
+@pytest.fixture(scope='session', autouse=True)
+def predictor_path():
+    """Resolve once and share the exact executable with replay subprocesses."""
+    from greekocr.harvest.predictor_path import predictor_binary
+    previous = os.environ.get('GREEK_OCR_PREDICTOR')
+    path = predictor_binary()
+    os.environ['GREEK_OCR_PREDICTOR'] = str(path)
+    yield path
+    if previous is None:
+        os.environ.pop('GREEK_OCR_PREDICTOR', None)
+    else:
+        os.environ['GREEK_OCR_PREDICTOR'] = previous
 
 @pytest.fixture(scope='session', autouse=True)
 def cpu_threads():

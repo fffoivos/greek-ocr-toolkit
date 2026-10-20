@@ -1,4 +1,5 @@
 from __future__ import annotations
+from greekocr.ops.data_root import input_path as _data_input
 import hashlib
 import json
 import unicodedata as ud
@@ -10,14 +11,14 @@ SCHEMA = 'real-lines/o1-v1'
 
 def sha256(path):
     h = hashlib.sha256()
-    with Path(path).open('rb') as f:
+    with _data_input(Path(path)).open('rb') as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b''):
             h.update(chunk)
     return h.hexdigest()
 
 
 def read_rows(path):
-    with Path(path).open(encoding='utf-8') as f:
+    with _data_input(Path(path)).open(encoding='utf-8') as f:
         for line in f:
             if line.strip():
                 yield json.loads(line)
@@ -37,13 +38,8 @@ def write_json(path, obj):
 
 
 def script(c):
-    if not c.isalpha():
-        return None
-    name = ud.name(c, '')
-    for s in ('GREEK', 'LATIN', 'CYRILLIC'):
-        if s in name:
-            return s.lower()
-    return 'other'
+    from greekocr.harvest.text_primitives import unicode_letter_script
+    return unicode_letter_script(c)
 
 
 def features(text):

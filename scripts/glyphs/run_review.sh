@@ -8,7 +8,7 @@
 set -u
 LABEL="$1"; BRIEF="$2"; MODEL="${3:-gpt-6.1-sol}"; EFFORT="${4:-xhigh}"
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-RDIR="$REPO/docs/reviews"; mkdir -p "$RDIR"
+RDIR="$REPO/docs/records/reviews"; mkdir -p "$RDIR"
 OUT="$RDIR/${LABEL}_review_1.md"; LOG="$RDIR/${LABEL}_review_1.codexlog"
 BEFORE=$(date +%s)
 echo "[$(date '+%H:%M:%S')] REVIEW START $LABEL model=$MODEL effort=$EFFORT"
@@ -17,7 +17,7 @@ echo "[$(date '+%H:%M:%S')] REVIEW START $LABEL model=$MODEL effort=$EFFORT"
 # writable roots) and that is PROVEN after the run: any repo file newer than the start marker fails the review.
 SCRATCH="$HOME/Projects/glossapi-ocr-local/experiments/ocr_program_review_20261006/review_scratch/$LABEL"
 mkdir -p "$SCRATCH"; MARK="$SCRATCH/.start_marker"; touch "$MARK"; sleep 1
-SCOPE="greekocr/glyphs tests/glyphs scripts/glyphs tests/fixtures/fonts docs/GLYPHS_PLAN.md docs/GLYPHS_STATE.json"
+SCOPE="greekocr/glyphs tests/glyphs scripts/glyphs tests/fixtures/fonts docs/records/glyphs/GLYPHS_PLAN.md docs/records/glyphs/GLYPHS_STATE.json"
 scope_hash() { (cd "$REPO" && find $SCOPE -type f -not -path "*/__pycache__/*" | LC_ALL=C sort | xargs shasum | shasum | cut -c1-12); }
 DIFF_BEFORE=$(scope_hash)
 { echo "Repository root (READ-ONLY, use absolute paths or \`cd $REPO\` in each command; writes there are blocked): $REPO"

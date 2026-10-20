@@ -6,6 +6,7 @@ then run Q5's default API afresh and use the strict Q4 fingerprint comparison.
 No prototype, float tolerance or extra metadata exclusion enters this gate.
 """
 from __future__ import annotations
+from greekocr.ops.data_root import input_path as _data_input
 
 import argparse
 import gzip
@@ -25,8 +26,8 @@ def main():
     args = parser.parse_args()
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=True)
-    reference_path = ROOT/"docs/reviews/q4-speed-evidence/current-equality.json.gz"
-    with gzip.open(reference_path, "rt") as stream:
+    reference_path = ROOT/"docs/records/reviews/q4-speed-evidence/current-equality.json.gz"
+    with gzip.open(_data_input(reference_path), "rt") as stream:
         reference = json.load(stream)
     mismatches = [name for name, expected in reference["source_manifest"].items()
                   if hashlib.sha256((ROOT/name).read_bytes()).hexdigest() != expected]
@@ -41,7 +42,7 @@ def main():
     left, right, comparison = (args.out/name for name in ("q4", "current", "comparison"))
     left.mkdir(parents=True, exist_ok=True)
     (left/"summary.json").write_text(json.dumps(reference))
-    binding = dict(q4_receipt_sha256=hashlib.sha256(reference_path.read_bytes()).hexdigest(),
+    binding = dict(q4_receipt_sha256=hashlib.sha256(_data_input(reference_path).read_bytes()).hexdigest(),
                    production_files_checked=len(reference["source_manifest"]), source_mismatches=mismatches,
                    page_keys=keys)
     (args.out/"binding.json").write_text(json.dumps(binding, indent=2))

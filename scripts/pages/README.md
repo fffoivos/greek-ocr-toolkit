@@ -26,7 +26,7 @@ Q3b's strict behaviour gate is `check_q3b_equality.py`, followed by
 `check_q3b_books.py --out .astra/q3b-equality` and `write_q3b_receipt.py`.
 The final receipt requires complete page/file coverage, source identity and the
 full test receipt; it retains every non-allowlisted failure. The gate uses only the field-by-field
-metadata allowlist documented in `docs/PAGES_OUTPUT_FORMAT.md`; every other
+metadata allowlist documented in `docs/A_ocr_development/reference/PAGES_OUTPUT_FORMAT.md`; every other
 difference fails. The historical Q3 scripts above retain their original rules.
 
 The Q3b runner calls the public API 16 times per page (table recovery on/off,

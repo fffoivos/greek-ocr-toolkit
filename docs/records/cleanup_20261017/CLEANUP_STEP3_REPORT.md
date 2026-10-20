@@ -1,0 +1,702 @@
+# CU3: recogniser phase 1
+
+Implementation, requested parity, and CU3b API documentation are complete.
+The restored frozen fixtures clear the earlier SF6 failures. The provenance tests
+now fail only for the two pre-existing causes specified by the coordinator.
+The unchanged capture-server test still cannot bind a local socket in this
+sandbox; final readiness accounts for that additional environmental error.
+No test files or assertions were changed, and no skip or xfail was introduced.
+
+## Scope and API
+
+Branch `opus/cleanup-1`; current ctc_align blob
+`9121771091c90c49b8582a0185f119286ce74482`, file SHA256
+`3ecb1a208918fdc33b897c00c1848456a9480946a17fb88f7d9f5f400a646068`.
+CU3b changes the existing `scripts/generate_api_docs.py` and generated
+`docs/API.md`, plus annotations/export declarations in the new recogniser package
+and this report. CU3's prior uncommitted work is retained. No .git writes,
+commits, pushes or network use. No plan §7 path was moved or edited.
+
+| Entry | Implementation / contract |
+|---|---|
+| `load(checkpoint, codec=None, device='cpu', threads=None, strict=True)` | Union binding validation; lazy original backends; provenance |
+| `Recogniser.read(images, profile=..., bs=16)` | `labelfix`: original `ctc_align.Recognizer.align_batch`; `eval`: original vendored `E1Reader.read`; `serve`: original Docling `Recognizer.recognize` |
+| `Recogniser.as_reader(profile='eval')` | Path-to-text reader adapter for new callers |
+| `Recogniser.logits(images, dtype=np.float32)` | Delegated `E1.logits`; explicit float64 reproduces its returned dtype; its float halo is not E1Reader's uint8 path |
+| `Reading` / `align(reading)` | Unrounded inherited alignment for labelfix; unavailable original output fields remain None, no extra forward |
+| `Alignment.slots()` | Existing text clusters and span windows; no physical ink claim |
+| `Alignment.evidence(...)` | Inherited `recognition_evidence`, identical schema, hash and record serialization |
+| `transfer(record_or_alignment, new_text)` | Frozen nearest-neighbour span transfer; NFD requested text, detached result, frames dropped, always transferred even for identity |
+| `confidence_matches` | Finite bounded frame scores; float64 mean with absolute tolerance 1e-6, relative tolerance zero |
+| `AlignmentCache(path, recogniser).get(crops)` | Delegates strict C1 crop_key; all new results go through to_record/from_record; duplicate keys rejected; single writer |
+| `run_shard(crops, recogniser, cache_path, bs=16)` | One explicitly selected shard via canonical cache |
+| `forbid_forward()` | Nestable process-local guard; originals restored on normal/exception exit |
+
+No preprocessing, model, decoder or alignment algorithm is copied. All three
+profiles call their old implementations. Prepared serve strips pass unchanged;
+PIL/path serve inputs delegate to plugin extract_strip on the whole crop. PIL
+eval inputs are serialized temporarily as lossless PNG for the existing path API.
+Invalid/unreadable inputs raise with their index, never silently disappear.
+
+The old methods do not expose argmax IDs; `Reading.ids` is None. Eval exposes
+only text; serve exposes text and line confidence; `align` rejects either when
+no original alignment exists. These limitations avoid invented data and extra
+forwards. Package/file provenance lives on readings and cache envelopes, outside
+frozen alignment records, so it cannot change alignment_sha256.
+
+Strict mode checks codec version, codec SHA, n_classes and head (the legacy
+missing-head default is NFD). Missing codec SHA fails strict mode. `strict=False`
+reports errors and keeps each backend's original loader checks; it never bypasses
+those original checks. Both locally available full_s0 and full_s1 checkpoints
+pass the union checks (metadata-only inspection, no s1 forward); see
+[checkpoint checks](../../../artifacts/cleanup_step3/checkpoint_checks.json).
+The existing synthetic checkpoint in `test_warmstart_readers.py` omits codec SHA:
+it would require strict=False if that pinned caller were migrated. It is unchanged.
+
+Transfer deliberately differs from `ctc_align.transfer_alignment`'s identity
+no-op and from `r1_common.transfer_record`'s frame retention / missing flag.
+Neither original changes. Schema strings and mandatory/optional key sets are
+frozen constants in `recogniser/evidence.py`, with a fixed synthetic hash test.
+
+## Golden and tests
+
+The cleanup worktree has no ignored frozen caches/crop manifest. Tests read
+existing sibling evidence directly; they do not copy over or alter a pinned
+cache. Golden comparisons run under forbid_forward for **every record**:
+
+| Frozen cache | Records | to_record / evidence / alignment_sha256 |
+|---|---:|---|
+| spellcheck `.cache/labelfix/align_s0.jsonl` | 1264 | 1264 identical |
+| spellcheck-r0 `.cache/labelfix/r0/align_locked_ia.jsonl` | 133 | 133 identical |
+| spellcheck-r0 `.cache/labelfix/r0/align_locked_ib.jsonl` | 400 | 400 identical |
+| Total | 1797 | 1797 identical |
+
+The tests compare canonical JSON bytes for records and evidence, and the exact
+required SHA construction. Synthetic scored slots also pin regional schema and
+provenance. The 17 L1F tolerance witnesses were copied verbatim into tests:
+17/17 pass 1e-6 and fail the historical float64 abs_tol=2e-7 predicate. Negative
+controls fail; transfer cases cover NFC, NFD, identity, insertion, empty strings,
+record/object inputs, detached copies and frame removal. Cache tests verify
+first-run rounding equals replay, strict keys, duplicate rejection and incomplete
+result rejection. Delegation tests cover eval, serve, logits and reader adapters
+without forwarding. Guard tests cover nesting and restoration.
+
+Commands used the requested Python with PYTHONPATH=$PWD and
+PYTHONDONTWRITEBYTECODE=1; pytest's existing offline fixture limits CPU threads to 2.
+
+CU3b reran the following with the requested Python, `PYTHONPATH=$PWD` and
+`PYTHONDONTWRITEBYTECODE=1` (the existing test fixture sets two CPU threads):
+
+| Command (`python -m pytest`) | Result |
+|---|---|
+| `tests/test_provenance_cli_api.py -q` | 1109 passed, 2 failed |
+| `tests/recogniser tests/labelfix -q` | 1455 passed, 1 error: recogniser 25 passed; labelfix 1430 passed, 1 error |
+| `-q` (full repository suite) | 4694 passed, 5 failed, 6 errors, 19 skipped, 8 warnings (128.42s) |
+
+The two provenance failures are exactly the pre-existing ones:
+`test_public_callables_typed_and_documented` reaches the unchanged four-line
+Wave-0 harvest example (`assert 4 == 2`), and
+`test_all_vendored_files_are_in_inventory` finds the pre-existing unlisted
+`tests/fixtures/parliament_resolution.json`. All 296 callable entries independently
+pass the documentation, annotation and importability checks, including all
+16 recogniser entries. Every new recogniser example is exactly two lines.
+
+The SF6 baseline and L1E fixture supplied by the lead are present untracked.
+There are no remaining SF6 failures. The labelfix error is the unchanged
+`tests/labelfix/test_capture.py::test_server_appends_each_decision_and_serves_static`:
+`PermissionError: [Errno 1] Operation not permitted` at `socket.bind`.
+This error was already recorded in the original CU3 run; it is additional to the
+coordinator's opus/spellcheck baseline list and is reported separately.
+No extra scientific parity experiment was run; the full suite uses the existing
+offline tests and their CPU limit.
+
+Full-suite comparison with the supplied opus/spellcheck baseline:
+
+| File | Supplied baseline | CU3b result |
+|---|---|---|
+| `tests/test_collection_outputs.py` | 3 failures | Same 3 failures |
+| `tests/test_provenance_cli_api.py` | 2 failures | Same 2 failures and causes |
+| `tests/test_apply_clean.py` | 5 errors | Same 5 errors (missing clean-data manifest) |
+| `tests/labelfix/test_capture.py` | Not in the supplied baseline list | 1 sandbox socket-bind error, also present in original CU3 |
+
+The 19 skips come from existing conditions: one empty orientation parameter set,
+two absent optional offline orientation fixtures, and 16 unavailable Chromium
+browser cases. There are no new recogniser failures. Readiness is withheld only
+because this environment cannot meet the exact supplied baseline error list;
+CU3b's requested API documentation and typing changes are complete.
+
+CU3b logs: [provenance](../../../artifacts/cleanup_step3/cu3b/provenance_tests.log),
+[recogniser/labelfix](../../../artifacts/cleanup_step3/cu3b/recogniser_labelfix.log),
+[per-case XML](../../../artifacts/cleanup_step3/cu3b/recogniser_labelfix.xml),
+[full suite](../../../artifacts/cleanup_step3/cu3b/full_suite.log).
+The earlier CU3 logs remain preserved as historical evidence.
+
+### CU3b public documentation verification
+
+The recogniser defining modules now declare their public exports, so the generator
+reports the complete callable surface instead of only `run_shard`. Public
+functions/methods have argument and return annotations; constructors are annotated
+as well. Delegated model, alignment and cache behavior is unchanged.
+
+The generated API inventory contains 16 recogniser entries with CALLS examples.
+Regeneration is idempotent. All 280 non-recogniser callable sections, the preamble,
+and the authored Wave-0 appendix are byte-identical to their pre-CU3b contents,
+without any ordering change. The generator now preserves that existing appendix;
+its pre-existing four-line example remains unchanged.
+[Machine-readable comparison](../../../artifacts/cleanup_step3/cu3b/api_validation.json)
+and [pre-edit API document](../../../artifacts/cleanup_step3/cu3b/API.before.md).
+
+Tracked diff stat (the recogniser package and report remain untracked):
+
+```text
+ docs/API.md                  | 146 +++++++++++++++++++++++++++++++++++++++++++
+ scripts/generate_api_docs.py |  26 +++++++-
+ 2 files changed, 171 insertions(+), 1 deletion(-)
+```
+
+## CPU parity
+
+`python tests/recogniser/parity.py` completed with sockets blocked, CPU only,
+4 intra-op threads / 1 interop thread. Exactly **200 distinct crops**, seeded
+20261017 from sorted `load_three_way(0)` rows (1264-row local held-out population).
+Because the cleanup manifest/crops are absent, the loader's TOOLKIT and TEST_JSONL
+roots were rebound in memory to the sibling spellcheck worktree. No dataset file
+or pinned source changed. The per-crop comparison runs both old and API paths;
+these are repeated evaluations of the same 200 distinct crops, no additional
+crops, serving experiment or other model forward.
+
+| Comparison | Result |
+|---|---:|
+| labelfix API vs ctc_align.align_batch | 200/200 exact |
+| eval API vs E1Reader.read | 200/200 exact |
+| labelfix text != eval text | 0/200 (0%) |
+
+Labelfix equality checks raw dataclass values, including text, every unrounded
+span field, n_frames, scale, strip_width, confidence and every frame confidence.
+Labelfix batches were identical in old and wrapper paths, bs=16, input order
+preserved. Eval was bs=1 as in E1Reader. No strict binding failures occurred.
+Zero differences in this sample does not remove the documented median/halo
+profile differences and does not select a winner. Serve and logits were tested
+by delegation mocks only, respecting the forward budget.
+
+[Per-crop parity and provenance](../../../artifacts/cleanup_step3/parity.json),
+[parity log](../../../artifacts/cleanup_step3/parity.log).
+
+## Caller inventory
+
+| Candidate | Moved? | Pin / reason |
+|---|---|---|
+| `greekocr/readers/ours.py:load_ours` | No | `docs/records/labelfix/spellcheck/clariden/L1E_evidence/L1E_DEPLOY_SHA256.txt` explicitly lists greekocr/readers/ours.py |
+| New tools | API documented | `greekocr/recogniser/README.md` requires new tools to use the API and provides old-entry-to-API mapping |
+
+Every caller candidate was checked against every receipt in THIS worktree:
+- `artifacts/labelfix_r1/DEPLOY_SHA256.txt`
+- `docs/records/labelfix/spellcheck/clariden/C1_DEPLOY_SHA256.txt`
+- `docs/records/labelfix/spellcheck/clariden/L1E_evidence/L1E_DEPLOY_SHA256.txt`
+- `docs/records/labelfix/spellcheck/clariden/R1_DEPLOY_SHA256.txt`
+
+**Callers moved: 0.** Phase 2 awaits gate re-certification. No other callers were
+in the authorized migration set.
+
+## Protection proof
+
+Receipt paths enumerate protected paths; historical receipt digests are not
+asserted to describe this branch's current bytes. The protection comparison is
+current pre-edit versus current post-edit. The union additionally includes all
+non-generated files under labelfix and _vendor and all 16 policy-binding paths.
+
+Existing protected files: **379/379 unchanged**.
+The 53 receipt-listed files absent before remain absent afterward;
+no SHA is invented for a missing file. Their names and receipt membership appear
+below and in the JSON snapshots.
+
+Policy digest before: `6f62925a9a25e956ea7585fd3e07b1043cfd36bea018754c92a7fac86330c406`.
+
+Policy digest after: `6f62925a9a25e956ea7585fd3e07b1043cfd36bea018754c92a7fac86330c406`.
+
+Complete policy_binding() outputs are identical, including all 16 source hashes:
+[before](../../../artifacts/cleanup_step3/policy_before.json),
+[after](../../../artifacts/cleanup_step3/policy_after.json).
+
+Machine-readable [before snapshot](../../../artifacts/cleanup_step3/pins_before.json)
+and [after snapshot](../../../artifacts/cleanup_step3/pins_after.json) include pin
+membership. The complete SHA lists are
+[before](../../../artifacts/cleanup_step3/pinned_before.sha256) and
+[after](../../../artifacts/cleanup_step3/pinned_after.sha256).
+Recheck with `python tests/recogniser/audit_pins.py`; it never refreshes the baseline.
+
+The original CU3 diff proof remains in
+[diff proof](../../../artifacts/cleanup_step3/diff_stat.txt). CU3b's tracked diff stat
+appears above. No caller was modified. CU3b independently rechecked **379/379**
+protected files and all **53** absent receipt paths; the complete policy output
+is identical. SHA lists: [before](../../../artifacts/cleanup_step3/cu3b/pinned_before.sha256),
+[after](../../../artifacts/cleanup_step3/cu3b/pinned_after.sha256).
+Policy outputs: [before](../../../artifacts/cleanup_step3/cu3b/policy_before.json),
+[after](../../../artifacts/cleanup_step3/cu3b/policy_after.json).
+
+### Complete protected SHA table
+
+| Protected path | Before SHA256 | After SHA256 |
+|---|---|---|
+| `artifacts/labelfix_r1/RESULT.md` | `12a400a1c0eaf7af6e0d0bc708dec6d7cd27de6bdb6cd8506d3d2da6dda3ad5b` | `12a400a1c0eaf7af6e0d0bc708dec6d7cd27de6bdb6cd8506d3d2da6dda3ad5b` |
+| `artifacts/labelfix_r1/binding/disjointness.json` | `ff5003fd49ee84751b2e602e0971cd6cf860e1bbcd9187978ca529f6509482d1` | `ff5003fd49ee84751b2e602e0971cd6cf860e1bbcd9187978ca529f6509482d1` |
+| `artifacts/labelfix_r1/binding/document_split.json` | `3a1ecae1141e6b6bb6ff3c4c87b2d629ad8bdce0e96ad48b8f0a094adb407d53` | `3a1ecae1141e6b6bb6ff3c4c87b2d629ad8bdce0e96ad48b8f0a094adb407d53` |
+| `artifacts/labelfix_r1/binding/exclusions.json` | `1f0c7b67eaa0f6300bbd24dec93f2c02f90a669de346202d0b6200bb1ec1eeaf` | `1f0c7b67eaa0f6300bbd24dec93f2c02f90a669de346202d0b6200bb1ec1eeaf` |
+| `artifacts/labelfix_r1/binding/heldout_lines.jsonl.gz` | `ee874a22763b47df714ac398a756c306ee289847fad4f7668191229e9ea0c7ec` | `ee874a22763b47df714ac398a756c306ee289847fad4f7668191229e9ea0c7ec` |
+| `artifacts/labelfix_r1/binding/mock_selection.jsonl` | `35d1ce8eb21b473211e6e8d9b6034c710d59db1674b216f06d10dc5f085e07d9` | `35d1ce8eb21b473211e6e8d9b6034c710d59db1674b216f06d10dc5f085e07d9` |
+| `artifacts/labelfix_r1/binding/owner_extra_lines.jsonl.gz` | `71e28c4c1bcb4382db77648ac5d19844ecf86b41039511323bd6a55fffc87e49` | `71e28c4c1bcb4382db77648ac5d19844ecf86b41039511323bd6a55fffc87e49` |
+| `artifacts/labelfix_r1/binding/prepare_receipt.json` | `838e24bccbeede67dd88f34699b3bac5cdabd19cb69c2e5e6d51dac583d17aa4` | `838e24bccbeede67dd88f34699b3bac5cdabd19cb69c2e5e6d51dac583d17aa4` |
+| `artifacts/labelfix_r1/data_provenance.json` | `f16fd2f6c17e89c0488ea8c1549f313777b734686b16754fcf7fb577faf86e3a` | `f16fd2f6c17e89c0488ea8c1549f313777b734686b16754fcf7fb577faf86e3a` |
+| `artifacts/labelfix_r1/heldout_font/extraction_receipt.json` | `84d3a259a5280a4c18b19e83961755ed1cf4931f288ff82bc9b241bc613a7277` | `84d3a259a5280a4c18b19e83961755ed1cf4931f288ff82bc9b241bc613a7277` |
+| `artifacts/labelfix_r1/run_binding.json` | `5fc2b40dfd0501fdcde7ab2cc6953afd18a059a46c11f4372d5165839dfe2527` | `5fc2b40dfd0501fdcde7ab2cc6953afd18a059a46c11f4372d5165839dfe2527` |
+| `docs/records/labelfix/spellcheck/clariden/C1_selection.summary.json` | `df4ea0cc0926464719f310fe1a940a3a19602fc78126a5be15c6c2ee0d7b9711` | `df4ea0cc0926464719f310fe1a940a3a19602fc78126a5be15c6c2ee0d7b9711` |
+| `docs/records/labelfix/spellcheck/clariden/R1_mark_reader_outline.md` | `fd654523f594c172dd0ab3ff91914d6368b03ee1eaf374ee664523a8b86f312f` | `fd654523f594c172dd0ab3ff91914d6368b03ee1eaf374ee664523a8b86f312f` |
+| `greekocr/__init__.py` | `71b967226af60f9e9d88a54374340925ecc47cbf96a5e64753d3fbe7a54f672e` | `71b967226af60f9e9d88a54374340925ecc47cbf96a5e64753d3fbe7a54f672e` |
+| `greekocr/__main__.py` | `79ee6f134c5c5193377cf9b189cbdcc3e2095e49ba9cec310114441c15a917c4` | `79ee6f134c5c5193377cf9b189cbdcc3e2095e49ba9cec310114441c15a917c4` |
+| `greekocr/_vendor/bench/__init__.py` | `c89d3e4269708b16b1530e466202aa0412c6cc9cf55773714457d27f4fafee1f` | `c89d3e4269708b16b1530e466202aa0412c6cc9cf55773714457d27f4fafee1f` |
+| `greekocr/_vendor/bench/admission.py` | `dbba2935455317a93ce26fc066d5ad3fce04f5606a3c233bbb5e05955139f924` | `dbba2935455317a93ce26fc066d5ad3fce04f5606a3c233bbb5e05955139f924` |
+| `greekocr/_vendor/bench/codec_coverage.py` | `14d27eae4d20fa313c7f756de9905f5b75f28a4dd1f72adffd2da6a59552bb28` | `14d27eae4d20fa313c7f756de9905f5b75f28a4dd1f72adffd2da6a59552bb28` |
+| `greekocr/_vendor/bench/common.py` | `44d618076b84f236d5123673efbfbdf5631c13a960bcb5737f3ec0e9e39d5de6` | `44d618076b84f236d5123673efbfbdf5631c13a960bcb5737f3ec0e9e39d5de6` |
+| `greekocr/_vendor/bench/e1_common.py` | `1a018d03669603ba8d4815dc90e151f0126f26ffa7f1bdcb7fcb90ebf58a4e14` | `1a018d03669603ba8d4815dc90e151f0126f26ffa7f1bdcb7fcb90ebf58a4e14` |
+| `greekocr/_vendor/bench/e1_eval.py` | `870114acffb7fe8abd4f0d6a04c7d555a69f8a8170f643026f39dd507e716c27` | `870114acffb7fe8abd4f0d6a04c7d555a69f8a8170f643026f39dd507e716c27` |
+| `greekocr/_vendor/bench/e1_readout.py` | `666edd2ad088a68fcb1e0e26ae09e6831b18f03d951903324b2c84ade69edf8f` | `666edd2ad088a68fcb1e0e26ae09e6831b18f03d951903324b2c84ade69edf8f` |
+| `greekocr/_vendor/bench/e2_bakeoff.py` | `439a772968baad47cb65940a49bd6398f63ba49d9b2254f11505b9c1d9586a77` | `439a772968baad47cb65940a49bd6398f63ba49d9b2254f11505b9c1d9586a77` |
+| `greekocr/_vendor/bench/e2_cllg_contract.py` | `869f89e654b7e2d8dc6613ace2682de3e52050f587a0e9a56b4aa4f0ae7d2b2c` | `869f89e654b7e2d8dc6613ace2682de3e52050f587a0e9a56b4aa4f0ae7d2b2c` |
+| `greekocr/_vendor/bench/e2_models.py` | `ba87a86dc3b6b16cfc0403b58ccca610f48e86cd156058fe489a4776f1e997c8` | `ba87a86dc3b6b16cfc0403b58ccca610f48e86cd156058fe489a4776f1e997c8` |
+| `greekocr/_vendor/bench/e2_native.py` | `39512ecd0ba9fb91cfb8978ff5a87bcc6e13b52eb0d1a97a28fe34ab0e65b0ec` | `39512ecd0ba9fb91cfb8978ff5a87bcc6e13b52eb0d1a97a28fe34ab0e65b0ec` |
+| `greekocr/_vendor/bench/e2_parity.py` | `15819df4f855e48558b6dd78cd08a36cd5ba170e1e68949882d3d38cb92f6801` | `15819df4f855e48558b6dd78cd08a36cd5ba170e1e68949882d3d38cb92f6801` |
+| `greekocr/_vendor/bench/e2_reader_parity.py` | `1a62349bd358472b739c514cfa5a9afbe08487e639f20f77f825f7b20eab1e80` | `1a62349bd358472b739c514cfa5a9afbe08487e639f20f77f825f7b20eab1e80` |
+| `greekocr/_vendor/bench/e2_teachers.py` | `4511f90908139fe72eac61efb5d5382c1b2b70b0901a453fe8c3a7627d103f7f` | `4511f90908139fe72eac61efb5d5382c1b2b70b0901a453fe8c3a7627d103f7f` |
+| `greekocr/_vendor/bench/e2_warmstart.py` | `8e90b4f57e10521f809fd0cac8a4bc61d39464106e2e40989618bc3a372bf934` | `8e90b4f57e10521f809fd0cac8a4bc61d39464106e2e40989618bc3a372bf934` |
+| `greekocr/_vendor/bench/extract_lines.py` | `0963f60a1f17011b00f6cab6c21fa296e6db90c2bb39a8f9c5f7b6c2bf459212` | `0963f60a1f17011b00f6cab6c21fa296e6db90c2bb39a8f9c5f7b6c2bf459212` |
+| `greekocr/_vendor/bench/line_categories.py` | `33560b9082017403c8c7fab2a7e53edb726b55581c228c28487f66ae64fc6545` | `33560b9082017403c8c7fab2a7e53edb726b55581c228c28487f66ae64fc6545` |
+| `greekocr/_vendor/bench/o4b_adjudicate.py` | `9a6e9605abafa41b86db6b4ba05d95ed0763ff916e19498d3c03356dde8188ac` | `9a6e9605abafa41b86db6b4ba05d95ed0763ff916e19498d3c03356dde8188ac` |
+| `greekocr/_vendor/bench/o4b_common.py` | `6b3aead60abf09ae941e585b5327090f869a976253463277d77141541f6219e7` | `6b3aead60abf09ae941e585b5327090f869a976253463277d77141541f6219e7` |
+| `greekocr/_vendor/bench/o4b_fetch.py` | `77e357521638a2cac993dcd1eb9eea176d765e61a5855b5cec734c428936e6d8` | `77e357521638a2cac993dcd1eb9eea176d765e61a5855b5cec734c428936e6d8` |
+| `greekocr/_vendor/bench/o4b_import_datasets.py` | `7737a9d496d3bbe7413eb19e025bc9abca2ecdcad01f3813f69e10100ca88c04` | `7737a9d496d3bbe7413eb19e025bc9abca2ecdcad01f3813f69e10100ca88c04` |
+| `greekocr/_vendor/bench/o4b_models.py` | `9b0f39776dcb3a43d57d92ab7c38811d1896543a4be752d961f505445ba12a65` | `9b0f39776dcb3a43d57d92ab7c38811d1896543a4be752d961f505445ba12a65` |
+| `greekocr/_vendor/bench/o4b_partition.py` | `f2287f1ea2fe8d1e20d582d2e256a106be534a6718e6cee29376f97a5610899e` | `f2287f1ea2fe8d1e20d582d2e256a106be534a6718e6cee29376f97a5610899e` |
+| `greekocr/_vendor/bench/o4b_textlayer_lines.py` | `16d01bcabfb7154a732f953147a8f1051d39a5545b20dd40fa00028be83b4a1a` | `16d01bcabfb7154a732f953147a8f1051d39a5545b20dd40fa00028be83b4a1a` |
+| `greekocr/_vendor/bench/o5_runtime.py` | `309cb21bebfffc3cd4e56c2854b32213e4d430adadd1d72b37ff8e87054c04d0` | `309cb21bebfffc3cd4e56c2854b32213e4d430adadd1d72b37ff8e87054c04d0` |
+| `greekocr/_vendor/codec/v1.json` | `d1b7e2d40565e89e699f748692265e06e2d7028409b78d02d6df6f89b2e82a86` | `d1b7e2d40565e89e699f748692265e06e2d7028409b78d02d6df6f89b2e82a86` |
+| `greekocr/_vendor/factory/Cargo.lock` | `bd9a9ade44b5b392e9746c5d1c7d5217391ca382ce93f3505a53034a2422b1ad` | `bd9a9ade44b5b392e9746c5d1c7d5217391ca382ce93f3505a53034a2422b1ad` |
+| `greekocr/_vendor/factory/Cargo.toml` | `62dccba6951cb345fc7753ef6a7072459b8892f593cd59c6bdf873d438d68b07` | `62dccba6951cb345fc7753ef6a7072459b8892f593cd59c6bdf873d438d68b07` |
+| `greekocr/_vendor/factory/appearance_band.json` | `3f7e7c5c2f58507d7bafdd580afcf6e71aec5ebc5bbede1a1349bd382d2099f7` | `3f7e7c5c2f58507d7bafdd580afcf6e71aec5ebc5bbede1a1349bd382d2099f7` |
+| `greekocr/_vendor/factory/exclusions/e2_v7_transfer_shared.txt` | `4ea16d07a239fb3fc3751d80e959e67e2a54b064110b70c61aad5bbb1e7cad2a` | `4ea16d07a239fb3fc3751d80e959e67e2a54b064110b70c61aad5bbb1e7cad2a` |
+| `greekocr/_vendor/factory/exclusions/realcrops_v1.txt` | `a38531ef4702e37e8b9fd9039abc1553a9173050d003b18e21947afbd934908d` | `a38531ef4702e37e8b9fd9039abc1553a9173050d003b18e21947afbd934908d` |
+| `greekocr/_vendor/factory/recipe.smoke.json` | `fa07971ec67e8c5700db093ca30248e8c04ab08809b3ebc0c2489525c66f161c` | `fa07971ec67e8c5700db093ca30248e8c04ab08809b3ebc0c2489525c66f161c` |
+| `greekocr/_vendor/factory/recipe.transfer-smoke.v1.json` | `75604dfb8ee8570840a814a3fe983ada1159c42a51d358461d9c068be8651587` | `75604dfb8ee8570840a814a3fe983ada1159c42a51d358461d9c068be8651587` |
+| `greekocr/_vendor/factory/recipe.v1.json` | `03c132afd4bd8198161b206884f7d601b764ac5de045bd51ab6671643a03214e` | `03c132afd4bd8198161b206884f7d601b764ac5de045bd51ab6671643a03214e` |
+| `greekocr/_vendor/factory/recipe.v5.json` | `2f228950e9a508b5e130e82ce5b89de2b911be4a23872c3acc7f53e83c59dce7` | `2f228950e9a508b5e130e82ce5b89de2b911be4a23872c3acc7f53e83c59dce7` |
+| `greekocr/_vendor/factory/recipe.v6.json` | `24c243ecd24c7f74ad8031a1feb6092523d21788d37379c8795b0cf1f53ebec6` | `24c243ecd24c7f74ad8031a1feb6092523d21788d37379c8795b0cf1f53ebec6` |
+| `greekocr/_vendor/factory/recipe.v7.json` | `4fbf257172cab1255fd068e37b1a6cac11b5f2fb84ecce83da0136a9150fb87f` | `4fbf257172cab1255fd068e37b1a6cac11b5f2fb84ecce83da0136a9150fb87f` |
+| `greekocr/_vendor/factory/recipe.v8.json` | `ba6faace28b1cd3ecd019ae00a43cc7a9ae79bcca0c75f75ce7b89e1214b7351` | `ba6faace28b1cd3ecd019ae00a43cc7a9ae79bcca0c75f75ce7b89e1214b7351` |
+| `greekocr/_vendor/factory/src/audit.rs` | `4903876e914e6ea6a8d3b1cb0d2bfaec0e21fdde960f08431869727108ed1918` | `4903876e914e6ea6a8d3b1cb0d2bfaec0e21fdde960f08431869727108ed1918` |
+| `greekocr/_vendor/factory/src/build.rs` | `d264cbfe00abe0b871092cb919b6e76f34b7bda081e82bb65d4d19894ccf0eff` | `d264cbfe00abe0b871092cb919b6e76f34b7bda081e82bb65d4d19894ccf0eff` |
+| `greekocr/_vendor/factory/src/codec.rs` | `2598774dc8efdc056265280a9b4b4c043c4eb73c5494faf9c98840ccda670632` | `2598774dc8efdc056265280a9b4b4c043c4eb73c5494faf9c98840ccda670632` |
+| `greekocr/_vendor/factory/src/composer.rs` | `731dc1a6f07d2ddf0dc6c7b7206a0f83f08bc5526d53e0610757f3217690179b` | `731dc1a6f07d2ddf0dc6c7b7206a0f83f08bc5526d53e0610757f3217690179b` |
+| `greekocr/_vendor/factory/src/corpus.rs` | `8b4ccb7ac79d5a1ac6f5b077293fd14a0e1890fc670b15244c52630e7dbe136a` | `8b4ccb7ac79d5a1ac6f5b077293fd14a0e1890fc670b15244c52630e7dbe136a` |
+| `greekocr/_vendor/factory/src/custody.rs` | `e61dbc4846852419975ec6059b010ae251c43e62f4ac212178205e94df1e9d7a` | `e61dbc4846852419975ec6059b010ae251c43e62f4ac212178205e94df1e9d7a` |
+| `greekocr/_vendor/factory/src/distort.rs` | `8bf785e77fab3e0ac77785ae3dab520fe04148322618d5abdb2344d993bca124` | `8bf785e77fab3e0ac77785ae3dab520fe04148322618d5abdb2344d993bca124` |
+| `greekocr/_vendor/factory/src/import_real.rs` | `f60cf98a743cf997684efe6ea37f79be87aff17b6a5db2a89734940ff694ade3` | `f60cf98a743cf997684efe6ea37f79be87aff17b6a5db2a89734940ff694ade3` |
+| `greekocr/_vendor/factory/src/main.rs` | `c643142db686b8d6707cd9d814f3ef60f4a8c888007623c5a5c44175993a90d5` | `c643142db686b8d6707cd9d814f3ef60f4a8c888007623c5a5c44175993a90d5` |
+| `greekocr/_vendor/factory/src/measure.rs` | `126b1b8e0b5ce8930af4d48a9f1512e0660c7f05a0e31ff14f340b8537f9408e` | `126b1b8e0b5ce8930af4d48a9f1512e0660c7f05a0e31ff14f340b8537f9408e` |
+| `greekocr/_vendor/factory/src/recipe.rs` | `bcf0fc666c2e57d69d3c2a845988b843cc7ef5a224a2a9c2171a89533b359956` | `bcf0fc666c2e57d69d3c2a845988b843cc7ef5a224a2a9c2171a89533b359956` |
+| `greekocr/_vendor/factory/src/render.rs` | `ec0e327af575899467fef5b3d013f476923e5f0137140caefa577bc6b486dcd5` | `ec0e327af575899467fef5b3d013f476923e5f0137140caefa577bc6b486dcd5` |
+| `greekocr/_vendor/factory/src/select.rs` | `24714cc17d658a5255e57c656fca6c73e835b8242a0330cd98c51084bbc7a322` | `24714cc17d658a5255e57c656fca6c73e835b8242a0330cd98c51084bbc7a322` |
+| `greekocr/_vendor/factory/src/shard.rs` | `17a180ab5ef89d4db1d9bdba23e2f92232b91a92577ae9c37fb4f30b5dca1bfd` | `17a180ab5ef89d4db1d9bdba23e2f92232b91a92577ae9c37fb4f30b5dca1bfd` |
+| `greekocr/_vendor/ops/watch_proc.sh` | `1d8ded272867860e6aee85dd9b1163fff6d62c2c061f30a98fcac52be65458ec` | `1d8ded272867860e6aee85dd9b1163fff6d62c2c061f30a98fcac52be65458ec` |
+| `greekocr/_vendor/ops/watch_slurm.sh` | `7aee9a258b4ea075d1d3ed1d6c7b95827f04cadba929f6abc74b69e85f1fe037` | `7aee9a258b4ea075d1d3ed1d6c7b95827f04cadba929f6abc74b69e85f1fe037` |
+| `greekocr/_vendor/origins.json` | `7b87659c3f7b5ed8a228e645fe5679f525775d2156670dcef2c5d2e63148b5c6` | `7b87659c3f7b5ed8a228e645fe5679f525775d2156670dcef2c5d2e63148b5c6` |
+| `greekocr/_vendor/pipeline/__init__.py` | `bd60154dcde35289c2222977669e4648ee54931b5fdf1e445417791cd2f4bc07` | `bd60154dcde35289c2222977669e4648ee54931b5fdf1e445417791cd2f4bc07` |
+| `greekocr/_vendor/pipeline/page_ocr_detector.py` | `6cfcf75b17430b422a37e1431e6e813d88cb0dcacf0cd8de19bee2ab40d83abd` | `6cfcf75b17430b422a37e1431e6e813d88cb0dcacf0cd8de19bee2ab40d83abd` |
+| `greekocr/_vendor/pipeline/recognize.py` | `0c655fad53de0daf38bf0824494852dcba21d126b1d3dd23bdfc020513544b09` | `0c655fad53de0daf38bf0824494852dcba21d126b1d3dd23bdfc020513544b09` |
+| `greekocr/_vendor/pods/__init__.py` | `bd60154dcde35289c2222977669e4648ee54931b5fdf1e445417791cd2f4bc07` | `bd60154dcde35289c2222977669e4648ee54931b5fdf1e445417791cd2f4bc07` |
+| `greekocr/_vendor/pods/pi_pod.py` | `406e7b17177db7db13fb32712a0572403670b51e56a586fc874007db4078d254` | `406e7b17177db7db13fb32712a0572403670b51e56a586fc874007db4078d254` |
+| `greekocr/_vendor/rec/__init__.py` | `f2844528b1a4a20b5100513df454b23bd73e4a326f0760497285032f69f96cdf` | `f2844528b1a4a20b5100513df454b23bd73e4a326f0760497285032f69f96cdf` |
+| `greekocr/_vendor/rec/openocr_vendored/LICENSE` | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
+| `greekocr/_vendor/rec/openocr_vendored/PROVENANCE.md` | `c9379b828c6bd89dd81eb4f44948b54a2a7d296ea09fcfb2285796ba6126f530` | `c9379b828c6bd89dd81eb4f44948b54a2a7d296ea09fcfb2285796ba6126f530` |
+| `greekocr/_vendor/rec/openocr_vendored/__init__.py` | `ddd974ef49be67eac605e88606bf88b165ff7763edd5a7f896b9ec2b4d76704c` | `ddd974ef49be67eac605e88606bf88b165ff7763edd5a7f896b9ec2b4d76704c` |
+| `greekocr/_vendor/rec/openocr_vendored/common.py` | `82903551fbbac55d15c4dbedf2a4325a3f89ef0d80d7cc774894d6e87ead3ba1` | `82903551fbbac55d15c4dbedf2a4325a3f89ef0d80d7cc774894d6e87ead3ba1` |
+| `greekocr/_vendor/rec/openocr_vendored/rctc_decoder.py` | `192e3670cd1bdc2a791d2885219a3b815c5680c94684a313dce215b5ca3bd0a7` | `192e3670cd1bdc2a791d2885219a3b815c5680c94684a313dce215b5ca3bd0a7` |
+| `greekocr/_vendor/rec/openocr_vendored/svtrv2_lnconv_two33.py` | `43d52b3c5348cefcd1d4d473e9c0c0119270628a04d6403f65be962fe2cc43d7` | `43d52b3c5348cefcd1d4d473e9c0c0119270628a04d6403f65be962fe2cc43d7` |
+| `greekocr/_vendor/rec/openocr_vendored/svtrv2_rctc.yml` | `37bf5eec639a3ddee04bdb27724cab04ee3044560ef74afe219bafe21d39c204` | `37bf5eec639a3ddee04bdb27724cab04ee3044560ef74afe219bafe21d39c204` |
+| `greekocr/_vendor/rec/openocr_vendored/svtrv2_tiny_rctc.yml` | `ca74267bff522150d202aae6b66af1638eb6dff091a5a9a0103628023739c718` | `ca74267bff522150d202aae6b66af1638eb6dff091a5a9a0103628023739c718` |
+| `greekocr/_vendor/rec/svtrv2_model.py` | `01b48368b6518ed03a84f7e34de69b460815c18b9a0d4f46fb2a03330af8fb77` | `01b48368b6518ed03a84f7e34de69b460815c18b9a0d4f46fb2a03330af8fb77` |
+| `greekocr/_vendor/scripts/fetch/__init__.py` | `bd60154dcde35289c2222977669e4648ee54931b5fdf1e445417791cd2f4bc07` | `bd60154dcde35289c2222977669e4648ee54931b5fdf1e445417791cd2f4bc07` |
+| `greekocr/_vendor/scripts/fetch/o4b_archive.sh` | `9b87061b13c2c8f1b72d2122f0aae38b5860dcb65b926594ab1362cec378bef2` | `9b87061b13c2c8f1b72d2122f0aae38b5860dcb65b926594ab1362cec378bef2` |
+| `greekocr/_vendor/scripts/fetch/o4b_datasets.sh` | `7d4596f5465815dc08717bfe49067ada79f27947d7c18a86e550bd119af95e32` | `7d4596f5465815dc08717bfe49067ada79f27947d7c18a86e550bd119af95e32` |
+| `greekocr/_vendor/scripts/fetch/o4c_audit.py` | `2497801805d31ea40cb95848d64d539a4b05344812e2ffe96037757c1c214fc4` | `2497801805d31ea40cb95848d64d539a4b05344812e2ffe96037757c1c214fc4` |
+| `greekocr/_vendor/scripts/fetch/o4c_audit_anemi.py` | `e7d7e5bef5ad6bf66e35d452d4e1a121fc91454feabbcfbfa1fab69112a9459b` | `e7d7e5bef5ad6bf66e35d452d4e1a121fc91454feabbcfbfa1fab69112a9459b` |
+| `greekocr/_vendor/scripts/fetch/o4c_common.py` | `ff65faf66f6d9b3f02fc1b5367d73e4d841c3266bf721d13460cf221fb50f6ad` | `ff65faf66f6d9b3f02fc1b5367d73e4d841c3266bf721d13460cf221fb50f6ad` |
+| `greekocr/_vendor/scripts/fetch/o4c_discover_anemi.py` | `d39266ec4e9788df07fd3b424e5afe99f10d64b7690db048f7fec40bc0349850` | `d39266ec4e9788df07fd3b424e5afe99f10d64b7690db048f7fec40bc0349850` |
+| `greekocr/_vendor/scripts/fetch/o4c_discover_archive.py` | `5f882626f7769300ce1e607f2d27e1d7f13fb44dfed758b61b6def9681fe5714` | `5f882626f7769300ce1e607f2d27e1d7f13fb44dfed758b61b6def9681fe5714` |
+| `greekocr/_vendor/scripts/fetch/o4c_discover_other.py` | `bc379699f84fe88a1f7c5cd3b09747bc806d179ec6576849d6f214321ae27ab4` | `bc379699f84fe88a1f7c5cd3b09747bc806d179ec6576849d6f214321ae27ab4` |
+| `greekocr/_vendor/scripts/fetch/o4c_discover_parliament.py` | `e0ca18928fcf9a2e2b6d418d0cc4f8ff853c33956dac7ce070a7a979b309f6ac` | `e0ca18928fcf9a2e2b6d418d0cc4f8ff853c33956dac7ce070a7a979b309f6ac` |
+| `greekocr/_vendor/scripts/fetch/o4c_discover_wikimedia.py` | `d8d8ed510290a0bf82f1c669b48d6f8b2c8fbd44fc6b14f8c05c3dc8ac485f02` | `d8d8ed510290a0bf82f1c669b48d6f8b2c8fbd44fc6b14f8c05c3dc8ac485f02` |
+| `greekocr/_vendor/scripts/fetch/o4c_finalize.py` | `d1afaca552fd05ed48f0b86eebebe525a629bf7f8b0ad36d7a40b26b6ab6aa19` | `d1afaca552fd05ed48f0b86eebebe525a629bf7f8b0ad36d7a40b26b6ab6aa19` |
+| `greekocr/_vendor/scripts/fetch/o4c_probe_media.py` | `855c97d2afa1961289e4c9d62ec0db9e3f5d1d65e2bfe50ca52808e803862ecb` | `855c97d2afa1961289e4c9d62ec0db9e3f5d1d65e2bfe50ca52808e803862ecb` |
+| `greekocr/_vendor/scripts/fetch/o4c_probe_print.py` | `f3edd5eab7e1316879c13ffdfd24b0e45c2470a240540cee2a93f60f1438f5e2` | `f3edd5eab7e1316879c13ffdfd24b0e45c2470a240540cee2a93f60f1438f5e2` |
+| `greekocr/_vendor/scripts/fetch/o4c_record_fixtures.py` | `429b2d4f306c6e33ebc87e3f6e8238f1d8c12e7fef9997599305088b4ab4446a` | `429b2d4f306c6e33ebc87e3f6e8238f1d8c12e7fef9997599305088b4ab4446a` |
+| `greekocr/_vendor/scripts/fetch/parliament_pdf_cache.py` | `537c2916b08d0b2a3e3ce96b8afffbc449635b867fc9f8825ef21edbfab5c3fc` | `537c2916b08d0b2a3e3ce96b8afffbc449635b867fc9f8825ef21edbfab5c3fc` |
+| `greekocr/_vendor/scripts/fetch/r2_cllg_env.sh` | `35f4298785e07a902418539c7aa770167f575c14ec9bc527edea6722c3d78926` | `35f4298785e07a902418539c7aa770167f575c14ec9bc527edea6722c3d78926` |
+| `greekocr/_vendor/scripts/fetch/r2_cllg_worker.py` | `de52f0f3580e22ad42e90144b384c46432119f9ae78f0308338e26e6926dcd0d` | `de52f0f3580e22ad42e90144b384c46432119f9ae78f0308338e26e6926dcd0d` |
+| `greekocr/_vendor/seed/node_scripts/__init__.py` | `bd60154dcde35289c2222977669e4648ee54931b5fdf1e445417791cd2f4bc07` | `bd60154dcde35289c2222977669e4648ee54931b5fdf1e445417791cd2f4bc07` |
+| `greekocr/_vendor/seed/node_scripts/build_parity_crops.py` | `1c7720d2b39cab9a7cfa60f9accab871a27263a844b4e1a43b863e2b40087d56` | `1c7720d2b39cab9a7cfa60f9accab871a27263a844b4e1a43b863e2b40087d56` |
+| `greekocr/_vendor/seed/node_scripts/fetch_parliament_s2.py` | `22e812dc274a3300ba06a534eb04d9336a87033ce0d00da02bf3aa2b02fbdf8e` | `22e812dc274a3300ba06a534eb04d9336a87033ce0d00da02bf3aa2b02fbdf8e` |
+| `greekocr/_vendor/seed/node_scripts/node_cllg_bakeoff.sh` | `146aab5388d6b260e71ae3804e366bfe2a110186bbd59c462ba5d910b17bf144` | `146aab5388d6b260e71ae3804e366bfe2a110186bbd59c462ba5d910b17bf144` |
+| `greekocr/_vendor/seed/node_scripts/node_vouli2.sh` | `d7cb81466285c63be5ed27780fccaf9dfe21d4f89f1555c8f95b798b9eeb1d9e` | `d7cb81466285c63be5ed27780fccaf9dfe21d4f89f1555c8f95b798b9eeb1d9e` |
+| `greekocr/_vendor/source_clis/scripts/fetch/__init__.py` | `bd60154dcde35289c2222977669e4648ee54931b5fdf1e445417791cd2f4bc07` | `bd60154dcde35289c2222977669e4648ee54931b5fdf1e445417791cd2f4bc07` |
+| `greekocr/_vendor/source_clis/scripts/fetch/o4c_audit.py` | `2f605358f9e26da0f43b4f9ef495093160b15f84be32463f9520ec3f70111eb4` | `2f605358f9e26da0f43b4f9ef495093160b15f84be32463f9520ec3f70111eb4` |
+| `greekocr/_vendor/source_clis/scripts/fetch/o4c_audit_anemi.py` | `d1ac09af4634a2b2be1db143fc5810b4805d8f23b67ec8c1a557f4e38d9c5216` | `d1ac09af4634a2b2be1db143fc5810b4805d8f23b67ec8c1a557f4e38d9c5216` |
+| `greekocr/_vendor/source_clis/scripts/fetch/o4c_common.py` | `ff65faf66f6d9b3f02fc1b5367d73e4d841c3266bf721d13460cf221fb50f6ad` | `ff65faf66f6d9b3f02fc1b5367d73e4d841c3266bf721d13460cf221fb50f6ad` |
+| `greekocr/_vendor/source_clis/scripts/fetch/o4c_discover_anemi.py` | `9da0b70730a9530e6288013057b5b3d2be6cdc858928c62aa3740bb8e3554bac` | `9da0b70730a9530e6288013057b5b3d2be6cdc858928c62aa3740bb8e3554bac` |
+| `greekocr/_vendor/source_clis/scripts/fetch/o4c_discover_archive.py` | `2c916140de80a8f2f31f472e14aebe5df20c05a73209987525427ccbf9f4ab33` | `2c916140de80a8f2f31f472e14aebe5df20c05a73209987525427ccbf9f4ab33` |
+| `greekocr/_vendor/source_clis/scripts/fetch/o4c_discover_other.py` | `1c7a5e2d2a3218d6d7709b7131c68cb0a5b13cf2144bef1cfc87ea5ee69196a2` | `1c7a5e2d2a3218d6d7709b7131c68cb0a5b13cf2144bef1cfc87ea5ee69196a2` |
+| `greekocr/_vendor/source_clis/scripts/fetch/o4c_discover_parliament.py` | `7cffad930cf26252e452ae7699685f1d2663e42682b4d7efa56c35cc61ae4d7a` | `7cffad930cf26252e452ae7699685f1d2663e42682b4d7efa56c35cc61ae4d7a` |
+| `greekocr/_vendor/source_clis/scripts/fetch/o4c_discover_wikimedia.py` | `f23a6ef7b4dec6881cc711fb2846f54579f1da7a2d17142134ab35c71f136dda` | `f23a6ef7b4dec6881cc711fb2846f54579f1da7a2d17142134ab35c71f136dda` |
+| `greekocr/_vendor/source_clis/scripts/fetch/o4c_finalize.py` | `2fbcb11aed9e20a427f0c5e8f3f4ba73eee2179d8f334d86ef9ed09b2181bb9b` | `2fbcb11aed9e20a427f0c5e8f3f4ba73eee2179d8f334d86ef9ed09b2181bb9b` |
+| `greekocr/_vendor/source_clis/scripts/fetch/o4c_probe_media.py` | `f285d28cf555402db45fce9e52876c07dae19380a3462c235ce4b00c4e0186fb` | `f285d28cf555402db45fce9e52876c07dae19380a3462c235ce4b00c4e0186fb` |
+| `greekocr/_vendor/source_clis/scripts/fetch/o4c_probe_print.py` | `76758b6d64032491e1a409330b1b73bab61901840ceebff80bcc8057af5d27f3` | `76758b6d64032491e1a409330b1b73bab61901840ceebff80bcc8057af5d27f3` |
+| `greekocr/_vendor/source_clis/scripts/fetch/o4c_record_fixtures.py` | `af64b2a4f91dad517f518d0f0fe25c9371be47a9ad58f00aa6b8255b747a8859` | `af64b2a4f91dad517f518d0f0fe25c9371be47a9ad58f00aa6b8255b747a8859` |
+| `greekocr/_vendor/train/__init__.py` | `bd60154dcde35289c2222977669e4648ee54931b5fdf1e445417791cd2f4bc07` | `bd60154dcde35289c2222977669e4648ee54931b5fdf1e445417791cd2f4bc07` |
+| `greekocr/_vendor/train/cer.py` | `4ac0bc16fa7380360eb30995184f00753b4394e436a2b3db3ec8fbbdafd5b331` | `4ac0bc16fa7380360eb30995184f00753b4394e436a2b3db3ec8fbbdafd5b331` |
+| `greekocr/_vendor/train/ckpt_io.py` | `c32fe83bab4f7a5440ff54c041aa98243ab4c8d2ecd6539c6ced7081c3f5f101` | `c32fe83bab4f7a5440ff54c041aa98243ab4c8d2ecd6539c6ced7081c3f5f101` |
+| `greekocr/_vendor/train/ctc_health.py` | `06bfed86a8c98635435176965052f1c3b27bae968285d6e6d787616934427260` | `06bfed86a8c98635435176965052f1c3b27bae968285d6e6d787616934427260` |
+| `greekocr/_vendor/train/data.py` | `ba0b037ba89aa687a34267184ffb8d82102670d9cb2aff7445cf9b09047b1213` | `ba0b037ba89aa687a34267184ffb8d82102670d9cb2aff7445cf9b09047b1213` |
+| `greekocr/_vendor/train/detector_common.py` | `0dc9bd99fa2635ade43ce02f018d4d95ae918a42c5219873c37d7e5916089a10` | `0dc9bd99fa2635ade43ce02f018d4d95ae918a42c5219873c37d7e5916089a10` |
+| `greekocr/_vendor/train/eval_cer.py` | `82538e37729618a1b20d6288a93a5bcb4fade1baf73108b5c937950b08397418` | `82538e37729618a1b20d6288a93a5bcb4fade1baf73108b5c937950b08397418` |
+| `greekocr/_vendor/train/heads.py` | `22aa92e4081c5070c19c41fec8a6a0fb673fea3137cf65c6fe12f593454a2799` | `22aa92e4081c5070c19c41fec8a6a0fb673fea3137cf65c6fe12f593454a2799` |
+| `greekocr/_vendor/train/mix.py` | `5c27588383f0ce7277bed25f51ead2ae1489281e1cca498f283e8a5884a0b270` | `5c27588383f0ce7277bed25f51ead2ae1489281e1cca498f283e8a5884a0b270` |
+| `greekocr/_vendor/train/mix.schema.json` | `2e7e066a9550c9217551cf934221273145fcd2c386b9289d9b9f010fda897a3d` | `2e7e066a9550c9217551cf934221273145fcd2c386b9289d9b9f010fda897a3d` |
+| `greekocr/_vendor/train/model.py` | `811869053e3143e5f0998a99232b0982d42b17b9c9195d5813af67bd82118683` | `811869053e3143e5f0998a99232b0982d42b17b9c9195d5813af67bd82118683` |
+| `greekocr/_vendor/train/train.py` | `c737986897134ea400f377dc17d0f0f65e3b9945e294ac203003e857ba298546` | `c737986897134ea400f377dc17d0f0f65e3b9945e294ac203003e857ba298546` |
+| `greekocr/annotate/__init__.py` | `48407f0baa1c823da7a2d5d5f3d116488038b13060dcdba5178720709a47ef73` | `48407f0baa1c823da7a2d5d5f3d116488038b13060dcdba5178720709a47ef73` |
+| `greekocr/annotate/_records.py` | `42a7fcd1b2e11b3d662d629e3caf4dbe13ef58cf61ae844d5cb253473c7ae6b4` | `42a7fcd1b2e11b3d662d629e3caf4dbe13ef58cf61ae844d5cb253473c7ae6b4` |
+| `greekocr/annotate/font.py` | `be9297601d0999b04cfe61dc9bc0eeae2abb4d8f9af5454d3c257f3da1b5859b` | `be9297601d0999b04cfe61dc9bc0eeae2abb4d8f9af5454d3c257f3da1b5859b` |
+| `greekocr/annotate/line_features.py` | `ef7cae7d3329974fd1e4276179edc4f91f11a4da532acbac618fa5c233caaf9b` | `ef7cae7d3329974fd1e4276179edc4f91f11a4da532acbac618fa5c233caaf9b` |
+| `greekocr/annotate/pipeline.py` | `8bede666b794c6e13e1db7b7015b11d899f2da3a19b83eaaa77e59ac54133a33` | `8bede666b794c6e13e1db7b7015b11d899f2da3a19b83eaaa77e59ac54133a33` |
+| `greekocr/annotate/sources.py` | `9a2de3eaea71d1dd604e5ecce68a55046a954dd673906be01acd2cea6ed1784c` | `9a2de3eaea71d1dd604e5ecce68a55046a954dd673906be01acd2cea6ed1784c` |
+| `greekocr/annotate/strata.py` | `710f9b8d0ed5f465b29bf2138d1c1eb381338b3fd4000d6b070787de13846f28` | `710f9b8d0ed5f465b29bf2138d1c1eb381338b3fd4000d6b070787de13846f28` |
+| `greekocr/cli.py` | `20760d8e20f4d551be86e7ae8d557ed81cd00b12395ddeccdd0a34bc6a13fd0d` | `20760d8e20f4d551be86e7ae8d557ed81cd00b12395ddeccdd0a34bc6a13fd0d` |
+| `greekocr/deploy/__init__.py` | `5b06aa1af103b6b563d94e192bfa3f6ddb1c4b810c4031e4f89aaea9d5cf73fb` | `5b06aa1af103b6b563d94e192bfa3f6ddb1c4b810c4031e4f89aaea9d5cf73fb` |
+| `greekocr/deploy/docling_plugin/__init__.py` | `14f92dd439917aa943b93113ebd3e231dace1a1fd28fba66b8281397e1a34326` | `14f92dd439917aa943b93113ebd3e231dace1a1fd28fba66b8281397e1a34326` |
+| `greekocr/deploy/docling_plugin/docling_plugin.py` | `256391ce58dc8a5409b63208f3dd8efb0da35049451fe62efac1f631eb53fea6` | `256391ce58dc8a5409b63208f3dd8efb0da35049451fe62efac1f631eb53fea6` |
+| `greekocr/deploy/docling_plugin/model.py` | `fa632cca327f1129a752a23f6dcecc950ad92d6f1f4dc065b7e7859c5495c8e2` | `fa632cca327f1129a752a23f6dcecc950ad92d6f1f4dc065b7e7859c5495c8e2` |
+| `greekocr/deploy/docling_plugin/options.py` | `2873780288482c0a5bb5b0f5d0577a7fbd29ee37395139238e66fd2f86c71a05` | `2873780288482c0a5bb5b0f5d0577a7fbd29ee37395139238e66fd2f86c71a05` |
+| `greekocr/deploy/docling_plugin/orientation.py` | `af586ffc304c56ae5d91d2cc5dd50a0c2a612fbfbb8c0efc957a579c8fe84c07` | `af586ffc304c56ae5d91d2cc5dd50a0c2a612fbfbb8c0efc957a579c8fe84c07` |
+| `greekocr/deploy/docling_plugin/recognizer/__init__.py` | `06ce64f68d9fc069b064b4538b4fe6a54afa86037c48bdfb1ecfb2c8c6dab08c` | `06ce64f68d9fc069b064b4538b4fe6a54afa86037c48bdfb1ecfb2c8c6dab08c` |
+| `greekocr/deploy/docling_plugin/recognizer/ckpt_io.py` | `3f44d8149d07052f0826c275eef838fb1b3f0dadcc413330c143efb5fa6c1e5b` | `3f44d8149d07052f0826c275eef838fb1b3f0dadcc413330c143efb5fa6c1e5b` |
+| `greekocr/deploy/docling_plugin/recognizer/codec.py` | `e6e15ad7e3d78cff8d348fdb84a06a52cfc5d39c55d1567f292e0ecb37b5399c` | `e6e15ad7e3d78cff8d348fdb84a06a52cfc5d39c55d1567f292e0ecb37b5399c` |
+| `greekocr/deploy/docling_plugin/recognizer/inference.py` | `32029d9142dbf0da37f7fb47d43e7b2a0e6dbaeaee1a941844497e7f6896bc45` | `32029d9142dbf0da37f7fb47d43e7b2a0e6dbaeaee1a941844497e7f6896bc45` |
+| `greekocr/deploy/docling_plugin/recognizer/model.py` | `90bcb3f9c1f1d593062145a5d23582eea862c4e98ab783bd0fd6cedf6adfb8ae` | `90bcb3f9c1f1d593062145a5d23582eea862c4e98ab783bd0fd6cedf6adfb8ae` |
+| `greekocr/deploy/docling_plugin/recognizer/strips.py` | `e9986428ed7d52319da6ffafa190fe5dd35bd6d5acb5806a57c2ff40ae58f898` | `e9986428ed7d52319da6ffafa190fe5dd35bd6d5acb5806a57c2ff40ae58f898` |
+| `greekocr/deploy/node_envs.py` | `258e1990d81653e802f0f212d10cd1794561e7d4e21137778e3770310104ed83` | `258e1990d81653e802f0f212d10cd1794561e7d4e21137778e3770310104ed83` |
+| `greekocr/deploy/pods.py` | `a59b96d26cfcd1af04889d4e117d37b99ec12a4904f8f672156f74ec7d2216b4` | `a59b96d26cfcd1af04889d4e117d37b99ec12a4904f8f672156f74ec7d2216b4` |
+| `greekocr/glyphs/__init__.py` | `1fd4e9e2b357cd8f244b508b639f8e07c60176bfaec3bb7b556d90211701d372` | `1fd4e9e2b357cd8f244b508b639f8e07c60176bfaec3bb7b556d90211701d372` |
+| `greekocr/glyphs/baseline.py` | `09e92755ccdd8fd748db1d6469f74adb5e6b6ef9789f746b0ee9f675f56d6606` | `09e92755ccdd8fd748db1d6469f74adb5e6b6ef9789f746b0ee9f675f56d6606` |
+| `greekocr/glyphs/boundary_evidence.py` | `b3412d8943e2d2513b9fe64bd879f93941719d88984ca7b522e27e29154e8545` | `b3412d8943e2d2513b9fe64bd879f93941719d88984ca7b522e27e29154e8545` |
+| `greekocr/glyphs/columns.py` | `c3408cd43637d1110fb1d0ad5d96f17670dd7d684ed51933c68d311621a4f7b2` | `c3408cd43637d1110fb1d0ad5d96f17670dd7d684ed51933c68d311621a4f7b2` |
+| `greekocr/glyphs/components.py` | `649b33d8c715f175421579ecbbb193594c027c6dfc3db7ec6a8dc76b6f3a88fb` | `649b33d8c715f175421579ecbbb193594c027c6dfc3db7ec6a8dc76b6f3a88fb` |
+| `greekocr/glyphs/evaluate.py` | `2ac4beca05cca4ebe4c18af89d8a9904c22930dcf19d1e32ef2659c7e1619590` | `2ac4beca05cca4ebe4c18af89d8a9904c22930dcf19d1e32ef2659c7e1619590` |
+| `greekocr/glyphs/ink.py` | `52097165b2f5180ceaa9e20982c5d0547d96bed889a84670984bca61075089f5` | `52097165b2f5180ceaa9e20982c5d0547d96bed889a84670984bca61075089f5` |
+| `greekocr/glyphs/letters.py` | `2bdbcf72cd04eb43c1c7c40141481963cab6e6d7aca617edece33e52563db676` | `2bdbcf72cd04eb43c1c7c40141481963cab6e6d7aca617edece33e52563db676` |
+| `greekocr/glyphs/line_structure.py` | `d684dd8be3ce55746955fcf4cece15093ab78e35f9f0e98c6c4812548b16be38` | `d684dd8be3ce55746955fcf4cece15093ab78e35f9f0e98c6c4812548b16be38` |
+| `greekocr/glyphs/lines_api.py` | `3574baa492029aaf026e2b890235f4d52a3dbced77a2ed160963cbf2f519877e` | `3574baa492029aaf026e2b890235f4d52a3dbced77a2ed160963cbf2f519877e` |
+| `greekocr/glyphs/orientation.py` | `5abebf4d70f3bb2a6e325cf15391543748a7e20ed8c6b2d169eb59a4503ec9ec` | `5abebf4d70f3bb2a6e325cf15391543748a7e20ed8c6b2d169eb59a4503ec9ec` |
+| `greekocr/glyphs/orientation_guides.py` | `a180f07936ebff21d6b548c329ed2c3697a86696c5fd61a15bc471b3fe4338e5` | `a180f07936ebff21d6b548c329ed2c3697a86696c5fd61a15bc471b3fe4338e5` |
+| `greekocr/glyphs/orientation_regions.py` | `021f24744a48e5ca63d45ca4e624f307e8ab90ffe02b7f3ecbaac06b2e6f71a1` | `021f24744a48e5ca63d45ca4e624f307e8ab90ffe02b7f3ecbaac06b2e6f71a1` |
+| `greekocr/glyphs/oriented_page.py` | `59d733b8f8a855911caffb226c0e45fe51110fa7b44a47a0caea735c2ce79dfe` | `59d733b8f8a855911caffb226c0e45fe51110fa7b44a47a0caea735c2ce79dfe` |
+| `greekocr/glyphs/page_font.py` | `edfb5484f15af62f7bbcad91bec9524e29fc411ad15dde2b12782cc4901d1060` | `edfb5484f15af62f7bbcad91bec9524e29fc411ad15dde2b12782cc4901d1060` |
+| `greekocr/glyphs/page_lines.py` | `7aad8a99997136970d4394615cc1d1550efff887e8fe2787db5ed4dad5b1a674` | `7aad8a99997136970d4394615cc1d1550efff887e8fe2787db5ed4dad5b1a674` |
+| `greekocr/glyphs/page_text_lines.py` | `00bcb968c32942f6d6aee63f7d23b097c6a2df5b2effbb7e645d7124b0ed5bc8` | `00bcb968c32942f6d6aee63f7d23b097c6a2df5b2effbb7e645d7124b0ed5bc8` |
+| `greekocr/glyphs/pixel_segments.py` | `1ac994e4dc26ffb58c110978294f128586153a792c239cb8faee9a4b230757cd` | `1ac994e4dc26ffb58c110978294f128586153a792c239cb8faee9a4b230757cd` |
+| `greekocr/glyphs/readability.py` | `f506cafb7d26e5d658599eb27b234b0ee9d802440f55a3f233db110d8b747c59` | `f506cafb7d26e5d658599eb27b234b0ee9d802440f55a3f233db110d8b747c59` |
+| `greekocr/glyphs/recut.py` | `6da0255c3854448e991f110711fea4d2cd9f1202ffdcc36bb2c3485dc72ac01b` | `6da0255c3854448e991f110711fea4d2cd9f1202ffdcc36bb2c3485dc72ac01b` |
+| `greekocr/glyphs/report.py` | `cd1bd5732b94448e19fef432e70fbb3cfb9c09757aab16a0383a9308cb21014d` | `cd1bd5732b94448e19fef432e70fbb3cfb9c09757aab16a0383a9308cb21014d` |
+| `greekocr/glyphs/statistics.py` | `9cf06d390c230d207fbe845473b7b28e1e6905008102e6004b4c6eb5dd7e649b` | `9cf06d390c230d207fbe845473b7b28e1e6905008102e6004b4c6eb5dd7e649b` |
+| `greekocr/glyphs/synthetic.py` | `3a58a763877d2d1b66fda9e44c16af842cc957b75ed7392e07087981683f32a3` | `3a58a763877d2d1b66fda9e44c16af842cc957b75ed7392e07087981683f32a3` |
+| `greekocr/glyphs/table_lines.py` | `4055cb32eb96e598479731f46db4ea80704b8ea73ee10afbaa352d810a4d4fd1` | `4055cb32eb96e598479731f46db4ea80704b8ea73ee10afbaa352d810a4d4fd1` |
+| `greekocr/harvest/__init__.py` | `c11c894269bb72dd108647972f8e856d1233cee1719ae5296b12c7b1b18add89` | `c11c894269bb72dd108647972f8e856d1233cee1719ae5296b12c7b1b18add89` |
+| `greekocr/harvest/admission.py` | `e32ba0429908bc405e0b2c2bb26d97cdec5f923733d708deaea018b65cb90a50` | `e32ba0429908bc405e0b2c2bb26d97cdec5f923733d708deaea018b65cb90a50` |
+| `greekocr/harvest/cli.py` | `a6a16e1bcdd68d9fcbeb1f5cc5f7c02d934acd12eb6dfc08686e898322737fb9` | `a6a16e1bcdd68d9fcbeb1f5cc5f7c02d934acd12eb6dfc08686e898322737fb9` |
+| `greekocr/harvest/collection.py` | `a3c3da8e6f8bf3ed5014256910d88b0c7dc97efef7fb8960ed950ac11a6ea186` | `a3c3da8e6f8bf3ed5014256910d88b0c7dc97efef7fb8960ed950ac11a6ea186` |
+| `greekocr/harvest/core.py` | `f5d67dd37883f09048af71451386b4babe7c361a64dff488fcefd3eff9881beb` | `f5d67dd37883f09048af71451386b4babe7c361a64dff488fcefd3eff9881beb` |
+| `greekocr/harvest/cyrillic.py` | `cd72d8fb3e2dabe14086f4a1f4e586717ae19cd2989365a223800f9c70f6639b` | `cd72d8fb3e2dabe14086f4a1f4e586717ae19cd2989365a223800f9c70f6639b` |
+| `greekocr/harvest/mixed.py` | `bf0016a126ca39d8792d620f8a1a4f5df6c6ab9cfb0217e4463b916c8bf82696` | `bf0016a126ca39d8792d620f8a1a4f5df6c6ab9cfb0217e4463b916c8bf82696` |
+| `greekocr/harvest/montage.py` | `cd90daf20c02f856954abe7d4222b16c85f24b1f28933c637f7c2bf509e4eff5` | `cd90daf20c02f856954abe7d4222b16c85f24b1f28933c637f7c2bf509e4eff5` |
+| `greekocr/harvest/montage_controls.py` | `d74f2c6bda8324f46fb73cb66aafaea2773495bfd436571a6e4792d6a5833179` | `d74f2c6bda8324f46fb73cb66aafaea2773495bfd436571a6e4792d6a5833179` |
+| `greekocr/harvest/openarchives.py` | `96995ff0aadae5085f7b8e835b5f91b5e44589f235579877319d71ecb9ec3f2b` | `96995ff0aadae5085f7b8e835b5f91b5e44589f235579877319d71ecb9ec3f2b` |
+| `greekocr/harvest/page_reads.py` | `964e7d2dbaa71ba6a07a8766ca4d01e7a42b6543a020f0674e5acec69d81e6ec` | `964e7d2dbaa71ba6a07a8766ca4d01e7a42b6543a020f0674e5acec69d81e6ec` |
+| `greekocr/harvest/parliament.py` | `767cde39ce54db410a6166b4386fdc44668bfe5a2ab476d54c6455d129b1325d` | `767cde39ce54db410a6166b4386fdc44668bfe5a2ab476d54c6455d129b1325d` |
+| `greekocr/harvest/parliament_geometry.py` | `ad544b9b74cafb9b1dbaecc158d0bd6c9ab6c09dd8a7796975e3393763a68cbe` | `ad544b9b74cafb9b1dbaecc158d0bd6c9ab6c09dd8a7796975e3393763a68cbe` |
+| `greekocr/harvest/parliament_http.py` | `855f0e1494bfa30c8bd1c827c6149efedb4ad90263af2a2c8be03e2f7e863156` | `855f0e1494bfa30c8bd1c827c6149efedb4ad90263af2a2c8be03e2f7e863156` |
+| `greekocr/harvest/parliament_provenance.py` | `b246388c24c76e5f87c55486ed32ca711e2e0990d70e5a0f0761b318a1d25473` | `b246388c24c76e5f87c55486ed32ca711e2e0990d70e5a0f0761b318a1d25473` |
+| `greekocr/harvest/pipeline.py` | `ce8716fdfe4636c9b0fc4e74de6e907ac52616e982f82591f23f1f116ac9d5c7` | `ce8716fdfe4636c9b0fc4e74de6e907ac52616e982f82591f23f1f116ac9d5c7` |
+| `greekocr/harvest/readers.py` | `04fb8db3058079c0eb2fee4f908ddad55ca8e48f6dd2d4994b20b57fd4972755` | `04fb8db3058079c0eb2fee4f908ddad55ca8e48f6dd2d4994b20b57fd4972755` |
+| `greekocr/harvest/regate.py` | `cc0c267dda733caa8c800c13c6cde3bab9b83f1dd5d00fcb24b32f4a189728c4` | `cc0c267dda733caa8c800c13c6cde3bab9b83f1dd5d00fcb24b32f4a189728c4` |
+| `greekocr/harvest/report.py` | `c0e4df776725cb1b620a01031cfcfc0ef1802f92cf5be07068f7e8cdb9378a03` | `c0e4df776725cb1b620a01031cfcfc0ef1802f92cf5be07068f7e8cdb9378a03` |
+| `greekocr/harvest/round1.py` | `858a92faa12c70b9cfbcbd28e03b6ca010221e9a2a97d480abaa54d13c5835b7` | `858a92faa12c70b9cfbcbd28e03b6ca010221e9a2a97d480abaa54d13c5835b7` |
+| `greekocr/harvest/round1_reads.py` | `c2295f288eca872a81eab9be40c0132de2b83e809e8fcd253896f22e33d1bca4` | `c2295f288eca872a81eab9be40c0132de2b83e809e8fcd253896f22e33d1bca4` |
+| `greekocr/harvest/round1_rescue.py` | `da7d6684aeb0325b097404a5021711545a0683d81e694e4f64a9cf69642a0b60` | `da7d6684aeb0325b097404a5021711545a0683d81e694e4f64a9cf69642a0b60` |
+| `greekocr/harvest/wikisource.py` | `278506ec7ba191dae9f426fc2e159a0f14ba86069631ef372011763a1e6de8aa` | `278506ec7ba191dae9f426fc2e159a0f14ba86069631ef372011763a1e6de8aa` |
+| `greekocr/labelfix/__init__.py` | `17211c5aa6cdac87c2f59503e30a1126806d4f2ff0a4799a8fada9a1bce25105` | `17211c5aa6cdac87c2f59503e30a1126806d4f2ff0a4799a8fada9a1bce25105` |
+| `greekocr/labelfix/build_lexicon.py` | `2b970cddf7c6904e3e27fe3ce6dc66d2e2a97a65b8dce991e1529a014af55e1f` | `2b970cddf7c6904e3e27fe3ce6dc66d2e2a97a65b8dce991e1529a014af55e1f` |
+| `greekocr/labelfix/candidates.py` | `3b2629f3d67047f751db79368d89e4cf4c9103ee4cc33137b172814ed0293b19` | `3b2629f3d67047f751db79368d89e4cf4c9103ee4cc33137b172814ed0293b19` |
+| `greekocr/labelfix/case.py` | `5769a9b583d16c985b61e1d07dc272cd859e3ffbbb73ef3d39539342ef9cb539` | `5769a9b583d16c985b61e1d07dc272cd859e3ffbbb73ef3d39539342ef9cb539` |
+| `greekocr/labelfix/constraints.py` | `cb543bc0ffd4b78ce75c623a93fccdc5b9aaf55b0261ca0101ba3fbac0363cb3` | `cb543bc0ffd4b78ce75c623a93fccdc5b9aaf55b0261ca0101ba3fbac0363cb3` |
+| `greekocr/labelfix/ctc_align.py` | `3ecb1a208918fdc33b897c00c1848456a9480946a17fb88f7d9f5f400a646068` | `3ecb1a208918fdc33b897c00c1848456a9480946a17fb88f7d9f5f400a646068` |
+| `greekocr/labelfix/deck.py` | `d8913e33a5252905c8a6863e9a547fd0899ae70e522cc6ab88447b6a3a040610` | `d8913e33a5252905c8a6863e9a547fd0899ae70e522cc6ab88447b6a3a040610` |
+| `greekocr/labelfix/deck_serve.py` | `c9ce3e4f8001757688ec1b6c1775eb9ac326d1468293d14d76e27a087090cc70` | `c9ce3e4f8001757688ec1b6c1775eb9ac326d1468293d14d76e27a087090cc70` |
+| `greekocr/labelfix/ingest_decisions.py` | `a6800048624c8c7ad2dadc8ffb0e25650d33276b23a7271f8ba00964f79a52a9` | `a6800048624c8c7ad2dadc8ffb0e25650d33276b23a7271f8ba00964f79a52a9` |
+| `greekocr/labelfix/ink.py` | `9be9e3ef8b2d568de0ba521d59d7f4498184b56c053366d8094f24b6c9e47998` | `9be9e3ef8b2d568de0ba521d59d7f4498184b56c053366d8094f24b6c9e47998` |
+| `greekocr/labelfix/lexicon.py` | `7e4abee13c6059b5c1865604210840f9eff7a784a26a8cc2d26a336356fc2b39` | `7e4abee13c6059b5c1865604210840f9eff7a784a26a8cc2d26a336356fc2b39` |
+| `greekocr/labelfix/linemetric.py` | `63b27b1b8a024200794437a45ecb36191bcb07765133d85447895ce85a2c0059` | `63b27b1b8a024200794437a45ecb36191bcb07765133d85447895ce85a2c0059` |
+| `greekocr/labelfix/markshape.py` | `ac050bb14df059d4c8b55dea86cb333dca14b0e6c2d54164d7dbbc30ba1115e5` | `ac050bb14df059d4c8b55dea86cb333dca14b0e6c2d54164d7dbbc30ba1115e5` |
+| `greekocr/labelfix/markshape_train.py` | `5e46ce79b69ad3bcc79d2fc382d9defd941d5b6641c7df47d6cf75a996afd638` | `5e46ce79b69ad3bcc79d2fc382d9defd941d5b6641c7df47d6cf75a996afd638` |
+| `greekocr/labelfix/owner_slots.py` | `0323dc8b8ef282a74e3a37bda4330dd01916626de3f519cab89be21d03175804` | `0323dc8b8ef282a74e3a37bda4330dd01916626de3f519cab89be21d03175804` |
+| `greekocr/labelfix/pull_firefox.py` | `61129f54d097368d6f98b80b47657b042d52e809a2b6722c3792a3ebd8124904` | `61129f54d097368d6f98b80b47657b042d52e809a2b6722c3792a3ebd8124904` |
+| `greekocr/labelfix/reach.py` | `8801be88357d2361a8fa4c2199f734570ef083be0c7e2d43eeb008bcdc5459bc` | `8801be88357d2361a8fa4c2199f734570ef083be0c7e2d43eeb008bcdc5459bc` |
+| `greekocr/labelfix/reading.py` | `6b2838a31e17960a03b2080bc7b23a68d8b58995490ca22e7761406ab8941518` | `6b2838a31e17960a03b2080bc7b23a68d8b58995490ca22e7761406ab8941518` |
+| `greekocr/labelfix/release_gate.py` | `9ef1d6467229e86c9464f428716c792f2a6fc4ffa1e709b798df82c504120408` | `9ef1d6467229e86c9464f428716c792f2a6fc4ffa1e709b798df82c504120408` |
+| `greekocr/labelfix/rules.py` | `ba5b9cdd244967baaa9f8776393cdaa7b56d2132009d890eca3f32243f318104` | `ba5b9cdd244967baaa9f8776393cdaa7b56d2132009d890eca3f32243f318104` |
+| `greekocr/labelfix/sample.py` | `ca3a32abc4318c9760e220e7722a184332debb218c87317b013848b595f44df0` | `ca3a32abc4318c9760e220e7722a184332debb218c87317b013848b595f44df0` |
+| `greekocr/labelfix/segmentation.py` | `60fbf9a0252f78326ebad11b9451b722dbee666cd05daa7e3c040dccdbb789fe` | `60fbf9a0252f78326ebad11b9451b722dbee666cd05daa7e3c040dccdbb789fe` |
+| `greekocr/labelfix/sheet.py` | `0c95d461a01bf6c029b5b873caf0f441f7fe4c0632c476a387093c696eb49ac4` | `0c95d461a01bf6c029b5b873caf0f441f7fe4c0632c476a387093c696eb49ac4` |
+| `greekocr/labelfix/spellcheck_validate.py` | `b68c3317eadaf033643d8882bff54d247a204fae4c78c5474a8cf358cea09c80` | `b68c3317eadaf033643d8882bff54d247a204fae4c78c5474a8cf358cea09c80` |
+| `greekocr/labelfix/spellink.py` | `cf5bc00b00ec7a7fb023291b42294b8139c1aa799c88a2b91357641e805d07ea` | `cf5bc00b00ec7a7fb023291b42294b8139c1aa799c88a2b91357641e805d07ea` |
+| `greekocr/labelfix/tei_extract.py` | `b32e5bfd31724b4d07a51158f82b1678b435ffc2eb7372485a142eef0cc9efa3` | `b32e5bfd31724b4d07a51158f82b1678b435ffc2eb7372485a142eef0cc9efa3` |
+| `greekocr/labelfix/text.py` | `b2fbe9cf6d8c97d1f8e06e149bfe4e11cc58b9b4f2bb323bddc8afce2ca52c92` | `b2fbe9cf6d8c97d1f8e06e149bfe4e11cc58b9b4f2bb323bddc8afce2ca52c92` |
+| `greekocr/labelfix/textstage.py` | `21c9c29f2d2b9d20c8524cd8df095b49f91ae4e87220897fc1a416f01d877649` | `21c9c29f2d2b9d20c8524cd8df095b49f91ae4e87220897fc1a416f01d877649` |
+| `greekocr/labelfix/toolkit_geometry.py` | `30d5ce9321242d493f9e8d4453f94393477b39b931f054d1a2d1007a522a173e` | `30d5ce9321242d493f9e8d4453f94393477b39b931f054d1a2d1007a522a173e` |
+| `greekocr/labelfix/validate.py` | `b23416e12970907010ba6f921974e8d8dc9b2afae7ef4bac000a06a83a1f612c` | `b23416e12970907010ba6f921974e8d8dc9b2afae7ef4bac000a06a83a1f612c` |
+| `greekocr/ops/__init__.py` | `1a6055eb3b6c41a5711a034d1667e476751e6dca471d4eb5fad560c507ce8acf` | `1a6055eb3b6c41a5711a034d1667e476751e6dca471d4eb5fad560c507ce8acf` |
+| `greekocr/ops/rate_limit.py` | `68c999fe30c6387498f836af9db872791182cb439a922398188b79b5acdcee6d` | `68c999fe30c6387498f836af9db872791182cb439a922398188b79b5acdcee6d` |
+| `greekocr/ops/receipts.py` | `adcbe166f5203f7e2b6c96084a861ffda6dd13020889d0680287b2368d9eee81` | `adcbe166f5203f7e2b6c96084a861ffda6dd13020889d0680287b2368d9eee81` |
+| `greekocr/ops/secrets.py` | `34b8e661d9c4950cae5429215cac0ed888f5f7d8eeff9a41dee5f7dd68011172` | `34b8e661d9c4950cae5429215cac0ed888f5f7d8eeff9a41dee5f7dd68011172` |
+| `greekocr/ops/watch.py` | `23dfa73b6a91ce3b87d3dfce2f5c89133c1201a10ce407dbf0418babd88522fe` | `23dfa73b6a91ce3b87d3dfce2f5c89133c1201a10ce407dbf0418babd88522fe` |
+| `greekocr/pages/__init__.py` | `e8640ddaccf0600d79e62b16cdd803ce1a515493e89f2df3464cfad2dff9001b` | `e8640ddaccf0600d79e62b16cdd803ce1a515493e89f2df3464cfad2dff9001b` |
+| `greekocr/pages/api.py` | `79e3476562173b0cfa0c396900319dbb70483142f36cc5c9f8a6407631bd7f0c` | `79e3476562173b0cfa0c396900319dbb70483142f36cc5c9f8a6407631bd7f0c` |
+| `greekocr/pages/boundaries.py` | `5662da5e4692fdc78064dab5afdc58c248d89ce8382520f7f93253fedfd9380e` | `5662da5e4692fdc78064dab5afdc58c248d89ce8382520f7f93253fedfd9380e` |
+| `greekocr/pages/cli.py` | `3dd4af1965d78e2b1a6f89ac03b06ac8c9133d6b7f5928504b95f310d23a8dff` | `3dd4af1965d78e2b1a6f89ac03b06ac8c9133d6b7f5928504b95f310d23a8dff` |
+| `greekocr/pages/delivery.py` | `46f990c48b4856507e730bec3998a425e46930d448702869e0d34e6b20895b05` | `46f990c48b4856507e730bec3998a425e46930d448702869e0d34e6b20895b05` |
+| `greekocr/pages/font.py` | `c9a312cf67efb101cc814268caf0eca07017eda532b01e6b1dbe66c2bcf35aaf` | `c9a312cf67efb101cc814268caf0eca07017eda532b01e6b1dbe66c2bcf35aaf` |
+| `greekocr/pages/layout.py` | `3557a437236d39d02a4f7841ea73a7ba748f28a726b49a99e6a549b75fd42a78` | `3557a437236d39d02a4f7841ea73a7ba748f28a726b49a99e6a549b75fd42a78` |
+| `greekocr/pages/lines.py` | `eb89e32df5aeb61608bba7d8023c1564c7be17fa40d5d4b694df0a7b469d6f5f` | `eb89e32df5aeb61608bba7d8023c1564c7be17fa40d5d4b694df0a7b469d6f5f` |
+| `greekocr/pages/options.py` | `ee072f342c0432912033f6de06e2f169ba014452a14db8e2357c424034cf1db4` | `ee072f342c0432912033f6de06e2f169ba014452a14db8e2357c424034cf1db4` |
+| `greekocr/pages/outputs.py` | `543c45483704200a5055475bc40dc076ee59382e28dde3bdc5cbb655261de53c` | `543c45483704200a5055475bc40dc076ee59382e28dde3bdc5cbb655261de53c` |
+| `greekocr/pages/pixels.py` | `ee29dc5be960b8a010095353eccb1d620568dec4a56b3c502cf5bc722622b913` | `ee29dc5be960b8a010095353eccb1d620568dec4a56b3c502cf5bc722622b913` |
+| `greekocr/pages/provenance.py` | `d3713e45985bfb16c45f7a967ebb5d3679f52f347651f60d2e73559b5e746fd4` | `d3713e45985bfb16c45f7a967ebb5d3679f52f347651f60d2e73559b5e746fd4` |
+| `greekocr/pages/records.py` | `5a4babab377f526398417f4ed0248c613248a7ed1d2e6c0ceda3e2fca57f96b2` | `5a4babab377f526398417f4ed0248c613248a7ed1d2e6c0ceda3e2fca57f96b2` |
+| `greekocr/pages/render.py` | `f6dc9b31f3bb5c792196adcb026a089a5deaa020740629fe9691295f7dd399de` | `f6dc9b31f3bb5c792196adcb026a089a5deaa020740629fe9691295f7dd399de` |
+| `greekocr/pages/statistics.py` | `4bbdbf84e7af92f24ad5c1144c4bf783b0429b5edbf4939a9c50ca2c8a72468c` | `4bbdbf84e7af92f24ad5c1144c4bf783b0429b5edbf4939a9c50ca2c8a72468c` |
+| `greekocr/pages/structure.py` | `bee619788491a8d76dc6b29f13da0496cd142b85d98e97ce918eb661371b61b4` | `bee619788491a8d76dc6b29f13da0496cd142b85d98e97ce918eb661371b61b4` |
+| `greekocr/pages/tables.py` | `ef6b8f96f0c9c9faf3fc29289adb006c43bda27080698b202c9c5fbbd56bc020` | `ef6b8f96f0c9c9faf3fc29289adb006c43bda27080698b202c9c5fbbd56bc020` |
+| `greekocr/pages/torch_prototypes.py` | `b066f88c8473c1883dec1a51c3b2f7e3136799f2b3b4d1e938af74c7de62240b` | `b066f88c8473c1883dec1a51c3b2f7e3136799f2b3b4d1e938af74c7de62240b` |
+| `greekocr/readers/__init__.py` | `f6b9b37a697adc3c18109760fc9de12deaa2a187f5219eb4698d6976d1eb45bf` | `f6b9b37a697adc3c18109760fc9de12deaa2a187f5219eb4698d6976d1eb45bf` |
+| `greekocr/readers/cllg.py` | `b28e368ba2da7d9986e55c6c40f18cb10d7113f2f99d1109fa9608c65d699d1c` | `b28e368ba2da7d9986e55c6c40f18cb10d7113f2f99d1109fa9608c65d699d1c` |
+| `greekocr/readers/kalchas.py` | `509d304453b515defd39a7b3dbd64e679c07eb223b3bb227a1cbb64db93afec9` | `509d304453b515defd39a7b3dbd64e679c07eb223b3bb227a1cbb64db93afec9` |
+| `greekocr/readers/ours.py` | `e073b644152f860821c003e2959f8724040475f4dbecd88a9181a996de17d92c` | `e073b644152f860821c003e2959f8724040475f4dbecd88a9181a996de17d92c` |
+| `greekocr/readers/paddle_r01.py` | `64d80d08e93fdcb134fffa99ef1a7e1237110ec96354cc25d9d0fb700337a178` | `64d80d08e93fdcb134fffa99ef1a7e1237110ec96354cc25d9d0fb700337a178` |
+| `greekocr/readers/services/__init__.py` | `246efb09bdd8fcbedcf2bd9d113f06644497ffed111d1f74f0a8eeef87c5af19` | `246efb09bdd8fcbedcf2bd9d113f06644497ffed111d1f74f0a8eeef87c5af19` |
+| `greekocr/readers/services/docai_driver.py` | `093db86d09895bdb7faf894fcbcfbe73289f48127f20f98e3e97a6e5476cf19d` | `093db86d09895bdb7faf894fcbcfbe73289f48127f20f98e3e97a6e5476cf19d` |
+| `greekocr/readers/services/docai_manifest.py` | `62a526d72e2d288865d2f49478f448b5c7c22ce94dd5bb1dcac6e7a1beb9734b` | `62a526d72e2d288865d2f49478f448b5c7c22ce94dd5bb1dcac6e7a1beb9734b` |
+| `greekocr/readers/services/google_docai.py` | `a392b9aa8186eb6a9e3c1088b616c15a6142dc71711c96fed7949e940b32c79d` | `a392b9aa8186eb6a9e3c1088b616c15a6142dc71711c96fed7949e940b32c79d` |
+| `greekocr/readers/services/google_vision.py` | `0ca5ac31acbec9243b23ff9b04645d979294541933b2b065406f5ed7dccbfa27` | `0ca5ac31acbec9243b23ff9b04645d979294541933b2b065406f5ed7dccbfa27` |
+| `greekocr/readers/services/transkribus.py` | `9764a7e05d03240926b5a208bb1bcc9ddcab20c24219b9a98cb505eae949b928` | `9764a7e05d03240926b5a208bb1bcc9ddcab20c24219b9a98cb505eae949b928` |
+| `greekocr/real/__init__.py` | `efc02e0e43bdff75b22977c0704c2cd998b21de0dcbeb19c58dfac7f70599f7a` | `efc02e0e43bdff75b22977c0704c2cd998b21de0dcbeb19c58dfac7f70599f7a` |
+| `greekocr/real/adjudicate.py` | `9d9eecb065e65edc41315bd99a7bc22d31403521b97e2b7a2f1a72faf049b750` | `9d9eecb065e65edc41315bd99a7bc22d31403521b97e2b7a2f1a72faf049b750` |
+| `greekocr/real/extract.py` | `ba8ebc95279cb23ca33164d8c6780415ff02806a2fc81bfc4917d9b074914321` | `ba8ebc95279cb23ca33164d8c6780415ff02806a2fc81bfc4917d9b074914321` |
+| `greekocr/real/geometry.py` | `a687bd800a2770e4c183798170d7d4916f1b70c6acfbbf200ad1d91fe6174493` | `a687bd800a2770e4c183798170d7d4916f1b70c6acfbbf200ad1d91fe6174493` |
+| `greekocr/real/geometry_evaluate.py` | `db574557d01ab1d8abc2d63fcc1a5afed148ab5a01554abfa9dfb7e9eda021b3` | `db574557d01ab1d8abc2d63fcc1a5afed148ab5a01554abfa9dfb7e9eda021b3` |
+| `greekocr/real/geometry_measure.py` | `92f9ee6e3dfdb0604b25e49a05807bf7edb9f2407f30652da0f557f2789c87ec` | `92f9ee6e3dfdb0604b25e49a05807bf7edb9f2407f30652da0f557f2789c87ec` |
+| `greekocr/real/importers.py` | `afba4b87ee463a8fceef44076c606171f36b2d933d1c4b4f7cc706ecc8916160` | `afba4b87ee463a8fceef44076c606171f36b2d933d1c4b4f7cc706ecc8916160` |
+| `greekocr/real/partition.py` | `116e040da5991ae845465e6db71301d95d9f18367aa8c3287b5f490c4aec1c5d` | `116e040da5991ae845465e6db71301d95d9f18367aa8c3287b5f490c4aec1c5d` |
+| `greekocr/real/sources/__init__.py` | `3fc073df79fabb2db87a1f8cb2a8e19c7aaa5667a3d1c49dbe90ae09a2e690ac` | `3fc073df79fabb2db87a1f8cb2a8e19c7aaa5667a3d1c49dbe90ae09a2e690ac` |
+| `greekocr/real/sources/_runner.py` | `e69e5cd8fea9598fd4a095876120bce9a55d4b38ba1433b58fe9fe26ea3044e0` | `e69e5cd8fea9598fd4a095876120bce9a55d4b38ba1433b58fe9fe26ea3044e0` |
+| `greekocr/real/sources/discovery.py` | `2e3d614ec9dc585f1b111d098d62f41ab6c29f20d18674f8372f764dfd0d02e3` | `2e3d614ec9dc585f1b111d098d62f41ab6c29f20d18674f8372f764dfd0d02e3` |
+| `greekocr/real/sources/parliament.py` | `34ecd4d3f44db5ec616958ef3a592f2a66cbdbbb98f55b79b98da5a42c195f73` | `34ecd4d3f44db5ec616958ef3a592f2a66cbdbbb98f55b79b98da5a42c195f73` |
+| `greekocr/real/sources/web_render.py` | `b788a9f6176be2c83deef9bc3236df880a82cd34f5eabd02929d243d85f7f647` | `b788a9f6176be2c83deef9bc3236df880a82cd34f5eabd02929d243d85f7f647` |
+| `greekocr/real/sources/web_sources.py` | `12a91d1301218fcd2781bf681762c1413a8a7f7cedfed543c1a3ceae7630611a` | `12a91d1301218fcd2781bf681762c1413a8a7f7cedfed543c1a3ceae7630611a` |
+| `greekocr/score/__init__.py` | `aebd1c9e2e69c62de448e71fcbc3d8707ef241c91a976c7804a39c0fb3146da0` | `aebd1c9e2e69c62de448e71fcbc3d8707ef241c91a976c7804a39c0fb3146da0` |
+| `greekocr/synth/__init__.py` | `59a48bd6dfe0ec6c336d1a93e78f957c9944971c5b91197251d98e0923c89438` | `59a48bd6dfe0ec6c336d1a93e78f957c9944971c5b91197251d98e0923c89438` |
+| `greekocr/types.py` | `14ff5e23708af1b739a7130f9cae1cb559a5debebde3bf9ab4851cae5fe3e147` | `14ff5e23708af1b739a7130f9cae1cb559a5debebde3bf9ab4851cae5fe3e147` |
+| `greekocr/verify/__init__.py` | `6f92e083b67119141b8ab7d384b7eaad3bcc912b6e60376835d190e2db2b0345` | `6f92e083b67119141b8ab7d384b7eaad3bcc912b6e60376835d190e2db2b0345` |
+| `greekocr/verify/calibration.py` | `b305d9d507cc340d49e94dbd30a3be6019b05b1a4e97f01a496dfbeb6ac2cd11` | `b305d9d507cc340d49e94dbd30a3be6019b05b1a4e97f01a496dfbeb6ac2cd11` |
+| `greekocr/verify/cli.py` | `d194b48e654ea7b97c58e825f77444c7abe78f27d2d2cdccd6ffe5331e15565d` | `d194b48e654ea7b97c58e825f77444c7abe78f27d2d2cdccd6ffe5331e15565d` |
+| `greekocr/verify/images.py` | `526914d3e7f5ad4dfb8f95818b58cd685c9cb877bf9f2dd412ac7770e922a5a3` | `526914d3e7f5ad4dfb8f95818b58cd685c9cb877bf9f2dd412ac7770e922a5a3` |
+| `greekocr/verify/judges.py` | `3b7e527fcca9cabacaf8f322d89c692882e3225b7da7d962e76bfbb6357864ee` | `3b7e527fcca9cabacaf8f322d89c692882e3225b7da7d962e76bfbb6357864ee` |
+| `greekocr/verify/text.py` | `0cc5e20a7e2ccc693f92e8ca61c70bc0c095ad9a8989c0afc0840450ab87f314` | `0cc5e20a7e2ccc693f92e8ca61c70bc0c095ad9a8989c0afc0840450ab87f314` |
+| `greekocr/warmstart/__init__.py` | `99268f6a483baa5a8f76ec4d7064f7f131e24b4e1272b9ee7e5fca8dceeefc39` | `99268f6a483baa5a8f76ec4d7064f7f131e24b4e1272b9ee7e5fca8dceeefc39` |
+| `scripts/labelfix/agreement_mode.py` | `4a0651a81c82876478846737030412c5f0ac76348c3f14714535de0cf54c7035` | `4a0651a81c82876478846737030412c5f0ac76348c3f14714535de0cf54c7035` |
+| `scripts/labelfix/agreement_mode_historical.py` | `72748328604764e379080d35ec0c51d8cb94bdbabe9eaa82d117a3d8d1a05a2d` | `72748328604764e379080d35ec0c51d8cb94bdbabe9eaa82d117a3d8d1a05a2d` |
+| `scripts/labelfix/box_regression.py` | `2e04069262af8c09e63f3613834e688399b9e998a900700b1681b8a1a4fe82c2` | `2e04069262af8c09e63f3613834e688399b9e998a900700b1681b8a1a4fe82c2` |
+| `scripts/labelfix/clariden/c1_common.py` | `7716cd905b923b87e3034b4f29f727fb1b358a647fd14299ad0af0fdd3c6422d` | `7716cd905b923b87e3034b4f29f727fb1b358a647fd14299ad0af0fdd3c6422d` |
+| `scripts/labelfix/clariden/c1_inventory.py` | `943240a10080ef599e5d2fb9ac6258632bf142aa7be062bc36ea5e82eedf49f2` | `943240a10080ef599e5d2fb9ac6258632bf142aa7be062bc36ea5e82eedf49f2` |
+| `scripts/labelfix/clariden/c1_job.sbatch` | `1648ba3ba2dafa91d9efb5a942b53fe29aad55562b340dbfc97becbeb2c16935` | `1648ba3ba2dafa91d9efb5a942b53fe29aad55562b340dbfc97becbeb2c16935` |
+| `scripts/labelfix/clariden/c1_run.py` | `45c8ad405ab43c6491dd0b61e2cb8b45940bef8ce643e4b2d3180d93ffe5aebe` | `45c8ad405ab43c6491dd0b61e2cb8b45940bef8ce643e4b2d3180d93ffe5aebe` |
+| `scripts/labelfix/clariden/c1_select.py` | `a19fe5007edcbf3b533452c1bf61f0a3a33c48459ce893bfb32bed0618579295` | `a19fe5007edcbf3b533452c1bf61f0a3a33c48459ce893bfb32bed0618579295` |
+| `scripts/labelfix/clariden/l1_common.py` | `2778235994afaf31cd7587c08223c9b2a5d20ff6c6adfca9f37383062895af66` | `2778235994afaf31cd7587c08223c9b2a5d20ff6c6adfca9f37383062895af66` |
+| `scripts/labelfix/clariden/l1_detect.py` | `e03915ea58845bca68d4092f42304002bd913e495ffe182757eaca005a3582ce` | `e03915ea58845bca68d4092f42304002bd913e495ffe182757eaca005a3582ce` |
+| `scripts/labelfix/clariden/l1_infer.py` | `67ccc5906c8320e45ec5d2670dc9661422b46a097a1ba89e548881d0a930a9b8` | `67ccc5906c8320e45ec5d2670dc9661422b46a097a1ba89e548881d0a930a9b8` |
+| `scripts/labelfix/clariden/l1e_job.sbatch` | `f48b847c044ac8374f4f8a16e1f8956f306cca22bc513a28c7f3aa5761d06736` | `f48b847c044ac8374f4f8a16e1f8956f306cca22bc513a28c7f3aa5761d06736` |
+| `scripts/labelfix/clariden/l1e_measure.py` | `011cbe122c62dd743bb5fbf57b305e2b23db1bdd7aed5ae89137f479a8118824` | `011cbe122c62dd743bb5fbf57b305e2b23db1bdd7aed5ae89137f479a8118824` |
+| `scripts/labelfix/clariden/l1e_run.py` | `ce7879bdef7dfb0f19b3d40b72685d758dcdba03dffb522f01a079a2bbc02558` | `ce7879bdef7dfb0f19b3d40b72685d758dcdba03dffb522f01a079a2bbc02558` |
+| `scripts/labelfix/clariden/l1e_windows.py` | `5cbf512f594b5a81bb2e0717f9f11783f44c437a6b84fb110c4308a34e550810` | `5cbf512f594b5a81bb2e0717f9f11783f44c437a6b84fb110c4308a34e550810` |
+| `scripts/labelfix/clariden/l1r_recompose.py` | `4de0eee56d61a974a33df699cfa6b037af208021578ef6182597ca34cbaa76a0` | `4de0eee56d61a974a33df699cfa6b037af208021578ef6182597ca34cbaa76a0` |
+| `scripts/labelfix/clariden/r1_common.py` | `45aff9154f33a193f55c494e0473caad8eed3236bbeba564171a841a0a047cb6` | `45aff9154f33a193f55c494e0473caad8eed3236bbeba564171a841a0a047cb6` |
+| `scripts/labelfix/clariden/r1_deploy_check.py` | `2a3654dc1751be8e181a4f8cafe367656b0e6ffc8495fea572aa725e3c54a1d1` | `2a3654dc1751be8e181a4f8cafe367656b0e6ffc8495fea572aa725e3c54a1d1` |
+| `scripts/labelfix/clariden/r1_extract.py` | `e67d72a9ac792c273b56537d34a5dc07d34768322899cd61c4a4814e8dcf5f42` | `e67d72a9ac792c273b56537d34a5dc07d34768322899cd61c4a4814e8dcf5f42` |
+| `scripts/labelfix/clariden/r1_job.sbatch` | `aa486d2cd1f2373b8061c6af4b6ffb7baa76d3cb7220c6c5c7f4c212394f55b2` | `aa486d2cd1f2373b8061c6af4b6ffb7baa76d3cb7220c6c5c7f4c212394f55b2` |
+| `scripts/labelfix/clariden/r1_model.py` | `6e38deb9c26c83a3f0b2b8cdcbd0a2f349d71018bee31606d82b9d857e39f62e` | `6e38deb9c26c83a3f0b2b8cdcbd0a2f349d71018bee31606d82b9d857e39f62e` |
+| `scripts/labelfix/clariden/r1_owner.py` | `96e96047899f3b61797675f8f17887ab96a59c77174c0cd2c66ae5fdc342edf5` | `96e96047899f3b61797675f8f17887ab96a59c77174c0cd2c66ae5fdc342edf5` |
+| `scripts/labelfix/clariden/r1_pixels.py` | `ee516375fb7447720d8efbb67a1cabf05e0861f48ee1b20a192000445137d3d6` | `ee516375fb7447720d8efbb67a1cabf05e0861f48ee1b20a192000445137d3d6` |
+| `scripts/labelfix/clariden/r1_prepare.py` | `4a2fbb3c6539889f7257f7991845453eaa866acc0f0703b978a92db38ffaa3af` | `4a2fbb3c6539889f7257f7991845453eaa866acc0f0703b978a92db38ffaa3af` |
+| `scripts/labelfix/clariden/r1_run.py` | `a1c9938c766261f9d0c6f3b825c4d294f70771fcecfbffba71bcf724e38db144` | `a1c9938c766261f9d0c6f3b825c4d294f70771fcecfbffba71bcf724e38db144` |
+| `scripts/labelfix/clariden/r1_score.py` | `6c234c88d93b4f1787f8c055448fe328daf7ef86ec4b0cbc91dc3b6c93201325` | `6c234c88d93b4f1787f8c055448fe328daf7ef86ec4b0cbc91dc3b6c93201325` |
+| `scripts/labelfix/clariden/r1_train.py` | `09b8b85f445cce9047df2674a3a0d02425df2c5ca37d1bd1e01a8613fa18d9b6` | `09b8b85f445cce9047df2674a3a0d02425df2c5ca37d1bd1e01a8613fa18d9b6` |
+| `scripts/labelfix/cn1_measure.py` | `713681212ddd0d4b906a62d04e499daa4f731494222599228d0fdecf33b79f7e` | `713681212ddd0d4b906a62d04e499daa4f731494222599228d0fdecf33b79f7e` |
+| `scripts/labelfix/cn1_offline.py` | `b8577d114363e8be367d78e42aef1d4124bba60fd95c98072346cd20eabac7f1` | `b8577d114363e8be367d78e42aef1d4124bba60fd95c98072346cd20eabac7f1` |
+| `scripts/labelfix/cn1_report.py` | `dd74ea6351d5a3a50a80ed08b463c9fabd47352ad11d1dc3fc90c79b164fbc3c` | `dd74ea6351d5a3a50a80ed08b463c9fabd47352ad11d1dc3fc90c79b164fbc3c` |
+| `scripts/labelfix/k1_validate.py` | `ebb60364cd3a4e93c6720e12e231494b73e3ee5625ae71a9383e7509896af0d0` | `ebb60364cd3a4e93c6720e12e231494b73e3ee5625ae71a9383e7509896af0d0` |
+| `scripts/labelfix/m2_review.py` | `cfe04c0691e8ffa09471032aecea8f4b09c2d11b90319da3c27febb5d2d57f5a` | `cfe04c0691e8ffa09471032aecea8f4b09c2d11b90319da3c27febb5d2d57f5a` |
+| `scripts/labelfix/m2_run.py` | `8e8afc88ae9803f929e566eda39cc06fe76b80b05ffa9934ebd6433b0b27f1af` | `8e8afc88ae9803f929e566eda39cc06fe76b80b05ffa9934ebd6433b0b27f1af` |
+| `scripts/labelfix/m2_score.py` | `73fa957447c5e2ff024d02a042a75e2d661850ea350389b7c1965f64fd4cea7a` | `73fa957447c5e2ff024d02a042a75e2d661850ea350389b7c1965f64fd4cea7a` |
+| `scripts/labelfix/m2_verify.py` | `6189b17729d898c6b4285bd86afea0af5b1391a38672eabd749eda0e8d353a01` | `6189b17729d898c6b4285bd86afea0af5b1391a38672eabd749eda0e8d353a01` |
+| `scripts/labelfix/owner_implicit_adjudication_prep.py` | `3b08e5d934da82654846aeef54742ac0170f749b179bcd381697b3b6d33b054e` | `3b08e5d934da82654846aeef54742ac0170f749b179bcd381697b3b6d33b054e` |
+| `scripts/labelfix/owner_implicit_changes.py` | `2b8c5e8dbae9862331c0e3fe216ffb414ff388f209895e6d93839525aeb7850a` | `2b8c5e8dbae9862331c0e3fe216ffb414ff388f209895e6d93839525aeb7850a` |
+| `scripts/labelfix/owner_pages_build.py` | `a65ab3609b7c74b54d5895eb073e0c58c2abed9d56669370b6b358b8a57ede09` | `a65ab3609b7c74b54d5895eb073e0c58c2abed9d56669370b6b358b8a57ede09` |
+| `scripts/labelfix/owner_pages_build_combined.py` | `843701c1ab7958b476a417740b244a26379768bfb84a61adfcd403bd4e3acea8` | `843701c1ab7958b476a417740b244a26379768bfb84a61adfcd403bd4e3acea8` |
+| `scripts/labelfix/owner_reading.py` | `0915e831115c570bcdeab540e000cb840f2de8d1e80d0f78be9ba49cda6b4b2f` | `0915e831115c570bcdeab540e000cb840f2de8d1e80d0f78be9ba49cda6b4b2f` |
+| `scripts/labelfix/r1_error_types.py` | `66177f0cd18cb6638f80e1af693c97293214b19eed377fe2af3f642a4abb8507` | `66177f0cd18cb6638f80e1af693c97293214b19eed377fe2af3f642a4abb8507` |
+| `scripts/labelfix/s2_crops.py` | `647e280e8c00c61d2f687e15a1976256dd15c8ff06d22d35250377fbd3d4ea7c` | `647e280e8c00c61d2f687e15a1976256dd15c8ff06d22d35250377fbd3d4ea7c` |
+| `scripts/labelfix/s2_report.py` | `baba66e0752204bf763fdf07ca6a8985b377da179d3a27cb6c87d1fa5b0b0e87` | `baba66e0752204bf763fdf07ca6a8985b377da179d3a27cb6c87d1fa5b0b0e87` |
+| `scripts/labelfix/s2_validate.py` | `c7b442e0b1eea1fa050e59b82ce15c3e864bb0f4b338a08e6121d028cbde02d8` | `c7b442e0b1eea1fa050e59b82ce15c3e864bb0f4b338a08e6121d028cbde02d8` |
+| `scripts/labelfix/s3_pin_slots.py` | `12a6f1e3a7a252fd48a5941666735412f6f6bc18da85e142476066f0204ca430` | `12a6f1e3a7a252fd48a5941666735412f6f6bc18da85e142476066f0204ca430` |
+| `scripts/labelfix/s3_report.py` | `8ba5e0ea727e2966ff29bc89e8548dd458c44893a6b09b1e7a5d4dd445b1ade8` | `8ba5e0ea727e2966ff29bc89e8548dd458c44893a6b09b1e7a5d4dd445b1ade8` |
+| `scripts/labelfix/s3_validate.py` | `e6793e3f4e6692e132c1ed0c7079a46fa5659d497101fb0b1ffbb8daa540d89f` | `e6793e3f4e6692e132c1ed0c7079a46fa5659d497101fb0b1ffbb8daa540d89f` |
+| `scripts/labelfix/s4_report.py` | `f444a8a2784ee97338821d96073cb9fc8a6e776b2f66d67c32de3248195ca62c` | `f444a8a2784ee97338821d96073cb9fc8a6e776b2f66d67c32de3248195ca62c` |
+| `scripts/labelfix/s4_train.py` | `a1598f84057cf11e50398ab6a38479ccd8711c1efab1a1c9737160b9b6335a5a` | `a1598f84057cf11e50398ab6a38479ccd8711c1efab1a1c9737160b9b6335a5a` |
+| `scripts/labelfix/s4_validate.py` | `469cc23585bb922220f3aac5ee4b8ae15576160d95ed2fa66430c16e1cc82e12` | `469cc23585bb922220f3aac5ee4b8ae15576160d95ed2fa66430c16e1cc82e12` |
+| `scripts/labelfix/s5_case_train.py` | `aef6d1105ec20c241a2d549c4d3e41cff877ded06136a49f4fd79d9c87620db1` | `aef6d1105ec20c241a2d549c4d3e41cff877ded06136a49f4fd79d9c87620db1` |
+| `scripts/labelfix/s5_notes.py` | `4412724a5ec9ad3ac20bfdcf88fd4a9b60b7290963ef3c1229012cc80e1e8d39` | `4412724a5ec9ad3ac20bfdcf88fd4a9b60b7290963ef3c1229012cc80e1e8d39` |
+| `scripts/labelfix/s5_report.py` | `4e1e2610f7c606e557373cbaadd5eb9a0fc3386a05ec981c47861e1775a56e8a` | `4e1e2610f7c606e557373cbaadd5eb9a0fc3386a05ec981c47861e1775a56e8a` |
+| `scripts/labelfix/s5_validate.py` | `e8f64612cc2ff594308a5e2365ec79d31317501f16cac01853516519b2b21935` | `e8f64612cc2ff594308a5e2365ec79d31317501f16cac01853516519b2b21935` |
+| `scripts/labelfix/s6_notes.py` | `ee754dfd33bb625be39104f157a834e96362b4bdeb23a977f6781b767c784f47` | `ee754dfd33bb625be39104f157a834e96362b4bdeb23a977f6781b767c784f47` |
+| `scripts/labelfix/s6_report.py` | `2ccfbdf0e162bcd73b3aa630d3ffec3d71ef4d04f702cae60f2af3bb38583cb7` | `2ccfbdf0e162bcd73b3aa630d3ffec3d71ef4d04f702cae60f2af3bb38583cb7` |
+| `scripts/labelfix/s6_validate.py` | `9a46eedcf36745fb7113954628413ccb8269ce36de5b69d7818a6f3a7290bb13` | `9a46eedcf36745fb7113954628413ccb8269ce36de5b69d7818a6f3a7290bb13` |
+| `scripts/labelfix/s7_box_regression.py` | `87d0b5d04e150aadce05b2da0c90ffe9c6ff41dbae9ec3cd63b344e0f146db75` | `87d0b5d04e150aadce05b2da0c90ffe9c6ff41dbae9ec3cd63b344e0f146db75` |
+| `scripts/labelfix/s7_launch_baseline.py` | `9fbd6ece2e6268fbf7349073e5d849501b741fbc28d8712d4c39a10935b0bb20` | `9fbd6ece2e6268fbf7349073e5d849501b741fbc28d8712d4c39a10935b0bb20` |
+| `scripts/labelfix/s7_m2_replay.py` | `84008ab645fb97e910c5fcd4d34433d17a9563be7154b2e7b433974b60ed3c71` | `84008ab645fb97e910c5fcd4d34433d17a9563be7154b2e7b433974b60ed3c71` |
+| `scripts/labelfix/s7_m2_scope.py` | `1f8e7345c3232803fa023db58a72cf02e57f1b20b81cc093c2953a76dd80bb79` | `1f8e7345c3232803fa023db58a72cf02e57f1b20b81cc093c2953a76dd80bb79` |
+| `scripts/labelfix/s7_owner.py` | `4a311c5ed9b1d80318d59efeb856a033001b5fd3cddf58f4439ecfe49104f013` | `4a311c5ed9b1d80318d59efeb856a033001b5fd3cddf58f4439ecfe49104f013` |
+| `scripts/labelfix/s7_report.py` | `3c162c3213a8ad5fcb4393059ba056991653adf2c6be379a5b783db460ebb62f` | `3c162c3213a8ad5fcb4393059ba056991653adf2c6be379a5b783db460ebb62f` |
+| `scripts/labelfix/s7_validate.py` | `2a7e3552223d3c35a130bd4082ad0fb2068d1b218469752bdacc2a8955d8e4b4` | `2a7e3552223d3c35a130bd4082ad0fb2068d1b218469752bdacc2a8955d8e4b4` |
+| `scripts/labelfix/s7_verify.py` | `6fe9974893d871d25314c82f94198335833f14c570056b02b587e4352937fc96` | `6fe9974893d871d25314c82f94198335833f14c570056b02b587e4352937fc96` |
+| `scripts/labelfix/sf1_owner_rescore.py` | `25e387ffb700ab9b722a34b7bbfb1a0906a717d287ccd62b2bff2a7549ebbd48` | `25e387ffb700ab9b722a34b7bbfb1a0906a717d287ccd62b2bff2a7549ebbd48` |
+| `scripts/labelfix/sf1_rescore.py` | `e8f572007f51fd49eea6852a0f5159a7519eab99d75e7df294bf49539a87840a` | `e8f572007f51fd49eea6852a0f5159a7519eab99d75e7df294bf49539a87840a` |
+| `scripts/labelfix/sf2_replay.py` | `abfaf79b533c8545c20aa5b3f258ab3ee8092ec68849a74eca814a2f9cf65806` | `abfaf79b533c8545c20aa5b3f258ab3ee8092ec68849a74eca814a2f9cf65806` |
+| `scripts/labelfix/sheet_build.py` | `34ab8a54f71861dfe713b00a0e4648c0e363fcbd03424f3f0004731b741a3677` | `34ab8a54f71861dfe713b00a0e4648c0e363fcbd03424f3f0004731b741a3677` |
+| `tests/labelfix/test_alignment.py` | `ea7ef7c8c9c319743a932e51e07f51614a03d8939a616ee9018bdb16c0f32cf5` | `ea7ef7c8c9c319743a932e51e07f51614a03d8939a616ee9018bdb16c0f32cf5` |
+| `tests/labelfix/test_capture.py` | `fe03d600996d5d41f42fd1b353f6e23c09d4128a2ede89970bf1a60dd8e79f66` | `fe03d600996d5d41f42fd1b353f6e23c09d4128a2ede89970bf1a60dd8e79f66` |
+| `tests/labelfix/test_constraints.py` | `9f729a6f4f51dc9f461dd00dbc451d11666ca0ee740af4487f4e1edad5ad132c` | `9f729a6f4f51dc9f461dd00dbc451d11666ca0ee740af4487f4e1edad5ad132c` |
+| `tests/labelfix/test_ingest.py` | `28bec951422f2a5d05760e62a52bc660d9e0eff1733792efec050a64f6370a6d` | `28bec951422f2a5d05760e62a52bc660d9e0eff1733792efec050a64f6370a6d` |
+| `tests/labelfix/test_k1.py` | `35802741db80fabd757fe260768910acb24eec695f0c731940f03e12f941953e` | `35802741db80fabd757fe260768910acb24eec695f0c731940f03e12f941953e` |
+| `tests/labelfix/test_l1e.py` | `7598be2d82084894f7a991983e8aea032d37287c39ade57a8194af672d78b9c5` | `7598be2d82084894f7a991983e8aea032d37287c39ade57a8194af672d78b9c5` |
+| `tests/labelfix/test_lexicon.py` | `416070a3d230d59be787c0eccef9fd2d5f48d2bf6f77c306a5fef7444d84ed9f` | `416070a3d230d59be787c0eccef9fd2d5f48d2bf6f77c306a5fef7444d84ed9f` |
+| `tests/labelfix/test_markshape.py` | `a6018efe5504bf7a92de5728c13235e4aa9dfe1ba290a0a3b4b36a7b46baddc6` | `a6018efe5504bf7a92de5728c13235e4aa9dfe1ba290a0a3b4b36a7b46baddc6` |
+| `tests/labelfix/test_r1.py` | `39bf8c103e9418834910860fbdb662b4c3a9c4e4c8ad55df3ea9cb3b67068bfd` | `39bf8c103e9418834910860fbdb662b4c3a9c4e4c8ad55df3ea9cb3b67068bfd` |
+| `tests/labelfix/test_rules.py` | `38223c941f775ada06a16a35a7188b179f6c921eea69a9f5a28a898eaa0be364` | `38223c941f775ada06a16a35a7188b179f6c921eea69a9f5a28a898eaa0be364` |
+| `tests/labelfix/test_s2.py` | `f79402b5242306a23fdf6ba95b1402c6074199e46ea4d33c1768a209431cb389` | `f79402b5242306a23fdf6ba95b1402c6074199e46ea4d33c1768a209431cb389` |
+| `tests/labelfix/test_s2_sheet.py` | `3e9e5208e7adddcf5c830d5f81a995439e411dd78b6a3fc651303bbc3d5847ae` | `3e9e5208e7adddcf5c830d5f81a995439e411dd78b6a3fc651303bbc3d5847ae` |
+| `tests/labelfix/test_s3.py` | `220519ff421c581ee7f36dc8984187d6b454297035ca5cb7037befe67c9e7250` | `220519ff421c581ee7f36dc8984187d6b454297035ca5cb7037befe67c9e7250` |
+| `tests/labelfix/test_s4.py` | `c1b1a114da46ac5c78c2521d1169f0746c869028da63e37cba505e45c5bc2018` | `c1b1a114da46ac5c78c2521d1169f0746c869028da63e37cba505e45c5bc2018` |
+| `tests/labelfix/test_s5.py` | `15d738159b08bb5145bccd762a605edfd39e73c24528342e71ccf89c007d474b` | `15d738159b08bb5145bccd762a605edfd39e73c24528342e71ccf89c007d474b` |
+| `tests/labelfix/test_s6.py` | `da5fff4b57c8acde47d561703614fc3fe4ef16141a720940356944ebdc2cfbc1` | `da5fff4b57c8acde47d561703614fc3fe4ef16141a720940356944ebdc2cfbc1` |
+| `tests/labelfix/test_s7.py` | `dd3e516d95f1dae511d92f35f3d305c1494426f602d5de3fd6c278789cde73af` | `dd3e516d95f1dae511d92f35f3d305c1494426f602d5de3fd6c278789cde73af` |
+| `tests/labelfix/test_sf1.py` | `bc5c766cbc04b53139733b25a002a979d8bf70f5f4edbb1b6c6e76013edd98e1` | `bc5c766cbc04b53139733b25a002a979d8bf70f5f4edbb1b6c6e76013edd98e1` |
+| `tests/labelfix/test_sf2.py` | `8368f82313319af162b8b1de490ae8991aec104525bd00ebcb8b78121cbb76d2` | `8368f82313319af162b8b1de490ae8991aec104525bd00ebcb8b78121cbb76d2` |
+| `tests/labelfix/test_spellcheck.py` | `39b6a775b59ae22497730c0dc21a22f93427404f9f3a27c19ae4817e059fa057` | `39b6a775b59ae22497730c0dc21a22f93427404f9f3a27c19ae4817e059fa057` |
+
+### Receipt-listed absent paths
+
+| Path | Before | After |
+|---|---|---|
+| `.cache/labelfix/align_s0.jsonl` | absent | absent |
+| `.cache/labelfix/clariden/C1_alignments.jsonl.gz` | absent | absent |
+| `.cache/labelfix/clariden/C1_crop_inventory.jsonl.gz` | absent | absent |
+| `.cache/labelfix/clariden/C1_selection.jsonl` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/index.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/lines.jsonl.gz` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00000-index.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00000-lines.jsonl.gz` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00000-narrow.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00000-wide.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00001-index.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00001-lines.jsonl.gz` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00001-narrow.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00001-wide.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00002-index.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00002-lines.jsonl.gz` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00002-narrow.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00002-wide.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00003-index.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00003-lines.jsonl.gz` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00003-narrow.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00003-wide.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00004-index.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00004-lines.jsonl.gz` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00004-narrow.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00004-wide.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00005-index.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00005-lines.jsonl.gz` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00005-narrow.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00005-wide.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00006-index.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00006-lines.jsonl.gz` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00006-narrow.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00006-wide.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00007-index.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00007-lines.jsonl.gz` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00007-narrow.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00007-wide.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00008-index.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00008-lines.jsonl.gz` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00008-narrow.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00008-wide.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00009-index.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00009-lines.jsonl.gz` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00009-narrow.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00009-wide.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00010-index.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00010-lines.jsonl.gz` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00010-narrow.npy` | absent | absent |
+| `artifacts/labelfix_r1/heldout_font/shard-00010-wide.npy` | absent | absent |
+| `docs/records/labelfix/spellcheck/clariden/C1_selection.jsonl` | absent | absent |
+| `L1E_EXTERNAL_SHA256.txt` | absent | absent |
+| `config/l1e_job.json` | absent | absent |
+
+## Coordinator branch ruling
+
+Stale blobs with zero commits are not edits (coordinator). CU3 builds on
+opus/spellcheck's 91217710 blob, matching this worktree.
+
+| branch | blob | commits touching it since merge-base with opus/spellcheck |
+|---|---|---:|
+| opus/spellcheck | 91217710 | 0 |
+| opus/spellcheck-s8 | 91217710 | 0 |
+| opus/spellcheck-l1 | ecbdfc18 | 0 |
+| opus/spellcheck-l1r | ecbdfc18 | 0 |
+| opus/spellcheck-l1r2 | ecbdfc18 | 0 |
+| opus/spellcheck-l1r3 | 91217710 | 0 |
+| opus/spellcheck-l1f | 91217710 | 0 |
+| opus/spellcheck-r1 | ecbdfc18 | 0 |
+| opus/spellcheck-r0 | ecbdfc18 | 0 |
+| opus/r2-cards | 91217710 | 0 |
+| opus/r2-prep | 91217710 | 0 |
+
+CU3 NOT READY: greekocr.recogniser phase 1 (wrapper), CU3b documentation complete; pinned bytes unchanged 379/379; policy digest identical yes; golden 1797/1797; parity labelfix ok eval ok, labelfix≠eval on 0/200; callers moved 0; tests 4694 passed, 19 skipped; failures only pre-existing tests/test_collection_outputs.py (3), tests/test_provenance_cli_api.py (2), tests/test_apply_clean.py (5 errors), plus previously recorded sandbox socket.bind error in tests/labelfix/test_capture.py (1 error), beyond supplied opus/spellcheck baseline.
+
+
+## Lead verification (17 Oct, outside the Sol sandbox)
+Full suite run by the track lead on the Mac outside the sandbox, with the two frozen fixture dirs present: **4,695 passed, 19 skipped, 5 failed, 5 errors**. That is exactly the opus/spellcheck pre-existing set: test_collection_outputs (3), test_provenance_cli_api (2), test_apply_clean (5 errors), all from missing local data. The sandbox socket.bind error does not occur outside the sandbox. **CU3 READY (lead-verified).**

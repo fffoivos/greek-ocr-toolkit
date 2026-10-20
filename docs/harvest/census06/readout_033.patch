@@ -1,0 +1,102 @@
+--- a/docs/harvest/census05/readout/census_readout.py
++++ b/docs/harvest/census06/readout/census_readout.py
+@@ -14,6 +14,7 @@
+ from pathlib import Path
+ import sqlite3
+ import time
++import unicodedata
+ 
+ DISPOSITIONS = ('ADMIT', 'HOLD', 'DROP')
+ TOOLS = ('polytonic', 'cyrillic', 'numerics', 'dashes', 'content_repair')
+@@ -86,6 +87,16 @@
+         return {name: [dict(list(zip(self.columns[name], values)) + [('rows', n)])
+                        for values, n in sorted(counts.items())]
+                 for name, counts in sorted(self.data.items())}
++
++
++def kept_unverified_edit_violation(raw, final_text, route, edits):
++    bad = bool(route.get('edits')) or any('polytonic' in e.get('tools', []) for e in edits)
++    rebuilt = raw
++    for e in sorted(edits, key=lambda x:x['start'], reverse=True):
++        if raw[e['start']:e['end']] != e['before']: bad = True
++        rebuilt = rebuilt[:e['start']] + e['after'] + rebuilt[e['end']:]
++    rebuilt = ' '.join(unicodedata.normalize('NFC', rebuilt).split())
++    return bad or rebuilt != final_text
+ 
+ 
+ def readout(run, out, baseline=None, expect_rows=None, expect_pipeline_version=None):
+@@ -261,6 +272,18 @@
+             if route.get('edits'):
+                 counts.add('correction_edits', ('tool', 'status', 'parent', 'split', 'disposition'),
+                            (tool, route['status']) + dims)
++        poly = d.get('routes', {}).get('polytonic', {})
++        status = poly.get('status', 'missing')
++        if status not in ('not_applicable', 'not_run_due_to_prior_exclusion'):
++            bucket = status if status in ('applied','verified_no_change','kept_unverified') else 'unresolved' if status in ('required_evidence_unresolved','unresolved','failed','proposal_only') else 'other'
++            counts.add('polytonic_status_by_parent_class', ('parent','class','status','disposition'), (parent,role,bucket,disp))
++            counts.add('polytonic_status_by_parent', ('parent','status','disposition'), (parent,bucket,disp))
++            counts.add('polytonic_status_by_class', ('class','status','disposition'), (role,bucket,disp))
++            if disp == 'ADMIT':
++                counts.add('polytonic_admits_by_status', ('parent','class','status'), (parent,role,bucket))
++        if status == 'kept_unverified' and disp == 'ADMIT':
++            if kept_unverified_edit_violation(json.loads(payload).get('raw_text',''), d.get('final_text'), poly, d.get('edits', [])):
++                problem('kept_unverified_no_polytonic_edit', dict(parent=parent,id=row_id))
+         if d.get('pre_dedup_disposition', disp) != disp:
+             for reason in names:
+                 counts.add('dedup_changes', ('reason', 'before', 'parent', 'split', 'disposition'),
+@@ -353,7 +376,7 @@
+     def check(name, failures):
+         invariants[name] = dict(status='PASS' if failures == 0 else 'FAIL', count=failures)
+     check('dispositions_sum', abs(rows - sum(totals[d] for d in DISPOSITIONS)))
+-    for name in ('admitted_train_equals_eligible', 'admitted_train_violations', 'heldout_leaks', 'gate_segmentation_violations', 'gate_route_violations',
++    for name in ('kept_unverified_no_polytonic_edit', 'admitted_train_equals_eligible', 'admitted_train_violations', 'heldout_leaks', 'gate_segmentation_violations', 'gate_route_violations',
+                  'duplicates', 'missing_rows', 'unexpected_rows', 'no_reason', 'pipeline_version_mismatch'):
+         check(name, problems[name]['count'])
+     check('summary_by_stratum', mismatch)
+--- a/docs/harvest/census05/readout/readout.sbatch
++++ b/docs/harvest/census06/readout/readout.sbatch
+@@ -5,19 +5,19 @@
+ #SBATCH --ntasks=1
+ #SBATCH --cpus-per-task=16
+ #SBATCH --time=00:30:00
+-#SBATCH --job-name=census05_readout
++#SBATCH --job-name=census06_readout
+ set -euo pipefail
+-: "${CENSUS05_RUN:?}" "${CENSUS05_READOUT_OUT:?}" "${CENSUS05_BUNDLE:?}"
+-[[ "$CENSUS05_BUNDLE" = /* ]] || { echo 'CENSUS05_BUNDLE must be absolute' >&2; exit 2; }
++: "${CENSUS06_RUN:?}" "${CENSUS06_READOUT_OUT:?}" "${CENSUS06_BUNDLE:?}"
++[[ "$CENSUS06_BUNDLE" = /* ]] || { echo 'CENSUS06_BUNDLE must be absolute' >&2; exit 2; }
+ export PYTHONDONTWRITEBYTECODE=1 GIT_OPTIONAL_LOCKS=0
+ export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+ # Inherit the allocation's uenv, exactly as seg_census/jobs/common.sh does.
+ # BUNDLE is the absolute deployed directory containing census_readout.py.
+-python=${CENSUS05_PYTHON:-${W:-/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3}/venv_l1/bin/python}
+-package=${CENSUS05_PROJECT_ROOT:-$CENSUS05_BUNDLE/../package/projects/greek-ocr-toolkit-pipe032}
++python=${CENSUS06_PYTHON:-${W:-/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3}/venv_l1/bin/python}
++package=${CENSUS06_PROJECT_ROOT:-$CENSUS06_BUNDLE/../package/projects/greek-ocr-toolkit-pipe032}
+ version=$(PYTHONPATH="$package" "$python" -B -c 'from greekocr.harvest.line_pipeline import PIPELINE_VERSION; print(PIPELINE_VERSION)')
+-args=(--expect-pipeline-version "$version" --run "$CENSUS05_RUN" --out "$CENSUS05_READOUT_OUT")
+-if [[ -n "${CENSUS05_BASELINE:-}" ]]; then args+=(--baseline "$CENSUS05_BASELINE"); fi
+-if [[ -n "${CENSUS05_EXPECT_ROWS:-}" ]]; then args+=(--expect-rows "$CENSUS05_EXPECT_ROWS"); fi
++args=(--expect-pipeline-version "$version" --run "$CENSUS06_RUN" --out "$CENSUS06_READOUT_OUT")
++if [[ -n "${CENSUS06_BASELINE:-}" ]]; then args+=(--baseline "$CENSUS06_BASELINE"); fi
++if [[ -n "${CENSUS06_EXPECT_ROWS:-}" ]]; then args+=(--expect-rows "$CENSUS06_EXPECT_ROWS"); fi
+ srun -A a0140 --partition="${SLURM_JOB_PARTITION:?}" --cpu-bind=none --nodes=1 --ntasks=1 \
+-  "$python" -B "$CENSUS05_BUNDLE/census_readout.py" "${args[@]}"
++  "$python" -B "$CENSUS06_BUNDLE/census_readout.py" "${args[@]}"
+--- a/docs/harvest/census05/readout/test_census_readout.py
++++ b/docs/harvest/census06/readout/test_census_readout.py
+@@ -173,10 +173,10 @@
+ os.execvpe(args[0],args,os.environ)
+ ''');srun.chmod(0o755)
+     out=tmp_path/'out';log=tmp_path/'srun.jsonl'
+-    env=dict(os.environ,PATH=str(bin_dir)+os.pathsep+os.environ['PATH'],CENSUS05_RUN=str(make_run(tmp_path/'spool-run',n=200,corrupt=False)),CENSUS05_READOUT_OUT=str(out),CENSUS05_BUNDLE=str(HERE),CENSUS05_PYTHON=sys.executable,SLURM_JOB_PARTITION='normal',MOCK_SRUN_LOG=str(log))
+-    decision_path=Path(env['CENSUS05_RUN'])/'generations/g1-test/decisions.jsonl'
++    env=dict(os.environ,PATH=str(bin_dir)+os.pathsep+os.environ['PATH'],CENSUS06_RUN=str(make_run(tmp_path/'spool-run',n=200,corrupt=False)),CENSUS06_READOUT_OUT=str(out),CENSUS06_BUNDLE=str(HERE),CENSUS06_PYTHON=sys.executable,SLURM_JOB_PARTITION='normal',MOCK_SRUN_LOG=str(log))
++    decision_path=Path(env['CENSUS06_RUN'])/'generations/g1-test/decisions.jsonl'
+     ds=[json.loads(line) for line in decision_path.read_text().splitlines()]
+-    for d in ds: d['pipeline_version']='0.3.2'
++    for d in ds: d['pipeline_version']='0.3.3'
+     decision_path.write_text(''.join(reader.canonical(d)+'\n' for d in ds))
+     exports=list(reader.records(decision_path.parent/'admitted_train.jsonl'))
+     for r,d in zip(exports,ds): r['decision']=d

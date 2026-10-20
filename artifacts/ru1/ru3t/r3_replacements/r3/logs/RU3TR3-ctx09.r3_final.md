@@ -1,0 +1,1 @@
+95 items done. Slot calls: ъ 138, ь 73, other 4, u 0. Items with unmarked final hard signs: 0. The glyphs are generally distinct in these faces, with the hard sign’s top-left flag visible in enlargement.

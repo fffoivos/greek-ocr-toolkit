@@ -1,0 +1,2 @@
+# SCAN2R4 — re-review of scanner v4.5.3 (gpt-6.1-sol, medium, network OFF, READ-ONLY; write only out/scan2r4/REVIEW.md)
+Criteria of SCAN2R_review_brief.md; confirm every finding of SCAN2R/R2/R3 closed by the single-cache + single-write-barrier design (re-run all prior probes; try three new overwrite variants: computed target via variable, overwrite through a second helper, overwrite inside a literal loop); rescan verdicts justified by P1–P3 only. Last line exactly: `SCAN2R4: <PASS|FAIL> | blocking <n> | high <n> | medium <n> | rescan justified <n>/15`

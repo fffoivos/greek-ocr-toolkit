@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / '.astra/out'
-DOC = ROOT / 'docs/reviews/PAGE_LINES_ROUND2_20261009.md'
+DOC = ROOT / 'docs/records/reviews/PAGE_LINES_ROUND2_20261009.md'
 DATA = DOC.with_suffix('.json')
 
 
@@ -63,7 +63,7 @@ def main():
               'No held-out pages were inspected. The other OCR text in the optional hint files was not used as a reference. This round is a reproducible implementation and review result, not a claim that the clean-line goal is solved.', '',
               '## Artifacts and reproduction', '',
               'The 48 source-size overlays, fixed-scale unrolled sheets, pixel segment JSON, final line JSON and per-page checks are in `.astra/out/`. `artifact_audit.json` binds their hashes; `curl_contacts.json` binds the frozen contact audit. These large artifacts are local/ignored; this report and its companion JSON are part of the code handoff.', '',
-              'Use the commands in `docs/PAGE_LINE_SEGMENTS.md`; all runs here used the brief\'s venv Python, `PYTHONDONTWRITEBYTECODE=1`, and pytest `-p no:cacheprovider`. No background job, network push or OCR model inference was launched.', '']
+              'Use the commands in `docs/A_ocr_development/reference/PAGE_LINE_SEGMENTS.md`; all runs here used the brief\'s venv Python, `PYTHONDONTWRITEBYTECODE=1`, and pytest `-p no:cacheprovider`. No background job, network push or OCR model inference was launched.', '']
     DOC.write_text('\n'.join(parts))
     print(DOC.relative_to(ROOT), totals, 'retained', retained)
 

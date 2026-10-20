@@ -1,0 +1,20 @@
+# CLEAN3B — refine the data-out plan with the coordinator's criteria and write the mover (NO moves, NO git writes)
+
+Workspace `$R` = /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next, branch `cleanup/20261019`. Inputs: `docs/cleanup_20261019/data_out/` from CLEAN3A (MOVE_PLAN.tsv is the complete HEAD inventory with sizes/sha256/kind/readers). Write only under `docs/cleanup_20261019/data_out/` (new files; do not edit CLEAN3A's) and the new module named below. No git writes; no file moves; another Sol run (CLEAN4T) is editing tests at the same time — do not touch tests/ or docs/cleanup_20261019/drafts/.
+
+CLEAN3A's rule swept whole bulk directories (54,722 files incl. 34,443 "other", 939 test fixtures). The coordinator's criteria replace it. A tracked file is MOVE iff any of:
+ (a) bytes > 5,000,000;
+ (b) extension in {png jpg jpeg gif webp tif tiff bmp pdf gz tgz tar zip bundle npy npz pt pth onnx bin mp4 mov wav} and path under docs/, artifacts/, out/, legacy_l1/, fixes, prototypes/**/evidence|outputs|runs — except files under tests/ (fixtures stay unless > 5 MB) and files ≤ 50 KB that a live reader (below) loads by literal name;
+ (c) extension in {jsonl html htm xml log codexlog txt tsv csv} with bytes > 1,000,000 under docs/, artifacts/, out/;
+ (d) the 19 ASK symlinks (pytest_tmp and before_sf2 evidence links) → MOVE with their directories; record link text.
+KEEP everything else: all .md, .py, .sh, .js, .css, .toml, .mmd, .json ≤ 5 MB, small receipts and tables, everything under greekocr/, scripts/, tests/, worker/, config/, collect_v3/, seed/ unless (a).
+Live reader = a file under greekocr/, scripts/, tests/, worker/, prototypes/ (not docs/, not artifacts/) that references a MOVE path or its basename. Historical scripts under docs/ are records and are not patched.
+
+Deliverables (under data_out/):
+1. `MOVE_PLAN_v2.tsv` (same columns as v1 plus rule a/b/c/d) and `MOVE_PLAN_v2.md`: totals by kind and top-level directory, count/bytes MOVE vs KEEP, the list of directories becoming empty, and the delta vs v1 (what v1 moved that v2 keeps, by kind and count).
+2. `LIVE_READERS_v2.tsv`: live reader file → MOVE path(s) → proposed change (resolve through `greekocr.ops.data_root.resolve(repo_relative_path)` which returns the repo path if present else `$GREEK_OCR_DATA_ROOT/<path>` and raises a clear error naming the receipt if absent). Write that module at `greekocr/ops/data_root.py` with a unit test `tests/test_data_root.py` (this is the one allowed tests/ addition), and apply the patches to the live readers listed (code only; keep each change minimal; list every file changed).
+3. `move_data.py`: reads MOVE_PLAN_v2.tsv; `--dry-run` prints counts/bytes and verifies every MOVE path exists with the recorded sha256; `--execute --dest /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-data` moves files preserving the repo-relative path (never overwrite: if the destination exists with the same sha256 skip, else stop), writes `MOVE_MANIFEST.tsv` (path, bytes, sha256, moved_at) and `rollback.sh` (moves everything back); it never calls git. The coordinator runs it.
+4. `RECEIPTS/` : receipt shards ≤ 4 MB each (`receipt_<nn>.tsv`: path, bytes, sha256, producing commit, kind) covering every MOVE file, plus `RECEIPTS/INDEX.md` with the shard list, totals and the two special cases (SEGEVAL1.bundle preserved as a file with its bundled head name; candidate_order_KEEP + SEGEVAL1.bundle referenced by historical scope guards s1–s4/gate_rereport/gate03 — a note, no record altered).
+5. `gitignore_additions_v2.txt`: patterns that keep the MOVE set out of git after the move (prefer directory and extension patterns to per-file lines; ≤ 300 lines), and `size_guard_test_v2.py` (fails on any tracked file > 5 MB).
+6. `SUMMARY_v2.md`: counts, bytes, the 23 receipt conflicts from v1 with a decision each (HEAD version is custody; lead-receipt version noted), open questions.
+Finish by printing the paths written and byte counts, and the dry-run summary line.

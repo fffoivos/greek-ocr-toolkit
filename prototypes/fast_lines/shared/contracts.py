@@ -1,6 +1,7 @@
 """S4: immutable-by-convention evidence, geometry, requests, ownership."""
 from dataclasses import dataclass, field, asdict
 import numpy as np
+from .geometry_memo import entry
 
 @dataclass
 class RegionRequest:
@@ -45,8 +46,11 @@ class Decision:
     bbox: object = None
 
 def bbox(item):
-    p=np.asarray(item['polygon'],float)
-    return [*p.min(0),*p.max(0)]
+    cache=entry(item['polygon'])
+    if cache is not None and 'bbox' in cache:return list(cache['bbox'])
+    p=np.asarray(item['polygon'],float);out=[*p.min(0),*p.max(0)]
+    if cache is not None:cache['bbox']=out
+    return list(out)
 
 def rect(b):
     x0,y0,x1,y1=map(float,b)

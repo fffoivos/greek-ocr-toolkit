@@ -71,7 +71,7 @@ def separate_lines(crop: Image.Image | NDArray[Any], *, min_visible: float = .5,
     """One straightened image per text line. Recogniser-facing default: tight=True, margin=0.2 x-heights — the image is
     cropped to its own ink ± margin after straightening. level_deg > 0 shifts (does not resample) baselines within
     level_deg of level — NOT qualified (CP-G4 F5: changes E1 readings on 10/40 level strips), so off by default.
-    Calibration (docs/GLYPHS_CALIBRATION.md, 240 strips, two readers): E1 median NFD CER on level lines
+    Calibration (docs/records/glyphs/GLYPHS_CALIBRATION.md, 240 strips, two readers): E1 median NFD CER on level lines
     0.028 → 0.028, on 1–5° lines 0.188–0.860 → 0.028–0.042; a fixed-height paper pad (tight=False, for display) cost
     level lines 0.028 → 0.069."""
     img = crop if isinstance(crop, Image.Image) else Image.fromarray(np.asarray(crop).astype(np.uint8))

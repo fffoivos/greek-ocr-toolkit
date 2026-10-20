@@ -1,0 +1,508 @@
+diff --git a/docs/harvest/sol_reading/HANDOVER.md b/docs/harvest/sol_reading/HANDOVER.md
+index 573473224..57980771d 100644
+--- a/docs/harvest/sol_reading/HANDOVER.md
++++ b/docs/harvest/sol_reading/HANDOVER.md
+@@ -67,10 +67,10 @@ Do not edit a protocol body without re-running a comparison.
+ - **Builders and checkers.** Builders are `tools/build_packs.py`, `grave/` (SR-G1) and `grave_full/tools/build_full.py`. Closure checker: `tools/scan_packs.py`.
+ 
+ ## 5. Leak scan (mandatory; any violation voids the run)
+-**The Codex sandbox does NOT restrict reads.** A canary outside the workspace was readable. Blinding therefore rests on the isolation in section 4 plus `tools/scan_rollout.py` **v4.4-canonical**, run on every rollout (original v4 retained byte-for-byte as `tools/scan_rollout_v4.py`):
++**The Codex sandbox does NOT restrict reads.** A canary outside the workspace was readable. Blinding therefore rests on the isolation in section 4 plus `tools/scan_rollout.py` **v4.5**, run on every rollout (original v4 retained byte-for-byte as `tools/scan_rollout_v4.py`):
+ 1. **Image provenance.** Every image returned to the model must match a file in its own reader folder:
+    - by bytes; or
+-   - as a `view_image` downscale (long side 2048; aspect within 1 px; pixel mean absolute difference < 2); or
++   - as a proven `view_image` return at a common non-upscaling scale (each axis within 1 px; RGB mean absolute difference strictly < 2/255 under a named standard filter; fully opaque alpha); or
+    - **(v4, coordinator-accepted)** as a pixel-exact reproduction. Replay the run's literal, relative-path commands on a fresh copy of the original pack, then compare pixels. This covers a zoom file the reader viewed and later overwrote; the PNG timestamp bytes may differ.
+ 
+    The replay log is kept in the scan JSON (`reproductions`). Example: `answers/grave_full/p1c1.scan.json`.
+@@ -93,17 +93,27 @@ Do not edit a protocol body without re-running a comparison.
+ | secondary pwd + // fixes | Exact literal pwd template base; Python `(j+1)//4` is not an absolute `/4` path | `rollout-2026-10-17T15-54-40-01a149ed-c0e3-7143-9bc9-11ac09eebd4d.jsonl` (RU1 ctx01/r2), clean; `rollout-2026-10-17T16-03-16-01a149f5-9e87-7a20-a543-62a90d71e078.jsonl` (ctx04/r2), VOID with exactly 15 provenance findings | `test_witness_ru1_ctx01_r2`; `test_witness_ru1_ctx04_r2`; `test_floor_division_positive`; `test_slash_outside_path_negative` |
+ | secondary exact pixels | Same mode, size and exact pixels permit PNG re-encoding; no downscale envelope change | Same RU1 witnesses: ctx01/r2 clean; ctx04/r2 remains VOID | `test_reencoding_positive_and_negative`; both RU1 witness tests |
+ | v4.4-canonical | One implementation combining the sourced rules above | All six external witnesses replayed with their recorded outcomes; none skipped | `test_scan_rollout_canonical.py` (42 tests including all 11 v4 cases); original v4 suite also run (53 total) |
++| v4.5 | Coordinator ruling (18 Oct): P1 closed answer argv; P2 proven common-scale image returns; P3 finite literal view loops and historical confined-helper replay | CQ4E 15 VOID rollouts rescanned separately; original receipts retained | `tests/test_scan_rollout.py`; `tests/fixtures/v45/`; `out/scan2/rescan_v45.json` |
+ 
+-Canonical file sha256 = dd2fc59d6385601146f8cfb3f23ff48aec2e769188f65def282f4b72e489c547; copy by hash, do not fork
++Canonical v4.5 file sha256 = c5204fe88490c35af07d1257680a9d32d4e43ab7be329b352af83c88a9cee17c; copy by hash, do not fork. Previous v4.4 sha256 = dd2fc59d6385601146f8cfb3f23ff48aec2e769188f65def282f4b72e489c547; retained in the unchanged CQ4 receipts.
+ 
+ **Sources found, inspected read-only (SCAN1, 17 Oct).** v4.1 and v4.2 are in `../greek-ocr-toolkit-sol-recut/docs/harvest/recut_v1/w1_masked/kosmo2/tools/scan_rollout_v41.py` and `scan_rollout_v42.py`. Their witness reports are respectively `kosmo2/scan/kosmo2/c2b.scan_v41_final.json` and `ruc1/scan/ruc1/c1.scan_v42.json` under the same `w1_masked/` root. No v4.1/v4.2 source was found in sol-collect. The sourcing scratchpad launcher at `/private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/8014ea5c-bc18-4a66-b4b1-93bd1d0a9cc4/scratchpad/sol_packs/launchers/run_bed.sh` dispatches kosmo2/ruc1 to the sourcing worktree launchers; no separate scratchpad `scan_rollout*.py` source was found.
+ 
+ CQ1's wrapper and tests are in `../greek-ocr-toolkit-spellcheck-r2cards/artifacts/cq1/tools/scan_rollout_v43.py` and `test_scan_rollout_v43.py`; saved outcomes are `artifacts/cq1/answers/r1.scan_v43.json` and `r1b.scan.json`. Secondary's source is `../greek-ocr-toolkit-secondary/scripts/secondary/reading/scan_rollout.py`; `docs/labelfix/secondary/RU10_REPORT.md` §RU1-S and §RU1-R3 disclose both path fixes and the exact-pixel re-encoding delta. Exact secondary rollout identities are recorded in `artifacts/ru1/logs/RU1-ctx01.r2.codexlog` and `RU1-ctx04.r2.codexlog`.
+ 
+-The v4.3 literal-store restriction applies to concatenations. Ordinary non-concatenated loads with a preceding store, such as ctx04's `load("rows")` retain v4 behavior; a load with no preceding store still fails. Applying a path-resolution failure to those data loads would add 11 unsupported findings. v4.1's witnessed `${base}` / `${load("base")}` template idiom retains literal `const base` resolution; a const alone does **not** authorize a v4.3 `load(...) + ...` concatenation. Pwd resolution requires the successful recorded output; it never executes pwd during scanning. Font allowances use the sourced v4.2 operand proofs, not a global font-path exemption. Reproduction uses a fresh OS temporary directory rather than a session-specific scratchpad. The image envelope remains 2048 long side, one-pixel aspect tolerance, RGB MAD strictly below 2.0.
++The v4.3 literal-store restriction applies to concatenations. Ordinary non-concatenated loads with a preceding store, such as ctx04's `load("rows")` retain v4 behavior; a load with no preceding store still fails. Applying a path-resolution failure to those data loads would add 11 unsupported findings. v4.1's witnessed `${base}` / `${load("base")}` template idiom retains literal `const base` resolution; a const alone does **not** authorize a v4.3 `load(...) + ...` concatenation. Pwd resolution requires the successful recorded output; it never executes pwd during scanning. Font allowances use the sourced v4.2 operand proofs, not a global font-path exemption. Reproduction uses a fresh OS temporary directory rather than a session-specific scratchpad. The v4.4 image envelope was 2048 long side. The v4.5 envelope follows the coordinator rulings below; native same-mode pixel checks remain exact.
+ 
+ All six witness rollouts were found under `~/.codex/sessions/2026/10/17/`. Missing rollout files cause explicit unittest skips naming the missing file; present rollouts with missing packs fail. `tools/SCAN1_TEST_RESULTS.txt` records the full scanner test run. `tools/SCANNER_CANONICAL.json` records source/canonical/test hashes and all 11 known external scanner copies or entrypoints: **0/11 currently match**; none was modified. Network, reading runs and .git writes were not used.
+ 
++
++### Canonical v4.5 coordinator rulings (18 Oct; SCAN2 qualification 19 Oct)
++
++- **P1 — answer atoms are data only in confined-helper argv.** The closed shorthand grammar is `[nsru]\??/[nagcu]\??` for breathing/accent, `[yn]\??/[yn]\??` for yes/no heads, and decimal numeric ids. `?` denotes low confidence. Mask only complete argv to the historically recorded, AST-pinned `zoom/record.py`; the pin verifies its IO and category mapping. Real `/n`, `/tmp/outside`, `../truth.json`, mixed invalid atoms, shell additions and forbidden names retain their path checks. The helper filename alone grants no authority.
++- **P2 — proven image returns.** Admit a common non-upscaling scale within one pixel on each axis, RGB MAD strictly below 2/255 under a named Pillow standard filter, and opaque alpha (including RGB to opaque RGBA for scaled returns). A new zoom scale requires reconstruction seeded only from verified manifest originals; final zoom files cannot seed it. Historical reconstructions use the same comparison. Native same-size comparisons retain exact mode/pixel behavior; crops, distortion, upscales, partial alpha and MAD >= 2/255 fail.
++- **P3 — finite templates and recorded history.** Expand only literal arrays or constant integer ranges (at most 1,000 views), bind concrete requested paths in returned-image order, and reconstruct overwritten views at their historical point. Inline only recorded confined zoom helpers with literal integer argv through the existing restricted AST/API worker and IO audit hook. Isolate literal `mkdir zoom` / `mkdir -p zoom` and independently safe image heredocs from rejected imports or answer code. Dynamic bounds, unsafe helpers, traversal and unproven extra images fail.
++
++Source: read-only `../greek-ocr-toolkit-spellcheck-r2cards/docs/labelfix/spellcheck/R2/CQ4E_VOIDS.md` and its 15 recorded rollouts. `out/scan2/rescan_v45.json` is a new scanner adjudication record, not an edit of the CQ4 ledger or acceptance/scoring of answers. Full scans, test log and deliverable details are in `out/scan2/`.
++
+ ## 6. Measured cost
+ | Task | Wall per item | Tokens per item (total / uncached input / output) |
+ |---|---|---|
+diff --git a/docs/harvest/sol_reading/tools/scan_rollout.py b/docs/harvest/sol_reading/tools/scan_rollout.py
+index acfe1742c..427dcc3e7 100644
+--- a/docs/harvest/sol_reading/tools/scan_rollout.py
++++ b/docs/harvest/sol_reading/tools/scan_rollout.py
+@@ -1,11 +1,11 @@
+ #!/usr/bin/env python3
+-"""Offline rollout audit v4.4-canonical: image provenance, literal paths, manifest integrity.
+-Downscales: long side 2048, aspect within one pixel, RGB mean absolute
++"""Offline rollout audit 4.5: image provenance, literal paths, manifest integrity.
++Downscales: any non-upscaling common scale, aspect within one pixel, RGB mean absolute
+ error < 2.0/255 using one of Pillow's standard resampling filters.
+-Reproductions require identical bytes or identical mode, size, and RGB(A) pixels.
++Historical reproductions use the same image policy as current views.
+ This audits recorded inputs/outputs, not OS isolation.
+ """
+-import argparse,ast,base64,io,json,re,sys,subprocess,tempfile,shutil,shlex
++import argparse,ast,base64,hashlib,io,json,re,sys,subprocess,tempfile,shutil,shlex
+ from replay_literal import parse as parse_replay
+ from pathlib import Path
+ from PIL import Image,ImageChops,ImageStat
+@@ -65,11 +65,19 @@ def match_image(data,candidates):
+             with Image.open(io.BytesIO(blob)) as original:
+                 if original.mode == out.mode and original.tobytes() == out.tobytes():
+                     return dict(path=rel,match='pixels',mad=0)
++        observed_mode=out.mode
++        opaque=out.mode!='RGBA' or out.getchannel('A').getextrema()==(255,255)
+         out=out.convert('RGB');w,h=out.size
+         for rel,blob,im in candidates:
+-            if max(im.size)<=2048 or max(w,h)!=2048:continue
+-            scale=2048/max(im.size)
+-            if abs(w-im.width*scale)>1 or abs(h-im.height*scale)>1:continue
++            if w>im.width or h>im.height or (w,h)==im.size:continue
++            # A single scale must lie in both per-axis one-pixel intervals.
++            lo=max(0,(w-1)/im.width,(h-1)/im.height)
++            hi=min(1,(w+1)/im.width,(h+1)/im.height)
++            if lo>hi:continue
++            with Image.open(io.BytesIO(blob)) as original:
++                if original.convert('RGBA').getchannel('A').getextrema()!=(255,255):continue
++                if observed_mode not in ('RGB','RGBA','L'):continue
++            if not opaque:continue
+             for filt in (Image.Resampling.LANCZOS,Image.Resampling.BICUBIC,Image.Resampling.BILINEAR,Image.Resampling.NEAREST,Image.Resampling.BOX,Image.Resampling.HAMMING):
+                 diff=ImageChops.difference(out,im.resize((w,h),filt));mad=sum(ImageStat.Stat(diff).mean)/3
+                 if mad<2.0:return dict(path=rel,match='downscale',mad=mad,resampling=filt.name)
+@@ -77,7 +85,7 @@ def match_image(data,candidates):
+ 
+ # Reproduction writes only into fresh OS temporary directories.
+ REPLAY_TMP=Path(tempfile.gettempdir())
+-VERSION='v4.4-canonical'
++VERSION='4.5'
+ 
+ def reproduce(data,directory,view,history):
+     """Only invoked after ordinary v3 provenance fails; never seed from zoom."""
+@@ -98,7 +106,7 @@ def reproduce(data,directory,view,history):
+                 if sha(dst)!=digest:raise ValueError('copied original digest mismatch')
+             receipt['manifest_verified']=True
+             receipt['original_files']=sum(n=='items.jsonl' or n.startswith('img/') for n in manifest['files'])
+-            for ordinal,cmd in history:
++            for ordinal,cmd in replay_history(history):
+                 event=dict(record=ordinal,command=cmd)
+                 try:parse_replay(cmd)
+                 except (ValueError,SyntaxError) as exc:
+@@ -118,20 +126,20 @@ def reproduce(data,directory,view,history):
+                     receipt['mode']=im.mode;receipt['observed_mode']=observed.mode
+                     exact=(im.mode==observed.mode and im.size==observed.size and im.convert('RGBA').tobytes()==observed.convert('RGBA').tobytes())
+                     receipt['pixels_exact']=exact
+-                    if match is None and exact:match=dict(path=str(rel),match='pixels',mad=0)
++                    if match is None:match=match_image(data,[(str(rel),p.read_bytes(),im.convert('RGB'))])
+                     if im.size==observed.size:
+                         receipt['same_size_rgb_exact']=ImageChops.difference(im.convert('RGB'),observed.convert('RGB')).getbbox() is None
+                         receipt['metadata_differences']={k:dict(observed=observed.info.get(k),reproduced=im.info.get(k)) for k in set(im.info)|set(observed.info) if im.info.get(k)!=observed.info.get(k)}
+             if match:
+-                return dict(match,match='reproduced_pixels' if match['match']=='pixels' else 'reproduced',comparison=match['match'],reproduction=receipt),receipt
+-            raise ValueError('reproduced file fails exact bytes/pixels policy')
++                return dict(match,match='reproduced_pixels' if match['match']=='pixels' else ('reproduced_downscale' if match['match']=='downscale' else 'reproduced'),comparison=match['match'],reproduction=receipt),receipt
++            raise ValueError('reproduced file fails image policy')
+     except Exception as exc:receipt['error']=str(exc)
+     return None,receipt
+ 
+ 
+ def _inspect_records(records,directory,skip_manifest=False):
+     directory=Path(directory).resolve();violations=[];views=[];commands=[];paths=[];matches=[];usage=None;rate_limits=None;tool_calls=0
+-    candidates=[];history=[];pending={};reproductions=[]
++    candidates=[];history=[];pending={};reproductions=[];legacy_data_call=None
+     for p in directory.rglob('*.png'):
+         if p.is_symlink():continue
+         rel=str(p.relative_to(directory))
+@@ -158,6 +166,15 @@ def _inspect_records(records,directory,skip_manifest=False):
+     for ordinal,obj in enumerate(records):
+         p=obj.get('payload') or {}
+         if not isinstance(p,dict):continue
++        if p.get('type')=='item_completed' and legacy_data_call is not None:
++            item=p.get('item') or {}
++            if item.get('type')=='ImageView' and isinstance(item.get('path'),str):
++                path=item['path'].removeprefix('file://')
++                try:rel=Path(path).relative_to(directory)
++                except ValueError:rel=Path('__outside__')
++                # Witnessed original-data views confer no zoom replay authority.
++                check(path,ordinal)
++                pending[legacy_data_call].append((path if str(rel).startswith(('img/','crops/')) else '__unsupported__',[]))
+         if p.get('type')=='token_count':
+             usage=(p.get('info') or {}).get('total_token_usage') or usage;rate_limits=p.get('rate_limits') or rate_limits
+         if p.get('type') in ('custom_tool_call_output','function_call_output'):
+@@ -165,7 +182,25 @@ def _inspect_records(records,directory,skip_manifest=False):
+                 try:
+                     url=block.get('image_url');url=url.get('url') if isinstance(url,dict) else url
+                     if not isinstance(url,str) or not url.startswith('data:image/'):raise ValueError('non-data image')
+-                    match=match_image(base64.b64decode(url.split(',',1)[1],validate=True),candidates)
++                    calls=pending.get(p.get('call_id'),[])
++                    chosen=candidates
++                    if image_index<len(calls):
++                        requested=Path(calls[image_index][0])
++                        if requested.is_absolute():
++                            try:requested=requested.relative_to(directory)
++                            except ValueError:requested=Path('__outside__')
++                        chosen=[c for c in candidates if c[0]==str(requested)]
++                    elif calls:chosen=[]
++                    else:chosen=[c for c in candidates if c[0].startswith(("img/","crops/"))]
++                    match=match_image(base64.b64decode(url.split(',',1)[1],validate=True),chosen)
++                    if match and match['match']=='downscale' and not calls:match=None
++                    if match and match['match']=='downscale' and match['path'].startswith('zoom/'):
++                        # Preserve v4's established 2048 baseline. New scale
++                        # admission requires a manifest-seeded reconstruction.
++                        with Image.open(io.BytesIO(base64.b64decode(url.split(',',1)[1],validate=True))) as observed:
++                            source=next(c[2] for c in chosen if c[0]==match['path'])
++                            legacy=max(source.size)>2048 and max(observed.size)==2048
++                        if not legacy:match=None
+                     if match is None:
+                         calls=pending.get(p.get('call_id'),[])
+                         if image_index<len(calls):
+@@ -176,33 +211,37 @@ def _inspect_records(records,directory,skip_manifest=False):
+                     matches.append(dict(record=ordinal,**match))
+                 except Exception as exc:violations.append(dict(record=ordinal,reason='image provenance: '+str(exc)))
+         if p.get('type') not in CALL_TYPES:continue
++        legacy_data_call=None
+         tool_calls+=1;name=p.get('name','local_shell_call');raw=p.get('input',p.get('arguments',p.get('action',{})))
+         if name=='exec':
+             text=raw if isinstance(raw,str) else json.dumps(raw)
+             # Template text is retained, including computed templates; no static path resolution required.
+-            for m in re.finditer(LITERAL,text):check(unquote(m[0]),ordinal)
++            ops=list(re.finditer(r'tools\.(exec_command|view_image)\s*\(\s*\{\s*(?:[\"\']?(?:cmd|path)[\"\']?)\s*:\s*('+LITERAL+')',text))
++            operations={op.start(2):op for op in ops};selected=[]
++            for m in re.finditer(LITERAL,text):
++                value=unquote(m[0]);check(answer_data(value,history),ordinal)
++                op=operations.get(m.start())
++                if op:
++                    if op[1]=='exec_command':history.append((ordinal,value))
++                    else:selected.append((value,list(history)))
+             v=quoted_property(text,'path');c=quoted_property(text,'cmd');views.extend(v);commands.extend(c)
+-            for cmd in c:check(cmd,ordinal)
+-            selected=[]
+-            for op in re.finditer(r'tools\.(exec_command|view_image)\s*\(\s*\{\s*(?:[\"\']?(?:cmd|path)[\"\']?)\s*:\s*('+LITERAL+')',text):
+-                value=unquote(op[2])
+-                if op[1]=='exec_command':history.append((ordinal,value))
+-                else:selected.append((value,list(history)))
+             pending[p.get('call_id')]=selected
++            if not selected and re.fullmatch(r'\s*for\(const \w+ of load\('+LITERAL+r'\)\.slice\(\d+,\d+\)\)image\(\(await tools\.view_image\(\{path:\w+\.crop\}\)\)\.image_url\);\s*',text):
++                legacy_data_call=p.get('call_id')
+         else:
+             try:args=json.loads(raw) if isinstance(raw,str) else raw
+             except ValueError:args=raw
+-            for value in strings(args):check(value,ordinal)
++            for value in strings(args):check(answer_data(value,history),ordinal)
+             if isinstance(args,dict):
+                 if 'view_image' in name and isinstance(args.get('path'),str):
+                     views.append(args['path']);pending[p.get('call_id')]=[(args['path'],list(history))]
+                 if 'exec_command' in name or p.get('type')=='local_shell_call':
+                     cmd=args.get('cmd',args.get('command'))
+                     if isinstance(cmd,list):cmd=' '.join(cmd)
+-                    if isinstance(cmd,str):commands.append(cmd);check(cmd,ordinal);history.append((ordinal,cmd))
++                    if isinstance(cmd,str):commands.append(cmd);history.append((ordinal,cmd))
+     errors,skipped=integrity(directory,skip_manifest);violations.extend({'reason':e} for e in errors)
+     zoom=[dict(path=str(p.relative_to(directory)),sha256=sha(p),bytes=p.stat().st_size) for p in sorted((directory/'zoom').rglob('*')) if p.is_file()]
+-    return dict(scanner_version=VERSION,reproductions=reproductions,ok=not violations,violations=violations,image_policy={'reproduction':'exact bytes or same mode, size, RGB(A) pixels', 'long_side':2048,'aspect_tolerance_px':1,'rgb_mad_strictly_below':2.0},image_matches=matches,returned_images=len(matches)+sum(v['reason'].startswith('image provenance:') for v in violations),zoom=zoom,view_image_calls=len(views),distinct_images_viewed=len(set(m['path'] for m in matches)),images_viewed=sorted(set(m['path'] for m in matches)),exec_commands=len(commands),commands=commands,paths=paths,tool_calls=tool_calls,total_token_usage=usage,rate_limits=rate_limits,manifest_check_skipped=skipped)
++    return dict(scanner_version=VERSION,reproductions=reproductions,ok=not violations,violations=violations,image_policy={'reproduction':'same image policy as current views', 'scale':'non-upscaling common scale','aspect_tolerance_px':1,'rgb_mad_strictly_below':2.0},image_matches=matches,returned_images=len(matches)+sum(v['reason'].startswith('image provenance:') for v in violations),zoom=zoom,view_image_calls=len(views),distinct_images_viewed=len(set(m['path'] for m in matches)),images_viewed=sorted(set(m['path'] for m in matches)),exec_commands=len(commands),commands=commands,paths=paths,tool_calls=tool_calls,total_token_usage=usage,rate_limits=rate_limits,manifest_check_skipped=skipped)
+ 
+ # Consume quoted strings/comments atomically: commands and comments cannot
+ # manufacture bindings. Templates are deliberately opaque and unsupported.
+@@ -356,11 +395,184 @@ def resolve_templates(records, directory):
+     return resolutions, evidence, failures
+ 
+ 
++
++# P1: prompt semantics give breathing n/s/r/u, accent n/a/g/c/u;
++# Optional ? denotes low confidence; yes/no pairs and numeric item ids cover
++# the other HANDOVER answer formats. Only this audited confined recorder can
++# consume shorthand. Its AST pins all IO and mappings, not merely its filename.
++RECORD_AST_SHA = 'd7e8022eb608fe49fc3b39ce77c66228f519bc795eac323a1152371b21e47107'
++ANSWER_ATOM = re.compile(r'(?:[nsru]\??/[nagcu]\??|[yn]\??/[yn]\??|[0-9]+)')
++HEREDOC = re.compile(r"(?m)^(?:(?:python|python3) -|cat > (zoom/[A-Za-z0-9_.-]+\.py)) <<'([A-Za-z_]+)'\n(.*?)\n\2(?=\n|$)",re.S)
++
++def recorded_helpers(history):
++    helpers={}
++    for _,cmd in history:
++        for name in list(helpers):
++            if name in cmd and not re.fullmatch(r'(?:python|python3) '+re.escape(name)+r' [^\n;|&<>]+',cmd):helpers.pop(name)
++        for m in HEREDOC.finditer(cmd):
++            if m[1]:helpers[m[1]]=m[3]
++    return helpers
++
++def answer_data(command,history):
++    try: args=shlex.split(command)
++    except ValueError:return command
++    if len(args)!=3 or args[:2] not in (['python','zoom/record.py'],['python3','zoom/record.py']):return command
++    atoms=args[2].split()
++    if not atoms or not all(ANSWER_ATOM.fullmatch(a) for a in atoms):return command
++    code=recorded_helpers(history).get('zoom/record.py','')
++    try:digest=hashlib.sha256(ast.dump(ast.parse(code)).encode()).hexdigest()
++    except SyntaxError:return command
++    if digest!=RECORD_AST_SHA:return command
++    return args[0]+' '+args[1]+' ANSWER_DATA'
++
++
++def replay_history(history):
++    """Normalize only independent literal units, without invoking any shell.
++
++    Never read a helper from the preserved final zoom tree. Helpers are recorded
++    at their historical write, and each invocation is validated after argv
++    substitution by the unchanged restricted worker.
++    """
++    helpers={}
++    for ordinal,cmd in history:
++        try:
++            parse_replay(cmd)
++            yield ordinal,cmd
++            continue
++        except (ValueError,SyntaxError):pass
++        units=[];cursor=0
++        for m in HEREDOC.finditer(cmd):
++            units.extend(cmd[cursor:m.start()].splitlines())
++            if m[1]:units.append((m[1],m[3]))
++            else:units.append("python3 - <<'PY'\n"+m[3]+"\nPY")
++            cursor=m.end()
++        units.extend(cmd[cursor:].splitlines())
++        emitted=False
++        for unit in units:
++            if isinstance(unit,tuple):
++                helpers[unit[0]]=unit[1];continue
++            if unit in ('mkdir zoom','mkdir -p zoom'):
++                yield ordinal,'mkdir -p zoom';emitted=True;continue
++            if unit.startswith("python3 - <<'PY'\n"):
++                try:parse_replay(unit)
++                except (ValueError,SyntaxError):continue
++                yield ordinal,unit;emitted=True;continue
++            try:argv=shlex.split(unit)
++            except ValueError:continue
++            if len(argv)<2 or argv[0] not in ('python','python3') or argv[1] not in helpers:
++                for name in list(helpers):
++                    if name in unit:helpers.pop(name)
++                continue
++            if not all(re.fullmatch(r'-?\d+',v) for v in argv[2:]):continue
++            # sys.argv is data, never an API made available to the worker.
++            try:
++                tree=ast.parse(helpers[argv[1]])
++                class Argv(ast.NodeTransformer):
++                    def visit_Import(self,node):
++                        node.names=[a for a in node.names if a.name!='sys']
++                        return node if node.names else None
++                    def visit_Attribute(self,node):
++                        if isinstance(node.value,ast.Name) and node.value.id=='sys' and node.attr=='argv':
++                            return ast.copy_location(ast.List(elts=[ast.Constant(v) for v in argv[1:]],ctx=ast.Load()),node)
++                        return self.generic_visit(node)
++                tree=ast.fix_missing_locations(Argv().visit(tree))
++                replay="python3 - <<'PY'\n"+ast.unparse(tree)+"\nPY"
++                parse_replay(replay)
++            except (ValueError,SyntaxError):continue
++            yield ordinal,replay;emitted=True
++        if not emitted:yield ordinal,cmd # retain explicit skipped receipt
++
++
++def expand_view_loops(records):
++    """Finite view-only JavaScript grammar; no JS evaluation or dynamic bounds."""
++    evidence=[];failures=[]
++    for ordinal,obj in enumerate(records):
++        p=obj.get('payload') or {}
++        if p.get('type') not in CALL_TYPES or p.get('name')!='exec':continue
++        field='input' if 'input' in p else 'arguments';raw=p.get(field)
++        if not isinstance(raw,str):continue
++        tokens=[m for m in TOKEN.finditer(raw) if not m[0].startswith(('//','/*'))]
++        edits=[];i=0
++        while i<len(tokens):
++            if tokens[i][0]!='for':i+=1;continue
++            start=i;j=i+1;depth=0
++            if j>=len(tokens) or tokens[j][0]!='(':i+=1;continue
++            while j<len(tokens):
++                t=tokens[j][0]
++                if t=='(':depth+=1
++                if t==')':
++                    depth-=1
++                    if depth==0:break
++                j+=1
++            if j+1>=len(tokens):
++                failures.append(dict(record=ordinal,reason='unsupported view loop'));break
++            header=raw[tokens[i+1].end():tokens[j].start()]
++            a=re.fullmatch(r'\s*(?:const|let)\s+(\w+)\s+of\s+\[([^\[\]]*)\]\s*',header)
++            r=re.fullmatch(r'\s*let\s+(\w+)\s*=\s*(\d+)\s*;\s*\1\s*(<=|<)\s*(\d+)\s*;\s*\1\+\+\s*',header)
++            values=None;var=None
++            if a:
++                var=a[1]
++                try:
++                    values=ast.literal_eval('['+a[2]+']')
++                    if not all(type(v) in (str,int) for v in values):values=None
++                except (ValueError,SyntaxError):pass
++            elif r:
++                var=r[1];lo=int(r[2]);hi=int(r[4])+(r[3]=='<=')
++                if 0<=hi-lo<=1000:values=list(range(lo,hi))
++            k=j+1;body_start=k;braced=tokens[k][0]=='{'
++            if braced:
++                depth=1;k+=1;body_start=k
++                while k<len(tokens) and depth:
++                    if tokens[k][0]=='{':depth+=1
++                    elif tokens[k][0]=='}':depth-=1
++                    if depth:k+=1
++                if depth:
++                    failures.append(dict(record=ordinal,reason='unterminated view loop'));break
++                body_end=k;end=k+1
++            else:
++                # The only admitted body is image(...), with balanced parens.
++                depth=0;k=body_start
++                while k<len(tokens):
++                    if tokens[k][0]=='(':depth+=1
++                    elif tokens[k][0]==')':
++                        depth-=1
++                        if depth==0: k+=1;break
++                    k+=1
++                body_end=k;end=k
++            body=raw[tokens[body_start].start():tokens[body_end-1].end()] if body_end>body_start else ''
++            # Exact image wrapper: no extra statements, hidden calls, or side effects.
++            if var:body=re.sub(r'^text\(\s*'+re.escape(var)+r'\s*\);\s*','',body)
++            view=re.fullmatch(r'image\s*\(\s*\(\s*await\s+tools\.view_image\s*\(\s*\{\s*path\s*:\s*('+LITERAL+r')\s*\}\s*\)\s*\)\.image_url\s*\)\s*;?',body)
++            if not view and re.fullmatch(r'\s*(?:const|let)\s+\w+\s+of\s+load\('+LITERAL+r'\)\.slice\(\d+,\d+\)\s*',header) and re.fullmatch(r'image\(\(await tools\.view_image\(\{path:\w+\.crop\}\)\)\.image_url\);?',body):
++                # Legacy data views gain no expansion/replay authority. Only
++                # manifest original images and recorded ImageView events prove outputs.
++                i=max(end,i+1);continue
++            if values is None or len(values)>1000 or not view:
++                failures.append(dict(record=ordinal,reason='unsupported view loop',expression=header))
++            else:
++                template=unquote(view[1]);expanded=[]
++                template=re.sub(r'\$\{\s*('+LITERAL+r')\s*\}',lambda m:unquote(m[1]),template)
++                for value in values:
++                    path=template.replace('${'+var+'}',str(value))
++                    path=re.sub(r'\$\{String\('+re.escape(var)+r'\)\.padStart\(([1-9]\d?),[\"\']0[\"\']\)\}',lambda m:str(value).zfill(int(m[1])),path)
++                    if '${' in path:
++                        failures.append(dict(record=ordinal,reason='unresolved view loop path'));break
++                    expanded.append('image((await tools.view_image({path:'+json.dumps(path)+'})).image_url);')
++                else:
++                    edits.append((tokens[start].start(),tokens[end-1].end(),''.join(expanded)))
++                    evidence.append(dict(record=ordinal,variable=var,values=values,views=len(expanded)))
++            i=max(end,i+1)
++        for a,b,replacement in reversed(edits):raw=raw[:a]+replacement+raw[b:]
++        p[field]=raw
++    return evidence,failures
++
++
+ def inspect(rollout, directory, skip_manifest=False):
+     directory = Path(directory).resolve()
+     records = rows(rollout) if Path(rollout).is_file() else []
+     bindings, failures = resolve(records, CALL_TYPES)
+     templates, pwd_evidence, template_failures = resolve_templates(records, directory)
++    loop_expansions, loop_failures = expand_view_loops(records)
+     result = _inspect_records(records, directory, skip_manifest)
+     allowed = []; keep = []
+     for violation in result['violations']:
+@@ -374,9 +586,9 @@ def inspect(rollout, directory, skip_manifest=False):
+         if proofs and isinstance(raw, str) and raw.count(path) == proofs:
+             allowed.append(dict(violation, access='read-only', proof='statically checked command operand'))
+         else: keep.append(violation)
+-    keep.extend(failures + template_failures)
++    keep.extend(failures + template_failures + loop_failures)
+     if not Path(rollout).is_file(): keep.append(dict(reason='missing rollout: '+str(rollout)))
+-    result.update(violations=keep, ok=not keep, rollout=str(rollout),
++    result.update(loop_expansions=loop_expansions, violations=keep, ok=not keep, rollout=str(rollout),
+         rollout_sha256=sha(rollout) if Path(rollout).is_file() else None,
+         template_resolutions=bindings, v41_template_resolutions=templates,
+         pwd_evidence=pwd_evidence, unresolved_loads=failures + template_failures,
+diff --git a/docs/harvest/sol_reading/tools/test_scan_rollout_canonical.py b/docs/harvest/sol_reading/tools/test_scan_rollout_canonical.py
+index 01c84fd7e..57dd94b8f 100644
+--- a/docs/harvest/sol_reading/tools/test_scan_rollout_canonical.py
++++ b/docs/harvest/sol_reading/tools/test_scan_rollout_canonical.py
+@@ -1,5 +1,5 @@
+ """Canonical scanner regressions, including every original v4 test and local witnesses."""
+-import base64, io, json, struct, tempfile, unittest
++import base64, io, json, struct, tempfile, unittest, shutil
+ from pathlib import Path
+ from unittest.mock import patch
+ from PIL import Image, PngImagePlugin
+@@ -163,7 +163,7 @@ class CanonicalRules(unittest.TestCase):
+         self.assertFalse(self.scan('const rows=load("rows");text(rows);')['ok'])
+ 
+     def test_version(self):
+-        self.assertEqual(self.scan('text("ok");')['scanner_version'], 'v4.4-canonical')
++        self.assertEqual(self.scan('text("ok");')['scanner_version'], '4.5')
+ 
+     def test_pwd_positive(self):
+         p = self.root/'rollout.jsonl'
+@@ -237,7 +237,8 @@ class CanonicalRules(unittest.TestCase):
+             b=io.BytesIO();Image.new('RGB',size,color).save(b,format='PNG')
+             return scanner.match_image(b.getvalue(), [('zoom/a.png',original.getvalue(),source)])
+         self.assertEqual(match((2048,100),(254,254,254))['match'],'downscale')
+-        for size,color in (((2048,100),(253,253,253)),((2048,103),'white'),((1024,50),'white')):
++        self.assertEqual(match((1024,50),'white')['match'],'downscale')
++        for size,color in (((2048,100),(253,253,253)),((2048,103),'white')):
+             self.assertIsNone(match(size,color))
+ 
+ 
+@@ -251,6 +252,47 @@ WITNESSES = {
+     'v42_ruc1': ('rollout-2026-10-17T16-49-41-01a14a20-1ea7-73a3-b472-2ff79d7093dc.jsonl', True, 81),
+ }
+ 
++def replay_witness(rollout, directory):
++    """Rehydrate missing content-addressed RU1 crops in a temporary snapshot.
++
++    The historical rollout and pack are never changed. Roots are relocated in
++    string fields only; the literal /zoom CQ1 violation is never rewritten.
++    Every recovered byte must match the existing manifest, and the complete
++    snapshot must pass integrity before the witness is inspected.
++    """
++    manifest=directory.parent/f'MANIFEST.{directory.name}.json'
++    files=json.loads(manifest.read_text())['files']
++    missing=[name for name in files if not (directory/name).is_file()]
++    if not missing:return inspect(rollout,directory)
++    if not all(name.startswith('crops/') for name in missing):
++        raise AssertionError('Missing non-crop witness originals: '+str(missing))
++    scratch=next((p for p in directory.parents if p.name=='scratchpad'),None)
++    if scratch is None:raise AssertionError('No local witness cache root')
++    with tempfile.TemporaryDirectory(prefix='sc45-witness-') as tmp:
++        root=Path(tmp).resolve();snapshot=root/directory.name
++        shutil.copytree(directory,snapshot)
++        shutil.copyfile(manifest,root/manifest.name)
++        for name in missing:
++            source=scratch/'ru1_cache'/name
++            if not source.is_file() or scanner.sha(source)!=files[name]:
++                raise AssertionError('Unavailable or changed cached witness crop: '+name)
++            (snapshot/name).parent.mkdir(parents=True,exist_ok=True)
++            shutil.copyfile(source,snapshot/name)
++        errors,skipped=scanner.integrity(snapshot)
++        if errors or skipped:raise AssertionError('Snapshot integrity: '+str(errors))
++        def relocate(obj):
++            if isinstance(obj,str):return obj.replace(str(directory),str(snapshot))
++            if isinstance(obj,list):return [relocate(v) for v in obj]
++            if isinstance(obj,dict):return {k:relocate(v) for k,v in obj.items()}
++            return obj
++        replay=root/'rollout.jsonl'
++        replay.write_text(''.join(json.dumps(relocate(json.loads(line)))+'\n' for line in rollout.read_text().splitlines()))
++        print('WITNESS SNAPSHOT '+rollout.name+' source_sha256='+scanner.sha(rollout)+
++            ' manifest_sha256='+scanner.sha(manifest)+' recovered='+str(len(missing))+
++            ' all_manifest_hashes=PASS original_pack_unchanged=true',flush=True)
++        return inspect(replay,snapshot)
++
++
+ class WitnessReplays(unittest.TestCase):
+     def replay(self, name):
+         filename, ok, images = WITNESSES[name]; rollout=SESSIONS/filename
+@@ -258,7 +300,7 @@ class WitnessReplays(unittest.TestCase):
+         with rollout.open() as f: directory=Path(json.loads(next(f))['payload']['cwd'])
+         # Missing packs are a failure: do not silently skip a present rollout.
+         self.assertTrue(directory.is_dir(), 'Missing witness reader pack: '+str(directory))
+-        result=inspect(rollout,directory)
++        result=replay_witness(rollout,directory)
+         self.assertEqual(result['ok'],ok,result['violations'])
+         self.assertEqual(result['returned_images'],images)
+         self.assertFalse(result['manifest_check_skipped'])

@@ -1,0 +1,330 @@
+--- a/docs/records/harvest/census05/readout/census_readout.py
++++ b/docs/records/harvest/census05/readout/census_readout.py
+@@ -16,7 +16,6 @@
+ import time
+ 
+ DISPOSITIONS = ('ADMIT', 'HOLD', 'DROP')
+-PIPELINE_VERSION = '0.3'  # line_pipeline.PIPELINE_VERSION; not a verdict rule
+ TOOLS = ('polytonic', 'cyrillic', 'numerics', 'dashes', 'content_repair')
+ 
+ 
+@@ -89,7 +88,7 @@
+                 for name, counts in sorted(self.data.items())}
+ 
+ 
+-def readout(run, out, baseline=None, expect_rows=None):
++def readout(run, out, baseline=None, expect_rows=None, expect_pipeline_version=None):
+     started = time.time()
+     run, out = Path(run).resolve(), Path(out).resolve()
+     if out == run or run in out.parents:
+@@ -135,9 +134,15 @@
+     index = sqlite3.connect(':memory:')
+     index.executescript('''CREATE TABLE seen(parent TEXT,id TEXT,disposition TEXT,split TEXT,reasons TEXT,crop TEXT,
+         PRIMARY KEY(parent,id));
++        CREATE TABLE eligible(parent TEXT,id TEXT,payload TEXT,PRIMARY KEY(parent,id));
++        CREATE TABLE exported(parent TEXT,id TEXT,PRIMARY KEY(parent,id));
+         CREATE TABLE protected_crop(value TEXT PRIMARY KEY);
+         CREATE TABLE protected_edition(value TEXT PRIMARY KEY);
+         CREATE TABLE leak_keys(parent TEXT,id TEXT,PRIMARY KEY(parent,id));''')
++    # line_pipeline_census.py:167-171: observed non-train/non-unassigned crops
++    # union configured heldout_crop_sha256; edition protection is retained below.
++    for crop in config.get('final_policy', {}).get('heldout_crop_sha256', []):
++        index.execute('INSERT OR IGNORE INTO protected_crop VALUES (?)', (crop,))
+     for edition in config.get('final_policy', {}).get('heldout_editions', []):
+         index.execute('INSERT OR IGNORE INTO protected_edition VALUES (?)', (edition,))
+     input_splits = Counter()
+@@ -185,11 +190,17 @@
+                           (parent, row_id, disp, split, canonical(names), b.get('crop_sha256')))
+         except sqlite3.IntegrityError:
+             problem('duplicates', dict(parent=parent, id=row_id))
+-        observed = inventory.execute('SELECT source,role,script,edition FROM observations WHERE parent=? AND id=?', (parent, row_id)).fetchone()
++        observed = inventory.execute('SELECT source,role,script,edition,split,payload FROM observations WHERE parent=? AND id=?', (parent, row_id)).fetchone()
+         if observed is None:
+             problem('unexpected_rows', dict(parent=parent, id=row_id))
+-            observed = ('UNKNOWN', 'UNKNOWN', 'UNKNOWN', '')
+-        source, role, script, edition = observed
++            observed = ('UNKNOWN', 'UNKNOWN', 'UNKNOWN', '', '', '{}')
++        source, role, script, edition, inventory_split, payload = observed
++        # line_pipeline_census.py:204-214: inventory split=train AND decision=ADMIT,
++        # exact exported row is dict(observation, final_text=..., decision=...).
++        if inventory_split == 'train' and disp == 'ADMIT':
++            expected_row = dict(json.loads(payload), final_text=d.get('final_text'), decision=d)
++            index.execute('INSERT OR IGNORE INTO eligible VALUES (?,?,?)',
++                          (parent, row_id, hashlib.sha256(canonical(expected_row).encode()).hexdigest()))
+         dims = (parent, split, disp)
+         counts.add('decisions_by_parent_split', ('parent', 'split', 'disposition'), dims)
+         counts.add('by_stratum', ('parent', 'split', 'source', 'role', 'script', 'disposition'),
+@@ -203,7 +214,7 @@
+         for tool, tool_version in d.get('toolchain_versions', {}).items():
+             tool_versions[(tool, tool_version)] += 1
+         version = d.get('pipeline_version', 'MISSING'); versions[version] += 1
+-        if version != PIPELINE_VERSION:
++        if not isinstance(version, str) or not version or version == 'MISSING' or version != (expect_pipeline_version if expect_pipeline_version is not None else next(iter(versions))):
+             problem('pipeline_version_mismatch', dict(parent=parent, id=row_id, version=version))
+         if disp != 'ADMIT' and not names:
+             problem('no_reason', dict(parent=parent, id=row_id, disposition=disp))
+@@ -266,6 +277,11 @@
+     admitted_train = 0
+     for row in records(generation / 'admitted_train.jsonl'):
+         admitted_train += 1
++        expected_row = index.execute('SELECT payload FROM eligible WHERE parent=? AND id=?', key(row)).fetchone()
++        duplicate = index.execute('SELECT 1 FROM exported WHERE parent=? AND id=?', key(row)).fetchone()
++        if duplicate or expected_row is None or expected_row[0] != hashlib.sha256(canonical(row).encode()).hexdigest():
++            problem('admitted_train_equals_eligible', dict(parent=key(row)[0], id=key(row)[1], kind='duplicate' if duplicate else 'row_mismatch'))
++        index.execute('INSERT OR IGNORE INTO exported VALUES (?,?)', key(row))
+         found = index.execute('SELECT disposition,split,crop FROM seen WHERE parent=? AND id=?', key(row)).fetchone()
+         if found != ('ADMIT', 'train', row.get('crop_sha256')) or row.get('split') != 'train':
+             problem('admitted_train_violations', dict(parent=key(row)[0], id=key(row)[1]))
+@@ -273,6 +289,8 @@
+         edition_hit = index.execute('SELECT 1 FROM protected_edition WHERE value=?', (row.get('edition_id'),)).fetchone() is not None
+         if crop_hit or edition_hit:
+             problem('heldout_leaks', dict(parent=key(row)[0], id=key(row)[1], crop=crop_hit, edition=edition_hit, export='admitted_train.jsonl'))
++    for parent, row_id in index.execute('SELECT parent,id FROM eligible EXCEPT SELECT parent,id FROM exported'):
++        problem('admitted_train_equals_eligible', dict(parent=parent, id=row_id, kind='missing'))
+     pending = {}
+     for path in sorted(generation.glob('pending_*.jsonl')):
+         tool = path.stem[len('pending_'):]; pending[tool] = 0
+@@ -335,7 +353,7 @@
+     def check(name, failures):
+         invariants[name] = dict(status='PASS' if failures == 0 else 'FAIL', count=failures)
+     check('dispositions_sum', abs(rows - sum(totals[d] for d in DISPOSITIONS)))
+-    for name in ('admitted_train_violations', 'heldout_leaks', 'gate_segmentation_violations', 'gate_route_violations',
++    for name in ('admitted_train_equals_eligible', 'admitted_train_violations', 'heldout_leaks', 'gate_segmentation_violations', 'gate_route_violations',
+                  'duplicates', 'missing_rows', 'unexpected_rows', 'no_reason', 'pipeline_version_mismatch'):
+         check(name, problems[name]['count'])
+     check('summary_by_stratum', mismatch)
+@@ -370,7 +388,7 @@
+     result = dict(schema='census-readout-v1', generation=str(generation), files=list(files.values()),
+                   input_rows=sum(expected.values()), rows=rows, complete=complete, dispositions=dict(totals),
+                   admitted_train=admitted_train, gate=dict(gate), pending=pending, v3_splits=dict(v3),
+-                  pipeline_versions=dict(versions), expected_pipeline_version=PIPELINE_VERSION,
++                  pipeline_versions=dict(versions), expected_pipeline_version=expect_pipeline_version,
+                   tool_versions_binding=tool_binding,
+                   toolchain_versions_seen_note='toolchain_versions tables count values serialized in decisions',
+                   summary_reason_counts=dict(summary_reasons), route_status_counts=dict(route_statuses),
+@@ -450,8 +468,9 @@
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--run', required=True); parser.add_argument('--out', required=True)
+     parser.add_argument('--baseline'); parser.add_argument('--expect-rows', type=int)
++    parser.add_argument('--expect-pipeline-version')
+     args = parser.parse_args()
+-    r = readout(args.run, args.out, args.baseline, args.expect_rows)
++    r = readout(args.run, args.out, args.baseline, args.expect_rows, args.expect_pipeline_version)
+     print(markdown(r).splitlines()[-1])
+     return 0 if all(v['status'] == 'PASS' for v in r['invariants'].values()) and r['complete'] else 1
+ 
+--- a/docs/records/harvest/census05/readout/test_census_readout.py
++++ b/docs/records/harvest/census05/readout/test_census_readout.py
+@@ -14,7 +14,12 @@
+ import pytest
+ 
+ HERE = Path(__file__).resolve().parent
+-ROOT = HERE.parents[3]
++ROOT = next(p for p in HERE.parents if (p / 'greekocr').is_dir() and (p / 'docs').is_dir())
++
++def historical(path):
++    if not path.exists():
++        pytest.skip('historical fixture absent from this checkout: ' + str(path))
++    return path
+ MOCK = ROOT / 'docs/harvest/seg_census/mock_batch'
+ ATTEMPTS = [MOCK / 'mode-i-removed'] + [MOCK / 'W/filter_pipeline_20261018/census_04_seg08' / n
+                                       for n in ('mode-i', 'mode-ii', 'smoke-mode-i', 'smoke-mode-ii')]
+@@ -34,7 +39,7 @@
+ 
+ def decision(r, disposition='ADMIT', reasons=None, stages=None):
+     return dict(binding={k:r[k] for k in ('parent_id','id','split','crop_sha256')}, disposition=disposition,
+-                pipeline_version='0.3', reasons=[dict(reason=x) for x in (reasons or [])], stages=stages or [],
++                pipeline_version='0.3', final_text='text', reasons=[dict(reason=x) for x in (reasons or [])], stages=stages or [],
+                 routes={t:dict(status='not_run_due_to_prior_exclusion') for t in reader.TOOLS},
+                 toolchain_versions={'segmentation':'0.8'})
+ 
+@@ -47,7 +52,7 @@
+     encoded = reader.canonical(binding); bound_sha = hashlib.sha256(encoded.encode()).hexdigest()
+     db.execute('INSERT INTO run VALUES (?,?)', ('binding', encoded))
+     gate_reasons = ['mixed_script_word','unexpected_script','short_line','single_character_cell','numeric_shape','cell_status_unresolved']
+-    strata = {}; totals = {}; first_admit = None
++    strata = {}; totals = {}; admitted = []
+     with (gen/'decisions.jsonl').open('w') as stream:
+         for i in range(n):
+             r = row(i, edition='protected' if corrupt and i==6 else None)
+@@ -67,14 +72,14 @@
+                 d['routes']['polytonic'] = dict(status='proposal_only', edits=[dict(start=0,end=1,text='x')])
+             else:
+                 d = decision(r)
+-                if first_admit is None: first_admit = dict(r, decision=d)
++                admitted.append(dict(r, final_text=d['final_text'], decision=d))
+             count = 2 if corrupt and i==0 else 1
+             for _ in range(count):
+                 stream.write(reader.canonical(d)+'\n')
+                 disp = d['disposition']; totals[disp]=totals.get(disp,0)+1
+                 k=('p','train','s','prose','greek',disp); strata[k]=strata.get(k,0)+1
+     db.commit(); db.close()
+-    (gen/'admitted_train.jsonl').write_text(reader.canonical(first_admit)+'\n' if first_admit else '')
++    (gen/'admitted_train.jsonl').write_text(''.join(reader.canonical(r)+'\n' for r in admitted))
+     if corrupt:
+         with (gen/'admitted_train.jsonl').open('a') as stream: stream.write(reader.canonical(row(7))+'\n')
+     (gen/'admission_records.jsonl').write_text('')
+@@ -91,6 +96,7 @@
+ 
+ @pytest.mark.parametrize('run', ATTEMPTS, ids=lambda p:p.name)
+ def test_real_mock(run, tmp_path):
++    historical(run / 'CURRENT.json')
+     before = {str(p):reader.sha(p) for p in run.rglob('*') if p.is_file()}
+     result = reader.readout(run,tmp_path/'out')
+     gen = Path(result['generation']); summary=json.loads((gen/'summary.json').read_text())
+@@ -150,7 +156,7 @@
+     run=make_run(tmp_path/'run',corrupt=False)
+     proc=subprocess.run(['/usr/bin/python3','-B',str(HERE/'census_readout.py'),'--run',str(run),'--out',str(tmp_path/'out')],capture_output=True,text=True)
+     assert proc.returncode==0,proc.stderr
+-    (HERE/'mac_python_receipt.json').write_text(json.dumps(dict(version=subprocess.check_output(['/usr/bin/python3','--version'],text=True).strip(),syntax='ast feature_version=(3, 6) PASS',stdout=proc.stdout),indent=2)+'\n')
++    (tmp_path/'mac_python_receipt.json').write_text(json.dumps(dict(version=subprocess.check_output(['/usr/bin/python3','--version'],text=True).strip(),syntax='ast feature_version=(3, 6) PASS',stdout=proc.stdout),indent=2)+'\n')
+ 
+ 
+ def test_spooled_job(tmp_path):
+@@ -167,14 +173,21 @@
+ os.execvpe(args[0],args,os.environ)
+ ''');srun.chmod(0o755)
+     out=tmp_path/'out';log=tmp_path/'srun.jsonl'
+-    env=dict(os.environ,PATH=str(bin_dir)+os.pathsep+os.environ['PATH'],CENSUS05_RUN=str(ATTEMPTS[0]),CENSUS05_READOUT_OUT=str(out),CENSUS05_BUNDLE=str(HERE),CENSUS05_PYTHON=sys.executable,SLURM_JOB_PARTITION='normal',MOCK_SRUN_LOG=str(log))
++    env=dict(os.environ,PATH=str(bin_dir)+os.pathsep+os.environ['PATH'],CENSUS05_RUN=str(make_run(tmp_path/'spool-run',n=200,corrupt=False)),CENSUS05_READOUT_OUT=str(out),CENSUS05_BUNDLE=str(HERE),CENSUS05_PYTHON=sys.executable,SLURM_JOB_PARTITION='normal',MOCK_SRUN_LOG=str(log))
++    decision_path=Path(env['CENSUS05_RUN'])/'generations/g1-test/decisions.jsonl'
++    ds=[json.loads(line) for line in decision_path.read_text().splitlines()]
++    for d in ds: d['pipeline_version']='0.3.2'
++    decision_path.write_text(''.join(reader.canonical(d)+'\n' for d in ds))
++    exports=list(reader.records(decision_path.parent/'admitted_train.jsonl'))
++    for r,d in zip(exports,ds): r['decision']=d
++    (decision_path.parent/'admitted_train.jsonl').write_text(''.join(reader.canonical(r)+'\n' for r in exports))
+     proc=subprocess.run(['bash',str(job)],cwd=str(unrelated),env=env,capture_output=True,text=True)
+     assert proc.returncode==0,proc.stderr
+     calls=[json.loads(line) for line in log.read_text().splitlines()]
+     assert len(calls)==1 and calls[0]['cwd']==str(unrelated)
+     assert str(HERE/'census_readout.py') in calls[0]['argv']
+     assert json.loads((out/'readout.json').read_text())['rows']==200
+-    (HERE/'spool_receipt.json').write_text(json.dumps(dict(stdout=proc.stdout,calls=calls,spooled=True,sbatch_invoked=False),indent=2)+'\n')
++    (tmp_path/'spool_receipt.json').write_text(json.dumps(dict(stdout=proc.stdout,calls=calls,spooled=True,sbatch_invoked=False),indent=2)+'\n')
+ 
+ 
+ def test_streaming_600k(tmp_path):
+@@ -190,12 +203,12 @@
+     metrics=json.loads(proc.stdout);assert metrics['rows']==600000
+     assert metrics['peak_mb']<1024
+     assert all(v['status']=='PASS' for v in metrics['invariants'].values())
+-    (HERE/'streaming_receipt.json').write_text(json.dumps(metrics,indent=2)+'\n')
++    (tmp_path/'streaming_receipt.json').write_text(json.dumps(metrics,indent=2)+'\n')
+ 
+ 
+ def test_local_census03_evidence():
+     evidence=ROOT/'docs/harvest/seg_census/remote_evidence'
+-    validation=json.loads((evidence/'validation.json').read_text())
++    validation=json.loads(historical(evidence/'validation.json').read_text())
+     assert validation['rows']==592466 and len(validation['parents'])==5
+     assert sum(validation['parents'].values())==592466
+     handoff=(ROOT/'docs/harvest/seg_census/HANDOFF_SEGCENSUS1.md').read_text()
+@@ -216,6 +229,8 @@
+     db.commit();db.close()
+     decisions=list(reader.records(gen/'decisions.jsonl'))
+     decisions[1]['binding']['split']='dev';decisions[1]['binding']['crop_sha256']='crop-0'
++    exports=[r for r in reader.records(gen/'admitted_train.jsonl') if r['id']!='1']
++    (gen/'admitted_train.jsonl').write_text(''.join(reader.canonical(r)+'\n' for r in exports))
+     (gen/'decisions.jsonl').write_text(''.join(reader.canonical(d)+'\n' for d in decisions))
+     summary=json.loads((gen/'summary.json').read_text());summary['by_stratum'][0]['rows']=9
+     summary['by_stratum'].append(dict(summary['by_stratum'][0],split='dev',rows=1));dump(gen/'summary.json',summary)
+@@ -240,3 +255,85 @@
+     assert result['invariants'][fault]==dict(status='FAIL',count=1)
+     if fault=='pipeline_version_mismatch':
+         assert result['pipeline_versions']=={'0.3':9,'DIFFERENT':1}
++
++@pytest.mark.parametrize('version,expected,passes', [('0.3.2',None,True),('0.3.2','0.3.2',True),('0.3.2','0.3',False),(None,None,False),('',None,False)])
++def test_pipeline_version_argument(tmp_path,version,expected,passes):
++    run=make_run(tmp_path/'version-run',corrupt=False)
++    path=run/'generations/g1-test/decisions.jsonl'
++    ds=[json.loads(s) for s in path.read_text().splitlines()]
++    for d in ds:
++        if version is None: d.pop('pipeline_version')
++        else: d['pipeline_version']=version
++    path.write_text(''.join(reader.canonical(d)+'\n' for d in ds))
++    exports=list(reader.records(run/'generations/g1-test/admitted_train.jsonl'))
++    for r,d in zip(exports,ds): r['decision']=d
++    (run/'generations/g1-test/admitted_train.jsonl').write_text(''.join(reader.canonical(r)+'\n' for r in exports))
++    result=reader.readout(run,tmp_path/'version-out',expect_pipeline_version=expected)
++    assert (result['invariants']['pipeline_version_mismatch']['status']=='PASS') is passes
++    assert result['expected_pipeline_version']==expected
++
++
++def republish(run, held=(), empty=False):
++    gen=run/'generations/g1-test'
++    db=sqlite3.connect(str(run/'ledger.sqlite'))
++    binding=json.loads(db.execute("SELECT value FROM run WHERE key='binding'").fetchone()[0])
++    binding['config']['final_policy']['heldout_crop_sha256']=list(held)
++    encoded=reader.canonical(binding)
++    db.execute("UPDATE run SET value=? WHERE key='binding'", (encoded,));db.commit();db.close()
++    if empty: (gen/'admitted_train.jsonl').write_text('')
++    summary=json.loads((gen/'summary.json').read_text())
++    summary['run_binding_sha256']=hashlib.sha256(encoded.encode()).hexdigest()
++    summary['outputs']={p.stem:dict(sha256=reader.sha(p)) for p in gen.glob('*.jsonl')}
++    dump(gen/'summary.json',summary)
++    current=json.loads((run/'CURRENT.json').read_text())
++    current.update(run_binding_sha256=summary['run_binding_sha256'],summary_sha256=reader.sha(gen/'summary.json'))
++    dump(run/'CURRENT.json',current)
++
++
++def cli(run, out, n):
++    proc=subprocess.run([sys.executable,'-B',str(HERE/'census_readout.py'),
++                         '--run',str(run),'--out',str(out),'--expect-rows',str(n)],capture_output=True,text=True)
++    return proc,json.loads((out/'readout.json').read_text())
++
++
++@pytest.mark.parametrize('configured', [True,False])
++def test_astra_config_only_crop(tmp_path,configured):
++    run=make_run(tmp_path/'run',n=1,corrupt=False)
++    republish(run,held=['crop-0'] if configured else [])
++    proc,result=cli(run,tmp_path/'out',1)
++    assert result['problems']['heldout_leaks']['count']==int(configured)
++    assert result['invariants']['heldout_leaks']['status']==('FAIL' if configured else 'PASS')
++    assert proc.returncode==(1 if configured else 0)
++    if configured:
++        assert result['problems']['heldout_leaks']['first20'][0]['edition'] is False
++
++
++def test_astra_missing_export(tmp_path):
++    run=make_run(tmp_path/'run',n=3,corrupt=False);republish(run,empty=True)
++    proc,result=cli(run,tmp_path/'out',3)
++    assert result['invariants']['admitted_train_equals_eligible']==dict(status='FAIL',count=3)
++    assert result['invariants']['admitted_train_violations']['status']=='PASS'
++    assert proc.returncode==1
++
++
++@pytest.mark.parametrize('fault',['duplicate','row_content'])
++def test_export_equality(tmp_path,fault):
++    run=make_run(tmp_path/'run',n=1,corrupt=False)
++    path=run/'generations/g1-test/admitted_train.jsonl'
++    if fault=='duplicate': path.write_text(path.read_text()*2)
++    else:
++        r=json.loads(path.read_text());r['final_text']='changed';dump(path,r)
++    republish(run)
++    proc,result=cli(run,tmp_path/'out',1)
++    assert result['invariants']['admitted_train_equals_eligible']['status']=='FAIL'
++    assert proc.returncode==1
++
++
++@pytest.mark.parametrize('name',['smoke-mode-i','smoke-mode-ii','full-mode-ii'])
++def test_census05_mock(tmp_path,name):
++    fixture=historical(HERE.parent/'mocks'/name/'readout.json')
++    recorded=json.loads(fixture.read_text())
++    run=historical(HERE.parent/'mock_batch/W/census_05_20261020/attempts'/name)
++    proc,result=cli(run,tmp_path/'out',200)
++    assert proc.returncode==0,proc.stdout+proc.stderr
++    assert all(v['status']=='PASS' for v in result['invariants'].values())
+--- a/docs/records/harvest/census05/readout/readout.sbatch
++++ b/docs/records/harvest/census05/readout/readout.sbatch
+@@ -14,7 +14,9 @@
+ # Inherit the allocation's uenv, exactly as seg_census/jobs/common.sh does.
+ # BUNDLE is the absolute deployed directory containing census_readout.py.
+ python=${CENSUS05_PYTHON:-${W:-/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3}/venv_l1/bin/python}
+-args=(--run "$CENSUS05_RUN" --out "$CENSUS05_READOUT_OUT")
++package=${CENSUS05_PROJECT_ROOT:-$CENSUS05_BUNDLE/../package/projects/greek-ocr-toolkit-pipe032}
++version=$(PYTHONPATH="$package" "$python" -B -c 'from greekocr.harvest.line_pipeline import PIPELINE_VERSION; print(PIPELINE_VERSION)')
++args=(--expect-pipeline-version "$version" --run "$CENSUS05_RUN" --out "$CENSUS05_READOUT_OUT")
+ if [[ -n "${CENSUS05_BASELINE:-}" ]]; then args+=(--baseline "$CENSUS05_BASELINE"); fi
+ if [[ -n "${CENSUS05_EXPECT_ROWS:-}" ]]; then args+=(--expect-rows "$CENSUS05_EXPECT_ROWS"); fi
+ srun -A a0140 --partition="${SLURM_JOB_PARTITION:?}" --cpu-bind=none --nodes=1 --ntasks=1 \

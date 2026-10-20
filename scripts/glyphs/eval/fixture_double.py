@@ -1,4 +1,4 @@
-"""Double-line flag on the 44 real fixtures vs docs/glyphs_fixture_labels.json (provisional, in-sample threshold)."""
+"""Double-line flag on the 44 real fixtures vs docs/records/glyphs/glyphs_fixture_labels.json (provisional, in-sample threshold)."""
 import json, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
@@ -6,7 +6,7 @@ sys.path.insert(0, str(ROOT))
 from PIL import Image
 from greekocr.glyphs.components import line_glyphs
 from greekocr.glyphs.baseline import skew_line
-labels = json.loads((ROOT / 'docs/glyphs_fixture_labels.json').read_text())
+labels = json.loads((ROOT / 'docs/records/glyphs/glyphs_fixture_labels.json').read_text())
 res = {}
 for kind in ('double', 'single', 'unscored_partial'):
     for n in labels[kind]:

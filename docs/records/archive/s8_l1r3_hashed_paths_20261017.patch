@@ -1,0 +1,626 @@
+diff --git a/scripts/labelfix/clariden/l1_common.py b/scripts/labelfix/clariden/l1_common.py
+index 9fb2371a..25518e7f 100644
+--- a/scripts/labelfix/clariden/l1_common.py
++++ b/scripts/labelfix/clariden/l1_common.py
+@@ -45,7 +45,8 @@ def overlay(record, runtime, variant, binding):
+     # Never trust previously composed decisions under an older policy.
+     mode = compose_runtime(runtime,variant.upper())
+     result.update(release_policy=POLICY,evidence_sha256=mode['evidence_sha256'],opening_quotes=mode['opening_quotes'],
+-        gate_decisions=[{k:s.get(k) for k in ('start','base','label_status','hold_reasons',
++        composed_text=mode['text'],
++        gate_decisions=[{k:s.get(k) for k in ('start','base','parts','label_status','hold_reasons',
+             'r1_coverage','segmentation_uncertain','localisation_unknown','unnamed',
+             'detector_parts','r1_parts','peer_arm','peer_prediction','peer_coverage','evidence','constraint_flags','apostrophe')}
+             for s in mode['slots']])
+@@ -99,11 +100,14 @@ def _overlays(task):
+     return runtime['id'],{v:overlay(record,runtime,v,binding) for v in variants}
+ 
+ 
+-def release(selection, runtime_paths, out, binding, source, input_receipt, variants=('presence','full'), workers=1):
++def release(selection, runtime_paths, out, binding, source, input_receipt, variants=('presence','full'), workers=1,
++            *, verified_source_sha256=None):
+     """Stream both variants, with one explicit kept-line list shared by each control."""
+     out = Path(out)
+     out.mkdir(parents=True, exist_ok=False)
+-    original_sha = sha256(source)
++    # Shard orchestration verifies the complete source before and after all
++    # shards. Avoid rereading that same full manifest twice per shard.
++    original_sha = verified_source_sha256 or sha256(source)
+     selected=list(rows(selection))
+     records = {r['id']: r for r in selected}
+     if len(records)!=len(selected):raise ValueError('duplicate selection IDs')
+@@ -158,7 +162,8 @@ def release(selection, runtime_paths, out, binding, source, input_receipt, varia
+             f.close()
+     if seen != set(records):
+         raise ValueError(f'incomplete runtime: {len(seen)}/{len(records)}')
+-    assert original_sha == sha256(source), 'original labels changed'
++    if verified_source_sha256 is None:
++        assert original_sha == sha256(source), 'original labels changed'
+     for variant in handles:
+         op = out / f'overlay_{variant}.jsonl.gz'
+         cp = out / f'ctrl_subset_{variant}.jsonl.gz'
+diff --git a/scripts/labelfix/clariden/l1r_recompose.py b/scripts/labelfix/clariden/l1r_recompose.py
+index c28bdf9f..44aa3c97 100644
+--- a/scripts/labelfix/clariden/l1r_recompose.py
++++ b/scripts/labelfix/clariden/l1r_recompose.py
+@@ -1,116 +1,477 @@
+-"""Re-release L1-v0 saved evidence under SF2. No detector or model execution.
++"""Receipt-bound SF6c recomposition; no detector, inference or submission.
+ 
+-Missing gate inputs cause HOLD. Old files are never written. A complete input
+-run, exact selection and all shard hashes must verify before release.
++--verify-only streams SHA-256 reads in place. Independent shard workers write
++atomic receipts and support exact-input reuse after a timeout.
+ """
++from __future__ import annotations
+ import argparse
+ from collections import Counter
++from concurrent.futures import ThreadPoolExecutor
++import hashlib
+ import json
++import multiprocessing as mp
+ from pathlib import Path
+-from greekocr.labelfix.release_gate import policy_binding
+-from scripts.labelfix.clariden.l1_common import release, rows, sha256, write_json
+-
+-
+-def recompose(input_run, selection, binding_dir, source, out, ensemble_run=None, workers=1):
+-    base,out=Path(input_run),Path(out)
+-    if out.resolve()==base.resolve() or base.resolve() in out.resolve().parents:
+-        raise ValueError('L1r output must be separate from historical run')
+-    run=json.loads((base/'run_receipt.json').read_text())
+-    if not run.get('complete'):raise ValueError('incomplete historical run')
+-    paths=sorted((base/'combined').glob('shard-*-combined.jsonl.gz'))
+-    if not paths:raise ValueError('no saved combined shards')
+-    inputs={str(selection):sha256(selection),str(source):sha256(source)}
+-    inputs[str(base/'run_receipt.json')]=sha256(base/'run_receipt.json')
+-    binding_path=Path(binding_dir)/'binding.json'
+-    if sha256(binding_path)!=run['binding_sha256']:raise ValueError('historical binding changed')
+-    inputs[str(binding_path)]=sha256(binding_path)
+-    for name,digest in run['step_receipts'].items():
+-        if sha256(base/name)!=digest:raise ValueError('historical step receipt changed: '+name)
+-        inputs[str(base/name)]=digest
+-    ids=[];missing=Counter();apostrophes=0
+-    for path in paths:
+-        receipt=json.loads(path.with_name(path.name.replace('-combined.jsonl.gz','-receipt.json')).read_text())
+-        if not receipt.get('complete') or receipt['output_sha256']!=sha256(path):raise ValueError('invalid shard '+str(path))
+-        inputs[str(path)]=sha256(path)
+-        for r in rows(path):
+-            ids.append(r['id'])
+-            for key in ('detector','r1_predictions','coverage','recogniser_text'):
+-                if key not in r:raise ValueError('missing line input '+key)
+-            for c in r['coverage']:
+-                for key in ('scored','evidence_state','uncertainty'):
+-                    if key not in c:missing['r1_'+key]+=1
+-            for s in r['detector']['slots']:
+-                if 'segmentation_uncertain' not in s:missing['detector_segmentation_state']+=1
+-                for k in ('clipped_top','clipped_bottom'):
+-                    if k not in s.get('evidence',{}):missing[k]+=1
+-                if s.get('apostrophe') and not s.get('evidence',{}).get('apostrophes'):apostrophes+=1
+-    selected=list(rows(selection))
+-    if len(ids)!=len(set(ids)) or set(ids)!={r['id'] for r in selected}:raise ValueError('runtime/selection mismatch')
+-    for v in ('presence','full'):
+-        manifest=json.loads((base/'release'/f'release_{v}.json').read_text())
+-        inputs[str(base/'release'/f'release_{v}.json')]=sha256(base/'release'/f'release_{v}.json')
+-        if manifest['source_sha256']!=sha256(source) or manifest['selection_sha256']!=sha256(selection):raise ValueError('source/selection changed')
+-        for name,key in [('overlay','overlay_sha256'),('kept_line_ids','kept_line_ids_sha256')]:
+-            if sha256(base/'release'/manifest[name])!=manifest[key]:raise ValueError('historical release hash mismatch')
+-            inputs[str(base/'release'/manifest[name])]=manifest[key]
+-        control=json.loads((base/'release'/f'release_ctrl_subset_{v}.json').read_text())
+-        if sha256(base/'release'/control['labels_file'])!=control['labels_sha256']:raise ValueError('historical control changed')
+-        inputs[str(base/'release'/control['labels_file'])]=control['labels_sha256']
+-    if missing:raise ValueError('saved evidence incomplete; regenerate missing fields: '+str(dict(missing)))
+-    runtime_paths=paths;ensemble=None
++import shutil
++import time
++import uuid
++from greekocr.labelfix.release_gate import MODES, POLICY, ENSEMBLE_CAVEAT, compose_runtime, policy_binding
++from scripts.labelfix.clariden.l1_common import STATUSES, canonical, label_sha, release, rows, sha256, write_json
++from scripts.labelfix.clariden.r1_common import write_rows
++
++VARIANTS = ('presence', 'full', 'ensemble_ab')
++_RECORDS = {}
++
++
++def load(path):
++    return json.loads(Path(path).read_text())
++
++
++def digest(value):
++    return hashlib.sha256(canonical(value).encode()).hexdigest()
++
++
++def atomic_json(path, value):
++    path = Path(path)
++    tmp = path.with_name(path.name + '.partial')
++    write_json(tmp, value)
++    tmp.replace(path)
++
++
++def separate_output(out, *inputs):
++    out = Path(out).resolve()
++    for original in inputs:
++        original = Path(original).resolve()
++        if out == original or original in out.parents or out in original.parents:
++            raise ValueError('output must be separate from historical inputs: ' + str(original))
++
++
++def verify_inputs(input_run, selection, binding_dir, source, ensemble_run=None, *, expected=None, workers=4):
++    """Verify the receipt DAG before creating releases; never loads pixels.
++
++    L1E's downstream recomposition/run receipt is deliberately not required.
++    Completion follows the complete inference receipt and every shard receipt.
++    """
++    started = time.monotonic()
++    base, selection, source = Path(input_run), Path(selection), Path(source)
++    inputs = {}
++
++    def checked(path, wanted=None):
++        path = Path(path)
++        got = sha256(path)
++        if wanted is not None and got != wanted:
++            raise ValueError('hash mismatch: ' + str(path))
++        if str(path) in inputs and inputs[str(path)] != got:
++            raise ValueError('input changed: ' + str(path))
++        inputs[str(path)] = got
++        return got
++
++    for name, wanted in (expected or {}).items():
++        checked(name, wanted)
++    checked(base / 'run_receipt.json')
++    run = load(base / 'run_receipt.json')
++    if not run.get('complete'):
++        raise ValueError('incomplete historical run')
++    bp = Path(binding_dir) / 'binding.json'
++    checked(bp, run['binding_sha256'])
++    binding = load(bp)
++    for name, wanted in run['step_receipts'].items():
++        checked(base / name, wanted)
++    checked(selection)
++    inp = load(base / 'input_receipt.json')
++    # The saved L1E mock predates the source field in input_receipt. Its
++    # source is byte-identical to its pinned, verification-only selection.
++    if 'source_sha256' not in inp:
++        if not (run.get('mock') and run.get('verification_only') and sha256(source) == inputs[str(selection)]):
++            raise ValueError('missing historical source binding')
++        inp['source_sha256'] = inputs[str(selection)]
++    checked(source, inp['source_sha256'])
++    if binding.get('source_sha256', inputs[str(source)]) != inputs[str(source)]:
++        raise ValueError('binding source mismatch')
++    top = load(base / 'detector/detector_receipt.json')
++    if not top.get('complete') or top['selection_sha256'] != inputs[str(selection)]:
++        raise ValueError('detector selection mismatch/incomplete')
++    selected = list(rows(selection))
++    ids = [r['id'] for r in selected]
++    if len(ids) != len(set(ids)) or len(ids) != run['lines'] or top['lines'] != len(ids):
++        raise ValueError('selection line count/uniqueness mismatch')
++    entries = sorted(top['shards'], key=lambda e: e['shard'])
++    numbers = [e['shard'] for e in entries]
++    if numbers != list(range(len(entries))):
++        raise ValueError('missing/duplicate detector shard')
++    expected_files, tasks = {}, []
++    for e in entries:
++        n = e['shard']
++        dp = base / 'detector' / f'shard-{n:05d}-receipt.json'
++        if str(dp) not in inputs or load(dp) != e or not e.get('complete'):
++            raise ValueError('unbound/incomplete detector shard: ' + str(n))
++        for name, wanted in e['sha256'].items():
++            expected_files[str(base / 'detector' / name)] = wanted
++        rp = base / 'combined' / f'shard-{n:05d}-receipt.json'
++        if str(rp) not in inputs:
++            raise ValueError('unbound A shard: ' + str(n))
++        ar = load(rp)
++        if not ar.get('complete') or ar['lines'] != e['lines'] or ar['samples'] != e['windows']:
++            raise ValueError('incomplete A inference shard: ' + str(n))
++        p = base / 'combined' / ar.get('output', f'shard-{n:05d}-combined.jsonl.gz')
++        expected_files[str(p)] = ar['output_sha256']
++        tasks.append(dict(shard=n, lines=e['lines'], samples=e['windows'], historical=str(p), runtime=str(p)))
++    if {p.name for p in (base / 'combined').glob('shard-*-combined.jsonl.gz')} != {Path(t['historical']).name for t in tasks}:
++        raise ValueError('unexpected/missing A shard files')
++    if sum(t['lines'] for t in tasks) != len(selected):
++        raise ValueError('shard population differs from selection')
++    peer = None
+     if ensemble_run is not None:
+-        ensemble_run=Path(ensemble_run)
+-        ep=ensemble_run/'r1e_receipt.json';ensemble=json.loads(ep.read_text())
+-        if not ensemble.get('complete') or ensemble['historical_run_receipt_sha256']!=sha256(base/'run_receipt.json'):
+-            raise ValueError('ensemble not bound to completed historical run')
+-        if ensemble['selection_sha256']!=sha256(selection):raise ValueError('ensemble selection changed')
+-        inputs[str(ep)]=sha256(ep);runtime_paths=[]
+-        for entry in ensemble['shards']:
+-            rp=ensemble_run/entry['receipt'];sr=json.loads(rp.read_text())
+-            if sha256(rp)!=entry['receipt_sha256'] or not sr['complete']:raise ValueError('ensemble shard receipt changed')
+-            p=ensemble_run/sr['output']
+-            if sha256(p)!=sr['output_sha256']:raise ValueError('ensemble shard changed')
+-            inputs[str(rp)]=sha256(rp);inputs[str(p)]=sha256(p);runtime_paths.append(p)
+-        if len(runtime_paths)!=len(paths):raise ValueError('ensemble shards missing')
+-    out.mkdir(parents=True,exist_ok=False)
+-    binding=json.loads(binding_path.read_text())
+-    policy=policy_binding();binding['historical_policy_sha256']=binding['policy_sha256'];binding['policy_sha256']=policy['sha256']
+-    binding['code_commit']='uncommitted-SF2-source-bound'
+-    binding.update(policy_binding=policy,code_sha256=policy['sources'])
+-    if ensemble is not None:
+-        binding.update(checkpoint_sha256=ensemble['checkpoint_sha256'],code_commit='e48e06e8+L1E-source-bound',
+-                       code_sha256=ensemble['code_sha256'])
+-    inp=json.loads((base/'input_receipt.json').read_text())
+-    variants=('presence','full','ensemble_ab') if ensemble is not None else ('presence','full')
+-    counts=release(selection,runtime_paths,out/'release',binding,source,inp,variants,workers)
+-    changes={}
+-    for v in ('presence','full'):
+-        old={r['line_id']:r for r in rows(base/'release'/f'overlay_{v}.jsonl.gz')}
+-        delta=[]
+-        for r in rows(out/'release'/f'overlay_{v}.jsonl.gz'):
+-            a=old[r['line_id']]
+-            if (a['status'],a.get('label'))!=(r['status'],r.get('label')):
+-                delta.append(dict(line_id=r['line_id'],before=a['status'],after=r['status'],
+-                    reasons=sorted({s['detail'] for s in r['hold_slots']})))
+-        write_json(out/f'decision_changes_{v}.json',delta)
+-        changes[v]=dict(changed=len(delta),reasons=dict(Counter(z for d in delta for z in d['reasons'])))
+-    if any(sha256(Path(p))!=h for p,h in inputs.items()):raise ValueError('input changed during recomposition')
+-    receipt=dict(schema='l1r-recomposition-v1',complete=True,policy=policy,inputs=inputs,
+-        historical_run=str(base),counts=counts,changes=changes,evidence_sufficient=True,
+-        historical_apostrophe_boxes_missing=apostrophes,network=False,detector_runs=0,r1_runs=0,
+-        ensemble_receipt_sha256=inputs.get(str(Path(ensemble_run)/'r1e_receipt.json')) if ensemble_run else None,
+-        outputs={str(p.relative_to(out)):sha256(p) for p in sorted(out.rglob('*')) if p.is_file()})
+-    write_json(out/'receipt.json',receipt)
++        ep = Path(ensemble_run) / 'r1e_receipt.json'
++        checked(ep)
++        peer = load(ep)
++        if not peer.get('complete') or peer['historical_run_receipt_sha256'] != inputs[str(base / 'run_receipt.json')]:
++            raise ValueError('incomplete/unbound B/E inference')
++        if peer['selection_sha256'] != inputs[str(selection)] or peer['lines'] != len(selected):
++            raise ValueError('B/E selection mismatch')
++        if set(peer['checkpoint_sha256']) != {'A', 'B', 'E'} or peer['checkpoint_sha256']['A'] != binding['r1_sha256']:
++            raise ValueError('B/E checkpoint mismatch')
++        bynumber = {}
++        for e in peer['shards']:
++            rp = Path(ensemble_run) / e['receipt']
++            checked(rp, e['receipt_sha256'])
++            sr = load(rp)
++            n = sr['shard']
++            if n in bynumber or n not in numbers or not sr.get('complete'):
++                raise ValueError('missing/duplicate/incomplete B/E shard')
++            t = tasks[n]
++            if (sr['lines'], sr['samples']) != (t['lines'], t['samples']) or (e['lines'], e['samples']) != (t['lines'], t['samples']):
++                raise ValueError('incomplete B/E inference population')
++            si = sr['inputs']
++            dr = base / 'detector' / f'shard-{n:05d}-receipt.json'
++            if (si['historical_combined_sha256'] != expected_files[t['historical']]
++                    or si['window_receipt_sha256'] != inputs[str(dr)]
++                    or si['checkpoint_sha256'] != peer['checkpoint_sha256']
++                    or si['code_sha256'] != peer['code_sha256']):
++                raise ValueError('B/E shard input binding mismatch')
++            p = Path(ensemble_run) / sr['output']
++            expected_files[str(p)] = sr['output_sha256']
++            bynumber[n] = str(p)
++        if set(bynumber) != set(numbers) or peer['samples'] != sum(t['samples'] for t in tasks):
++            raise ValueError('B/E inference incomplete for one or more shards')
++        for t in tasks:
++            t['runtime'] = bynumber[t['shard']]
++        if {p.name for p in Path(ensemble_run).glob('shard-*-combined.jsonl.gz')} != {Path(p).name for p in bynumber.values()}:
++            raise ValueError('unexpected/missing B/E shard files')
++
++    def hash_file(item):
++        name, wanted = item
++        if sha256(name) != wanted:
++            raise ValueError('hash mismatch: ' + name)
++        return name, wanted
++
++    with ThreadPoolExecutor(max_workers=workers) as pool:
++        inputs.update(pool.map(hash_file, expected_files.items()))
++    result = dict(schema='l1r-input-verification-v1', complete=True, lines=len(selected),
++                  shards=len(tasks), samples=sum(t['samples'] for t in tasks),
++                  inputs=inputs, inputs_sha256=digest(inputs), historical_run=str(base),
++                  ensemble_run=str(ensemble_run) if ensemble_run else None,
++                  checkpoint_sha256=peer['checkpoint_sha256'] if peer else {'A': binding['r1_sha256']},
++                  historical_inference_code_sha256=peer['code_sha256'] if peer else {},
++                  elapsed_seconds=time.monotonic() - started)
++    return result, tasks, selected, binding, inp
++
++
++def decision_record(runtime):
++    return {m: compose_runtime(runtime, m) for m in MODES}
++
++
++def validate_release(out, selected, variants):
++    """Read actual overlay/control payloads, not aliases of an in-memory set."""
++    out = Path(out)
++    records = {r['id']: r for r in selected}
++    for v in variants:
++        m = load(out / f'release_{v}.json')
++        c = load(out / f'release_ctrl_subset_{v}.json')
++        name = v.replace('_', '-')
++        if m['release'] != f'v2-corrected-{name}-sf6' or c['release'] != f'v2-ctrl-subset-{name}-sf6':
++            raise ValueError('invalid SF5 release name')
++        for manifest in (m, c):
++            if manifest['release_policy'] != POLICY or manifest['ensemble_caveat'] != ENSEMBLE_CAVEAT:
++                raise ValueError('invalid policy/caveat')
++            if sha256(out / manifest['input_verification_file']) != manifest['input_verification_sha256']:
++                raise ValueError('input verification receipt changed')
++            for key, hk in [('overlay', 'overlay_sha256'), ('kept_line_ids', 'kept_line_ids_sha256')]:
++                if sha256(out / manifest[key]) != manifest[hk]:
++                    raise ValueError('release payload hash mismatch')
++        if sha256(out / c['labels_file']) != c['labels_sha256']:
++            raise ValueError('control hash mismatch')
++        seen, accepted, counts = set(), set(), Counter()
++        for r in rows(out / m['overlay']):
++            i = r['line_id']
++            if r['status'] not in STATUSES:
++                raise ValueError('invalid release status')
++            if i in seen or i not in records or r['original_label_sha256'] != label_sha(records[i]['label']):
++                raise ValueError('overlay original label/ID mismatch')
++            seen.add(i)
++            counts[r['status']] += 1
++            if r['status'] in ('corrected', 'unchanged'):
++                if r['hold_slots']:
++                    raise ValueError('HOLD line admitted')
++                accepted.add(i)
++            elif 'label' in r:
++                raise ValueError('excluded line has release label')
++        kept = (out / m['kept_line_ids']).read_text().splitlines()
++        controls = list(rows(out / c['labels_file']))
++        if (seen != set(records) or len(kept) != len(set(kept)) or set(kept) != accepted
++                or len(controls) != len(accepted) or {r['line_id'] for r in controls} != accepted
++                or m['kept_lines'] != len(accepted) or dict(counts) != {k: n for k, n in m['counts_by_status'].items() if n}):
++            raise ValueError('release/control population mismatch')
++        for r in controls:
++            if r['label'] != records[r['line_id']]['label'] or r['original_label_sha256'] != label_sha(r['label']):
++                raise ValueError('control label modified')
++        for dimension in ('coverage_per_wave', 'coverage_per_source'):
++            if sum(b['total'] for b in m[dimension].values()) != len(records):
++                raise ValueError('coverage population mismatch')
++    return dict(complete=True, lines=len(records), variants=list(variants),
++                original_label_sha_every_line=True, hold_excluded=True, exact_control_pairing=True)
++
++
++def _initialise(selection):
++    global _RECORDS
++    _RECORDS = {r['id']: r for r in rows(selection)}
++
++
++def code_sources():
++    root = Path(__file__).resolve().parents[3]
++    paths = sorted((root / 'greekocr').rglob('*.py')) + sorted((root / 'scripts/labelfix').rglob('*.py'))
++    paths.append(root / 'scripts/labelfix/clariden/l1r_job.sbatch')
++    return {str(p.relative_to(root)): sha256(p) for p in paths}
++
++
++def _shard(task):
++    t, out, binding, source, inp, audit = task
++    started = time.monotonic()
++    runtime = list(rows(t['runtime']))
++    if any(r['id'] not in _RECORDS for r in runtime):
++        raise ValueError('unexpected runtime ID')
++    selected = [_RECORDS[r['id']] for r in runtime]
++    dest = Path(out) / 'shards' / f'shard-{t["shard"]:05d}'
++    reuse_binding = dict(runtime_sha256=sha256(t['runtime']), selection_sha256=digest(selected), binding=binding, audit=audit)
++    rp = dest / 'receipt.json'
++    if rp.exists():
++        r = load(rp)
++        if not r.get('complete') or r['inputs'] != reuse_binding:
++            raise ValueError('stale recomposition shard receipt')
++        for name, wanted in r['outputs'].items():
++            if sha256(dest / name) != wanted:
++                raise ValueError('recomposition shard output changed')
++        return r
++    historical = list(rows(t['historical']))
++    byid = {r['id']: r for r in selected}
++    if len(runtime) != t['lines'] or len(historical) != t['lines'] or len(byid) != t['lines']:
++        raise ValueError('runtime shard count mismatch')
++    if [r['id'] for r in runtime] != [r['id'] for r in historical] or {r['id'] for r in runtime} != set(byid):
++        raise ValueError('runtime/selection shard identity mismatch')
++    for r, old in zip(runtime, historical):
++        for k in ('detector', 'recogniser_text', 'coverage', 'r1_predictions'):
++            if r[k] != old[k]:
++                raise ValueError('L1E historical evidence changed: ' + k)
++        for k in ('recogniser_nfd', 'recognition_confidence', 'recognition_evidence', 'image_width'):
++            if (k in r, r.get(k)) != (k in old, old.get(k)):
++                raise ValueError('L1E historical evidence changed: ' + k)
++        if 'ensemble_ab' in binding['variants']:
++            want = [(p['start'], p['base']) for p in r['r1_predictions']]
++            if len(want) != len(set(want)):
++                raise ValueError('duplicate A prediction')
++            for arm in ('B', 'E'):
++                ps = r.get('peer_predictions', {}).get(arm)
++                cov = r.get('peer_coverage', {}).get(arm)
++                if ps is None or cov is None or [(p['start'], p['base']) for p in ps] != want or cov != r['coverage']:
++                    raise ValueError('B/E inference incomplete: ' + r['id'] + ':' + arm)
++    partial = dest.with_name(dest.name + '.partial-' + uuid.uuid4().hex)
++    partial.mkdir(parents=True)
++    sp = partial / 'selection.jsonl'
++    write_rows(sp, selected)
++    counts = release(sp, [t['runtime']], partial / 'release', binding, source, inp, binding['variants'], workers=1,
++                     verified_source_sha256=inp['source_sha256'])
++    # Packaging census only: consume the frozen composer's actual overlays.
++    elisions = {}
++    for variant in binding['variants']:
++        fields = ('google', 'recogniser', 'both', 'google_only', 'recogniser_only',
++                  'both_kept', 'both_deleted', 'google_only_kept', 'google_only_deleted',
++                  'recogniser_only_kept', 'recogniser_only_deleted', 'added',
++                  'spacing_breathings', 'spacing_breathings_attached', 'aligned_lines', 'unaligned_lines')
++        all_rows, released = Counter(dict.fromkeys(fields, 0)), Counter(dict.fromkeys(fields, 0))
++        for row in rows(partial / 'release' / f'overlay_{variant}.jsonl.gz'):
++            c = row.get('elision_census')
++            if c is None:
++                continue
++            summary = {k: v for k, v in c.items() if k != 'aligned'}
++            summary.update(aligned_lines=int(c['aligned']), unaligned_lines=int(not c['aligned']))
++            all_rows.update(summary)
++            if row['status'] in ('corrected', 'unchanged'):
++                released.update(summary)
++        elisions[variant] = dict(elision_census=dict(all_rows), elision_census_released=dict(released))
++    for p in (partial / 'release').glob('release_*.json'):
++        m = load(p)
++        m['release'] = m['release'].removesuffix('-r') + '-sf6'
++        if 'paired_release' in m:
++            m['paired_release'] = m['paired_release'].removesuffix('-r') + '-sf6'
++        m.update(**elisions[m['variant']])
++        m.update(input_verification_file='../../../input_verification.json',
++                 input_verification_sha256=binding['input_verification_sha256'],
++                 input_hashes_sha256=binding['input_hashes_sha256'],
++                 historical_inference_code_sha256=binding['historical_inference_code_sha256'])
++        write_json(p, m)
++    validation = validate_release(partial / 'release', selected, binding['variants'])
++    if audit:
++        write_rows(partial / 'decisions.jsonl.gz', [dict(id=r['id'], decisions=decision_record(r)) for r in runtime])
++    r = dict(schema='l1r-recomposition-shard-v1', complete=True, shard=t['shard'], lines=len(runtime),
++             inputs=reuse_binding, counts=counts, validation=validation, elapsed_seconds=time.monotonic()-started,
++             outputs={str(p.relative_to(partial)): sha256(p) for p in sorted(partial.rglob('*')) if p.is_file()})
++    atomic_json(partial / 'receipt.json', r)
++    partial.rename(dest)
++    return r
++
++
++def merge_shards(out, shards, selection, selected, variants):
++    out = Path(out)
++    if (out / 'release').exists():
++        for v in variants:
++            merged = load(out / 'release' / f'release_{v}.json')
++            shard = load(out / 'shards' / f'shard-{shards[0]["shard"]:05d}' / 'release' / f'release_{v}.json')
++            for key in ('policy_sha', 'input_hashes_sha256', 'code_sha256', 'input_verification_sha256'):
++                if merged[key] != shard[key]:
++                    raise ValueError('stale aggregated release')
++        return validate_release(out / 'release', selected, variants)
++    dest = out / ('release.partial-' + uuid.uuid4().hex)
++    dest.mkdir()
++    for v in variants:
++        manifests = [load(out / 'shards' / f'shard-{r["shard"]:05d}' / 'release' / f'release_{v}.json') for r in shards]
++        m = dict(manifests[0])
++        for prefix in ('overlay_', 'ctrl_subset_'):
++            name = prefix + v + '.jsonl.gz'
++            with (dest / name).open('wb') as target:
++                for r in shards:
++                    with (out / 'shards' / f'shard-{r["shard"]:05d}' / 'release' / name).open('rb') as f:
++                        shutil.copyfileobj(f, target, 1024 * 1024)
++        kept = sorted(i for r in shards for i in (out / 'shards' / f'shard-{r["shard"]:05d}' / 'release' / m['kept_line_ids']).read_text().splitlines())
++        (dest / m['kept_line_ids']).write_text(''.join(i + '\n' for i in kept))
++        counts = Counter({s: 0 for s in STATUSES})
++        for sub in manifests:
++            counts.update(sub['counts_by_status'])
++        m.update(input_verification_file='../input_verification.json',
++                 selection_sha256=sha256(selection), counts_by_status=dict(counts), kept_lines=len(kept),
++                 overlay_sha256=sha256(dest / m['overlay']), kept_line_ids_sha256=sha256(dest / m['kept_line_ids']))
++        m['alias_only'] = sum(sub['alias_only'] for sub in manifests)
++        for key in ('elision_census', 'elision_census_released'):
++            total = Counter()
++            for sub in manifests:
++                total.update(sub[key])
++            m[key] = dict(total)
++        for dimension in ('coverage_per_wave', 'coverage_per_source'):
++            combined = {}
++            for sub in manifests:
++                for name, b in sub[dimension].items():
++                    combined.setdefault(name, Counter({s: 0 for s in STATUSES})).update({s: b[s] for s in (*STATUSES, 'alias_only')})
++            for b in combined.values():
++                b['total'] = sum(b[s] for s in STATUSES)
++                b['kept'] = b['corrected'] + b['unchanged']
++                b['kept_fraction'] = b['kept'] / b['total']
++            m[dimension] = combined
++        write_json(dest / f'release_{v}.json', m)
++        cp = dest / f'ctrl_subset_{v}.jsonl.gz'
++        write_json(dest / f'release_ctrl_subset_{v}.json', dict(m,
++                   release=m['release'].replace('v2-corrected-', 'v2-ctrl-subset-'), labels='ORIGINAL',
++                   labels_file=cp.name, labels_sha256=sha256(cp), paired_release=m['release'],
++                   corrected_and_control_line_sets_equal=True))
++    validation = validate_release(dest, selected, variants)
++    dest.rename(out / 'release')
++    return validation
++
++
++def recompose(input_run, selection, binding_dir, source, out, ensemble_run=None, workers=1,
++              *, expected=None, audit_decisions=False, code_commit='fbf491f5+L1R3-source-bound'):
++    started = time.monotonic()
++    separate_output(out, input_run, *([ensemble_run] if ensemble_run else []), binding_dir, source, selection)
++    verification, tasks, selected, binding, inp = verify_inputs(input_run, selection, binding_dir, source, ensemble_run,
++                                                               expected=expected, workers=min(workers, 16))
++    out = Path(out)
++    out.mkdir(parents=True, exist_ok=True)
++    vr = out / 'input_verification.json'
++    if vr.exists() and load(vr)['inputs'] != verification['inputs']:
++        raise ValueError('restart inputs changed')
++    if not vr.exists():
++        atomic_json(vr, verification)
++    policy = policy_binding()
++    variants = VARIANTS if ensemble_run else VARIANTS[:2]
++    binding.update(historical_policy_sha256=binding['policy_sha256'], policy_sha256=policy['sha256'],
++                   policy_binding=policy, code_sha256=code_sources(), code_commit=code_commit,
++                   checkpoint_sha256=verification['checkpoint_sha256'], variants=list(variants),
++                   input_verification_sha256=sha256(vr), input_hashes_sha256=verification['inputs_sha256'],
++                   historical_inference_code_sha256=verification['historical_inference_code_sha256'],
++                   audit_decisions=audit_decisions)
++    if (out / 'receipt.json').exists():
++        prior = load(out / 'receipt.json')
++        if not prior.get('complete') or prior['policy'] != policy or prior['binding'] != binding:
++            raise ValueError('completed output binding changed')
++        for name, wanted in prior['outputs'].items():
++            if sha256(out / name) != wanted:
++                raise ValueError('completed output changed')
++        return prior
++    work = [(t, str(out), binding, str(source), inp, audit_decisions) for t in tasks]
++    if workers > 1:
++        with mp.get_context('spawn').Pool(workers, initializer=_initialise, initargs=(selection,)) as pool:
++            shards = []
++            for r in pool.imap(_shard, work, chunksize=1):
++                shards.append(r)
++                print(f'L1R_SHARD {r["shard"]} lines={r["lines"]} seconds={r["elapsed_seconds"]:.3f}', flush=True)
++    else:
++        _initialise(selection)
++        shards = list(map(_shard, work))
++    validation = merge_shards(out, shards, selection, selected, variants)
++    with ThreadPoolExecutor(max_workers=min(workers, 16)) as pool:
++        for name, got in pool.map(lambda p: (p, sha256(p)), verification['inputs']):
++            if got != verification['inputs'][name]:
++                raise ValueError('input changed during recomposition: ' + name)
++    if code_sources() != binding['code_sha256']:
++        raise ValueError('recomposition code changed during run')
++    receipt = dict(schema='l1r-recomposition-v2', complete=True, policy=policy, binding=binding,
++                   inputs_sha256=verification['inputs_sha256'], input_verification_sha256=sha256(vr),
++                   counts={v: load(out / 'release' / f'release_{v}.json')['counts_by_status'] for v in variants},
++                   validation=validation, shards=[dict(shard=r['shard'], receipt=f'shards/shard-{r["shard"]:05d}/receipt.json',
++                       receipt_sha256=sha256(out / 'shards' / f'shard-{r["shard"]:05d}' / 'receipt.json')) for r in shards],
++                   outputs={str(p.relative_to(out)): sha256(p) for p in sorted((out / 'release').glob('*'))},
++                   elapsed_seconds=time.monotonic()-started, network=False, detector_runs=0, r1_runs=0,
++                   original_labels_unchanged=True)
++    atomic_json(out / 'receipt.json', receipt)
+     return receipt
+ 
+ 
+ def main():
+-    ap=argparse.ArgumentParser(description=__doc__)
+-    for flag in ('input-run','selection','binding-dir','source','out'):ap.add_argument('--'+flag,type=Path,required=True)
+-    ap.add_argument('--ensemble-run',type=Path);ap.add_argument('--workers',type=int,default=1)
+-    a=ap.parse_args()
+-    r=recompose(a.input_run,a.selection,a.binding_dir,a.source,a.out,a.ensemble_run,a.workers)
+-    print(json.dumps({k:v for k,v in r.items() if k not in ('inputs','outputs')},ensure_ascii=False,indent=2))
++    ap = argparse.ArgumentParser(description=__doc__)
++    for flag in ('input-run', 'selection', 'binding-dir', 'source', 'out'):
++        ap.add_argument('--'+flag, type=Path)
++    ap.add_argument('--config', type=Path)
++    ap.add_argument('--ensemble-run', type=Path)
++    ap.add_argument('--workers', type=int, default=1)
++    ap.add_argument('--verify-only', action='store_true')
++    ap.add_argument('--audit-decisions', action='store_true')
++    a = ap.parse_args()
++    cfg = load(a.config) if a.config else {}
++    args = {k: cfg.get(k, getattr(a, k)) for k in ('input_run', 'selection', 'binding_dir', 'source', 'ensemble_run')}
++    if not all(args[k] for k in ('input_run', 'selection', 'binding_dir', 'source')) or a.out is None or a.workers < 1:
++        ap.error('input paths, --out and positive --workers required')
++    expected = cfg.get('expected_sha256')
++    if a.verify_only:
++        separate_output(a.out, args['input_run'], args['binding_dir'], args['source'], args['selection'],
++                        *([args['ensemble_run']] if args['ensemble_run'] else []))
++        result = verify_inputs(**args, expected=expected, workers=a.workers)[0]
++        a.out.parent.mkdir(parents=True, exist_ok=True)
++        atomic_json(a.out, result)
++    else:
++        if not cfg.get('verification_only') and not __import__('os').environ.get('SLURM_JOB_ID'):
++            ap.error('production recomposition requires a Slurm allocation')
++        if cfg.get('verification_only') and load(Path(args['input_run']) / 'run_receipt.json')['lines'] != 64:
++            ap.error('local mock must be the complete 64-line verification runtime')
++        result = recompose(**args, out=a.out, workers=a.workers, expected=expected, audit_decisions=a.audit_decisions)
++    print(json.dumps({k: v for k, v in result.items() if k not in ('inputs', 'outputs', 'shards', 'binding', 'historical_inference_code_sha256')}, ensure_ascii=False, indent=2))
+ 
+ 
+-if __name__=='__main__':main()
++if __name__ == '__main__':
++    main()

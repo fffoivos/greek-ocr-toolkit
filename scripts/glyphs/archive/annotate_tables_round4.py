@@ -13,7 +13,7 @@ from PIL import Image,ImageDraw
 from scipy import ndimage as ndi
 
 ROOT=Path(__file__).resolve().parents[3]
-OUT=ROOT/'docs/tables/annotations'
+OUT=ROOT/'docs/records/tables/annotations'
 
 
 def runs(mask):

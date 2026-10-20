@@ -82,7 +82,7 @@ def case_image(number,panels):
 
 def main():
     pages=sorted((ROOT/'.astra/pages').glob('*.png'));assert len(pages)==54
-    tables={p.stem for p in (ROOT/'docs/tables/annotations').glob('*.json')}
+    tables={p.stem for p in (ROOT/'docs/records/tables/annotations').glob('*.json')}
     rows=[];failures=[]
     for page in pages:
         key=page.stem

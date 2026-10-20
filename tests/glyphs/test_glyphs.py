@@ -1,5 +1,5 @@
 """Glyph model: font gate, rendered truth, letters vs marks, letter boxes (pieces), skew/bend, double lines, ink state.
-Each CP-G1 finding (docs/reviews/CP-G1_review_1.md) has a regression here, named test_f<n>_…"""
+Each CP-G1 finding (docs/records/reviews/CP-G1_review_1.md) has a regression here, named test_f<n>_…"""
 from pathlib import Path
 import json
 import random

@@ -1,0 +1,191 @@
+diff --git a/docs/harvest/line_pipeline/tool_versions.json b/docs/harvest/line_pipeline/tool_versions.json
+index 81ce91aa3..46cf5b1a2 100644
+--- a/docs/harvest/line_pipeline/tool_versions.json
++++ b/docs/harvest/line_pipeline/tool_versions.json
+@@ -64,7 +64,7 @@
+       "digest": "50b06dd57cb18e0fb9b6e4e7ea64bc850057228f86085446565ce15809327749"
+     },
+     "segmentation": {
+-      "version": "0.7",
++      "version": "0.8",
+       "documented_iterations": [
+         "29fa466 crop guides",
+         "5d664bf font normalized",
+@@ -72,19 +72,20 @@
+         "b2f8d95 whole-word tolerance",
+         "405d4f1 padding 1.5 heights",
+         "0.5 + row-frame text box",
+-        "crop-only line inventory and cut-off gate before length"
++        "crop-only line inventory and cut-off gate before length",
++        "owner's three rules; remove target-cut veto and taller-than-upright guard"
+       ],
+-      "iteration_count": 7,
+-      "scope": "0.7 crop-only line inventory and cut-off gate before unchanged 0.6 length/padding; owner design 2026-10-19",
++      "iteration_count": 8,
++      "scope": "0.8 exactly the owner's three rules: crop-only other-lines gate, unchanged 0.6 length and padding; cut evidence is diagnostics only; owner policy 2026-10-19",
+       "components": {
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/segmentation-policy.js": "05133c6a15e907661b3aae144dea31ac0bf7a461e7bc61abae97f776aae6837e",
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/crop-tools.py": "c486fa8716dbd12c7f998c892f638c9d653c17ea8db8f646cb97cfa090ecd48f",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/segmentation-policy.js": "e5b635ff9a04cc66f454a68e01ce9773229672e655b3ee08296ee5c0d149ee15",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/crop-tools.py": "921b79ad1450e1023518e4aa36280a0efea2fe83ae1739ca0166e98c14ede1af",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/font-models.json": "fb3f28f7d90c2b638bfe9c72ab42dcf060d59939a7ab410fc2e1cf6d898965de",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/service.mjs": "df1781fb469c92dfe3b7fe886b4297a7ca20878bb82006cf6825536ce537c911",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py": "1dd618bc2d884cf2490498456653f49b0276944f3bde83d38e26e633031eb641",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py": "038bd46af4535e6de6af58e11c4b7496e03e0434094cc8cd6b48668e2199ad77"
+       },
+-      "digest": "734b56ca41c92488d435dd5e0b32ddb3c41e91b8ebfd0ac0397c1f5b81b2536d"
++      "digest": "512e362a691c6f2f425acc41e587b4b751dedbaadd10077d42309ed3f1f7bebd"
+     },
+     "content_gate": {
+       "version": "0.2",
+diff --git a/greekocr/harvest/filtering_assets/crop-tools.py b/greekocr/harvest/filtering_assets/crop-tools.py
+index 8adb2bcc9..2b449929f 100644
+--- a/greekocr/harvest/filtering_assets/crop-tools.py
++++ b/greekocr/harvest/filtering_assets/crop-tools.py
+@@ -74,8 +74,9 @@ def line_inventory(glyphs, lines, components, angle_deg):
+             cutoff_words=sum(not w['whole'] for w in words), word_groups=words,
+             context_whole_words=None, context_cutoff_words=None, context_count_resolved=None))
+     main = next((l for l in lines if l.side == 'main' and l.votes > 0), None)
++    # skew_line and the measured heights are diagnostics only, never gate inputs.
+     cut = dict(angle_deg=None, crossings=[], cut_spans=[], cut_letters=[], baseline_exit=False,
+-        low_visibility_span=False, upright_box_height=None, row_frame_height=None, row_frame_taller=False)
++        low_visibility_span=False, upright_box_height=None, row_frame_height=None)
+     if main is not None:
+         skew = skew_line(glyphs)
+         cut.update(angle_deg=skew.angle_deg, crossings=[asdict(c) for c in skew.crossings],
+@@ -87,8 +88,7 @@ def line_inventory(glyphs, lines, components, angle_deg):
+         row = tight_box(text, labels=glyphs.labels, angle_deg=angle_deg, centre=(glyphs.width/2, glyphs.height/2))
+         if upright is not None:
+             cut.update(upright_box_height=upright[3]-upright[1], row_frame_height=row[3]-row[1])
+-            cut['row_frame_taller'] = cut['row_frame_height'] > cut['upright_box_height']
+-    cut['cut'] = cut['baseline_exit'] or cut['low_visibility_span'] or cut['row_frame_taller']
++    cut['cut'] = cut['baseline_exit'] or cut['low_visibility_span']
+     return inventory, cut
+ 
+ 
+diff --git a/greekocr/harvest/filtering_assets/segmentation-policy.js b/greekocr/harvest/filtering_assets/segmentation-policy.js
+index ca19ef183..d686d9ce4 100644
+--- a/greekocr/harvest/filtering_assets/segmentation-policy.js
++++ b/greekocr/harvest/filtering_assets/segmentation-policy.js
+@@ -1,4 +1,8 @@
+-// Segmentation 0.7: crop line/cut gate, then the unchanged OCR-length screen.
++// Segmentation 0.8: exactly the owner's three rules, in this order:
++// 1. Other lines: additional complete line or >2 whole words; cut-off words do not count.
++// 2. De-skewed main-row box length, height-normalised through the frozen predictor.
++// 3. Crop height <= upright box height + 1.5 * de-skewed line height.
++// Cut evidence and optional source context are diagnostics only.
+ // KEEP here passes this screen only; it is not a training-admission certificate.
+ function boxLengthJudgement(row,lower=.5,upper=1.5,mode=2){
+  const e=row.box_evidence,chars=row.characters;
+@@ -16,7 +20,6 @@ function lineInventoryJudgement(row,maxWholeWords=2){
+  const result={verdict:'PASS',reason:'gate: pass',whole_words:neighbours.reduce((n,l)=>n+l.whole_words,0),cutoff_words:neighbours.reduce((n,l)=>n+l.cutoff_words,0),complete_rows:neighbours.filter(l=>l.complete).map(l=>l.index),main_cut};
+  if(!lines.some(l=>l.side==='main'&&l.votes>0))return {...result,verdict:'UNCERTAIN',reason:'gate: no main row found'};
+  if(row.orientation_resolved===false)return {...result,verdict:'UNCERTAIN',reason:'gate: reading direction unresolved'};
+- if(main_cut.cut)return {...result,verdict:'DROP',reason:'gate: target line cut'};
+  if(result.complete_rows.length)return {...result,verdict:'DROP',reason:'gate: second complete line'};
+  if(result.whole_words>maxWholeWords)return {...result,verdict:'DROP',reason:'gate: too many whole neighbour words'};
+  return result;
+diff --git a/scripts/harvest/build_filter_versions.py b/scripts/harvest/build_filter_versions.py
+index a949de3ad..c2bf13eaf 100644
+--- a/scripts/harvest/build_filter_versions.py
++++ b/scripts/harvest/build_filter_versions.py
+@@ -16,9 +16,9 @@ def build():
+       "numerics":("0.2",["N1 automatic ink candidate (rejected 0/5)","N1 assisted two-reader and lead-pixel release"],
+           [PROJECTS/"greek-ocr-toolkit-secondary/artifacts/n1/n1_v1_w1.jsonl"],"assisted separator corrections; failed automatic candidate is disabled"),
+       "dashes":("0.1",["dash tags; no general repair release"],[ROOT/"greekocr/harvest/line_pipeline.py"],"tag only"),
+-      "segmentation":("0.7",["29fa466 crop guides","5d664bf font normalized","cad8709 target-box normalization","b2f8d95 whole-word tolerance","405d4f1 padding 1.5 heights","0.5 + row-frame text box","crop-only line inventory and cut-off gate before length"],
++      "segmentation":("0.8",["29fa466 crop guides","5d664bf font normalized","cad8709 target-box normalization","b2f8d95 whole-word tolerance","405d4f1 padding 1.5 heights","0.5 + row-frame text box","crop-only line inventory and cut-off gate before length","owner's three rules; remove target-cut veto and taller-than-upright guard"],
+           [ROOT/"greekocr/harvest/filtering_assets/segmentation-policy.js",ROOT/"greekocr/harvest/filtering_assets/crop-tools.py",ROOT/"greekocr/harvest/filtering_assets/font-models.json",ROOT/"greekocr/harvest/filtering_assets/service.mjs",
+-           ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py",ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py"],"0.7 crop-only line inventory and cut-off gate before unchanged 0.6 length/padding; owner design 2026-10-19"),
++           ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py",ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py"],"0.8 exactly the owner's three rules: crop-only other-lines gate, unchanged 0.6 length and padding; cut evidence is diagnostics only; owner policy 2026-10-19"),
+     }
+     for tool in ("content_gate","content_repair","composer","final_eligibility","census"):
+         definitions[tool]=("0.2",["first integrated graph implementation","Astra review: composed coverage, producer binding and atomic exports"],
+diff --git a/tests/test_seg_gate.py b/tests/test_seg_gate.py
+index 57d243c55..aedc595be 100644
+--- a/tests/test_seg_gate.py
++++ b/tests/test_seg_gate.py
+@@ -1,4 +1,4 @@
+-"""SEG-GATE-1: crop-only gate precedence and frozen Stage-B arithmetic."""
++"""SEG-GATE-2: exactly three rules; cut diagnostics never affect decisions."""
+ import json
+ from pathlib import Path
+ 
+@@ -20,7 +20,7 @@ def load(path, key):
+ 
+ @pytest.fixture(scope='module')
+ def native():
+-    worker = NativeSegmenter({'segmentation': {'version': '0.7'}},
++    worker = NativeSegmenter({'segmentation': {'version': '0.8'}},
+         ROOT/'scripts/harvest/filter_runtime/target/debug/greekocr-frozen-font-predict')
+     yield worker
+     worker.close()
+@@ -35,19 +35,23 @@ def real_row(rid):
+         crop_path=str(D/'crops'/f'{rid}.png'))
+ 
+ 
+-def test_cut_witness_drops_before_length(native, monkeypatch):
+-    def forbidden(*a, **k):
+-        raise AssertionError('Stage B executed before the gate passed')
+-    monkeypatch.setattr(native.predictor, 'call', forbidden)
+-    monkeypatch.setattr(native.crop_tools, 'features_from_observation', forbidden)
+-    answer = native(real_row('847e1ec1-p000015-l0035'))
++def test_cut_witness_decides_by_frozen_length(native):
++    rid = '847e1ec1-p000015-l0035'
++    before = load(D/'deskew/replay_segeval1.jsonl','line_id')[rid]['after']
++    answer = native(real_row(rid))
+     gate = answer['evidence']['gate']
+-    assert (answer['verdict'], answer['reason']) == ('DROP', 'gate: target line cut')
++    assert gate['verdict'] == 'PASS' and answer['reason'].startswith('length:')
+     assert gate['main_cut']['baseline_exit']
+     assert gate['main_cut']['crossings'][0]['x'] == pytest.approx(1817.4010238826568)
+     assert gate['main_cut']['cut_spans'] == [dict(x0=1990,x1=2044,edge='bottom',min_visible=.869)]
+     assert len(gate['main_cut']['cut_letters']) == 10
+-    assert not answer['evidence']['box_evidence']['available']
++    assert 'row_frame_taller' not in gate['main_cut']
++    box = answer['evidence']['box_evidence']
++    assert box == before['evidence']['box_evidence']
++    ratio = (answer['evidence']['characters']+1)/(box['predictions'][2]+1)
++    assert answer['evidence']['padding_evidence']['total_padding_line_heights'] <= 1.5
++    assert answer['verdict'] == ('DROP' if ratio < .5 or ratio > 1.5 else 'KEEP')
++    print(f'{rid}: length ratio={ratio!r}; verdict={answer["verdict"]}')
+ 
+ 
+ def test_partial_body_witness_keeps_without_context(native):
+@@ -133,16 +137,33 @@ def test_stage_b_zero_angle_equals_06_to_digit(native):
+ 
+ @pytest.mark.parametrize('change,reason', [
+     ('no_main','gate: no main row found'),('orientation','gate: reading direction unresolved'),
+-    ('span','gate: target line cut'),('height','gate: target line cut'),
+ ])
+ def test_gate_precedence_and_only_two_uncertainties(native,change,reason):
+     gate,e = gate_for(native,[30,42,90,102,150,162])
+     if change == 'no_main': e['lines'] = [l for l in e['lines'] if l['side'] != 'main']
+     if change == 'orientation': e['orientation_resolved'] = False
+-    if change in ('span','height'): e['gate']['main_cut'].update(cut=True,**{('low_visibility_span' if change=='span' else 'row_frame_taller'):True})
+     result = native.service.call(dict(operation='decide',policy_sha256=native.policy_sha,evidence=e))
+     assert result['reason'] == reason
+-    assert result['verdict'] == ('UNCERTAIN' if change in ('no_main','orientation') else 'DROP')
++    assert result['verdict'] == 'UNCERTAIN'
++
++
++@pytest.mark.parametrize('diagnostic', [
++    dict(cut=True), dict(baseline_exit=True), dict(low_visibility_span=True),
++    dict(crossings=[dict(line='baseline',meaning='leaves the crop')]),
++    dict(cut_spans=[dict(min_visible=0)]), dict(cut_letters=[dict(body_cut=1)]),
++    dict(row_frame_height=1000,upright_box_height=1),
++])
++def test_cut_diagnostics_cannot_change_gate_or_final_decision(native,diagnostic):
++    gate,e = gate_for(native,[30,42,90,102])
++    e.update(gate_only=False,characters=20,box_evidence=dict(available=True,predictions=[None,None,20]),
++        padding_evidence=dict(available=True,total_padding_line_heights=0))
++    request = dict(operation='decide',policy_sha256=native.policy_sha)
++    before = native.service.call(dict(request,evidence=e))
++    e['gate']['main_cut'].update(diagnostic)
++    assert native.service.call(dict(request,evidence=e)) == before
++    e['gate_only'] = True
++    after = native.service.call(dict(request,evidence=e))
++    assert (after['verdict'],after['reason']) == (gate['verdict'],gate['reason']) == ('PASS','gate: pass')
+ 
+ 
+ def test_context_cannot_change_gate(native):

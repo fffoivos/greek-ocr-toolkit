@@ -1,0 +1,2 @@
+# SCAN2R6 — re-review of scanner v4.5.5 (gpt-6.1-sol, medium, network OFF, READ-ONLY; write only out/scan2r6/REVIEW.md)
+Criteria of SCAN2R_review_brief.md; re-run every probe of SCAN2R…R5 (all VOID) and three new variants of your choice on early-exit paths and restoration; confirm the barrier runs before any classification for every command; rescan verdicts justified by P1–P3 only. Last line exactly: `SCAN2R6: <PASS|FAIL> | blocking <n> | high <n> | medium <n> | rescan justified <n>/15`

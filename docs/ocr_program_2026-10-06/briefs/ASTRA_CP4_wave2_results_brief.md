@@ -1,0 +1,14 @@
+# ASTRA-CP4 — xhigh review (checkpoint 4 / W3) of the WAVE-2 RESULTS (H7 recipe retest) before scaling wave 3
+
+ROLE: independent fresh-eyes CERTIFIER (gpt-6-astra); implementer ≠ certifier; verify firsthand (read-only ssh to Clariden under /iopsstor; this worktree read-only; never write, never submit); raw numbers; no background jobs; write the verdict yourself.
+
+WHAT (W=/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3): the completed wave-2 runs under $W/e4_wave2_rel3_20261020/ (package 4537ef9d20a5dc3a; preparation/inventory01; the smoke, preflight, job01–03 and aggregate outputs and Slurm logs; the aggregate's per-arm × seed benchmark 0.2 tables (test and dev panels, per class), the H7 driver verdict, registry rows, consumed GPU-h from sacct). Inputs as reviewed at checkpoint 3b (docs/records/reviews/astra_program_review_2026-10-06/ASTRA-CP3B_review_1.md): release v3, v_c via census_05, benchmark 0.2 seal04 (suite sha 9447f09c…), split2 ledger.
+PROJECT DOCS: docs/programme_20261019/NIGHT_PLAN.md (W2/W3, S1a), NIGHT_STATE.json (decisions), docs/cleanup_20261019/POST_CLEANUP_PROGRAMME.md §4 (H7, decision rules) and §3.3a (sealed instrument; diacritics unqualified), the package's preregistration file and parity table, docs/records/reviews/…/ASTRA-CP3_review_1.md and ASTRA-CP3B_review_1.md.
+
+MANDATE:
+1. Run integrity: 9 runs completed as preregistered (3 arms × 3 seeds), each bound to the reviewed package bytes and inputs (recompute hashes of the arm manifests against the inventory), no re-runs or silent substitutions, consumed GPU-h vs the ≈27 GPU-h cap reported from sacct, logs free of errors that invalidate a run.
+2. Evaluation integrity: scores computed by the unchanged 0.1 scorer on the sealed seal04 panels (recompute at least one arm × seed from the stored predictions), test panel not used for any selection, dev reported separately, per-class table complete for all 16 classes incl. empty-class handling, diacritic-sensitive and letters-only scores both reported (diacritics unqualified).
+3. The H7 verdict: apply the preregistered decision rules yourself to the raw per-seed numbers (seed ranges, paired per-item comparisons where the rules require them); state whether add / add_corr beat ctrl at the preregistered margin, per class, and whether the driver's verdict matches your recomputation; flag any post-hoc reading in the lead's summary.
+4. Implications for wave 3 (S1a): is release v3 (+ corrections) the right base for the scaling ladder; anything in the results that changes the scaling design or the caps.
+5. Anything that makes the results unusable or overstated.
+DISPOSITION: BLOCKER/HIGH block wave 3 until fixed; MEDIUM/LOW logged. DELIVERABLE: markdown; header; one-line verdict; findings most-severe-first with path:line / numbers / failure scenario / fix; cleared items; last line exactly `VERDICT: <one line> | BLOCKERS: <n> | HIGH: <n>`.

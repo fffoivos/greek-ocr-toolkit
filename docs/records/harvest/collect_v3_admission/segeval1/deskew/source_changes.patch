@@ -1,0 +1,169 @@
+--- a/greekocr/harvest/line_pipeline_native.py
++++ b/greekocr/harvest/line_pipeline_native.py
+@@ -145,9 +145,17 @@
+         yy, xx = np.nonzero(glyphs.ink)
+         ink_box = [int(xx.min()), int(yy.min()), int(xx.max())+1, int(yy.max())+1] if len(xx) else None
+         components = [dict(index=int(c.index), bbox=[int(c.x0),int(c.y0),int(c.x1),int(c.y1)], role=c.role, area=int(c.area), touches=list(c.touches)) for c in glyphs.components]
++        main = next((l for l in lines if l.side == "main"), None)
++        angle_deg = 0.0
++        # A mathematically flat fitted curve can carry a few ULPs of solver
++        # roundoff. Keep that identity case off the floating rotation path.
++        if main is not None and len(main.base) > 1 and np.ptp(main.base) > 8*np.spacing(max(1., float(np.max(np.abs(main.base))))):
++            x = np.arange(len(main.base), dtype=float); x -= x.mean()
++            slope = float(np.dot(x, main.base-main.base.mean()) / np.dot(x, x))
++            angle_deg = float(np.degrees(np.arctan(slope)))  # clockwise in image coordinates
+         features = self.crop_tools.features_from_observation(width=glyphs.width, height=glyphs.height, components=components,
+             ink_box=ink_box, ink_pixels=int(glyphs.ink.sum()), xheight=float(glyphs.band.xh), xheight_source=glyphs.band.xh_source,
+-            support_count=glyphs.band.n_support, chars=chars)
++            support_count=glyphs.band.n_support, chars=chars, labels=glyphs.labels, angle_deg=angle_deg)
+         packed = []
+         for l in lines:
+             at = np.unique(np.r_[np.linspace(0,glyphs.width-1,min(128,glyphs.width),dtype=int), *[np.array([np.argmin(getattr(l,k)),np.argmax(getattr(l,k))]) for k in ('ascender','mean','base','descender')]])
+@@ -158,10 +166,12 @@
+             box_evidence=dict(available=False), detected_rows=packed,
+             padding_evidence=dict(available=False), neighbour_evidence=None)
+         if b:
+-            prediction = self.predictor.call(dict(long_side=max(b["width"],b["height"]), short_side=min(b["width"],b["height"]), script=row.get("script_class", "pooled")))
+-            evidence["box_evidence"] = dict(available=True, predictions=[None,None,prediction["expected"]], bbox=b["bbox"], prediction=prediction)
++            rf = features["row_frame_text_box"]
++            prediction = self.predictor.call(dict(long_side=max(rf["length"],rf["height"]), short_side=min(rf["length"],rf["height"]), script=row.get("script_class", "pooled")))
++            evidence["box_evidence"] = dict(available=True, predictions=[None,None,prediction["expected"]], bbox=b["bbox"], prediction=prediction, row_frame=rf)
+             h = features["segment"]["height"]
+-            evidence["padding_evidence"] = dict(available=True, total_padding_line_heights=(h-b["height"])/b["height"])
++            evidence["padding_evidence"] = dict(available=True, total_padding_line_heights=(h-b["height"])/rf["height"],
++                upright_box_height=b["height"], row_frame_height=rf["height"])
+         if any(l["side"] != "main" and l["votes"] > 0 for l in packed):
+             context = self.context(row, image, frame, QuarterTurn)
+             if context.get('error'):
+--- a/greekocr/harvest/filtering_assets/crop-tools.py
++++ b/greekocr/harvest/filtering_assets/crop-tools.py
+@@ -52,9 +52,25 @@
+     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+ 
+ 
+-def tight_box(components):
++def tight_box(components, *, labels=None, angle_deg=0, centre=None):
+     if not components:
+         return None
++    if angle_deg != 0:
++        import numpy as np
++        # Rotate only the selected components' ink, not their upright envelopes.
++        # Pixel cells have unit area; their projected half-width bounds the ink
++        # without resampling or rounding a continuous row-frame measurement.
++        yy, xx = np.nonzero(np.isin(labels, [c['index'] for c in components]))
++        if not len(xx):
++            raise ValueError('text components have no labelled ink')
++        cx, cy = centre
++        c, s = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
++        dx, dy = xx + .5 - cx, yy + .5 - cy
++        u, v = c*dx + s*dy + cx, -s*dx + c*dy + cy
++        half = (abs(c) + abs(s))/2
++        return [float(u.min()-half), float(v.min()-half),
++                float(u.max()+half), float(v.max()+half)]
++    # Preserve the original integer box exactly for the identity transform.
+     return [min(c['bbox'][0] for c in components), min(c['bbox'][1] for c in components),
+             max(c['bbox'][2] for c in components), max(c['bbox'][3] for c in components)]
+ 
+@@ -81,7 +97,8 @@
+ 
+ 
+ def features_from_observation(*, width, height, components, ink_box, ink_pixels,
+-                              xheight, xheight_source, support_count, chars):
++                              xheight, xheight_source, support_count, chars,
++                              labels=None, angle_deg=0):
+     """Geometry arithmetic only; components/roles come from the existing tool."""
+     if width <= 0 or height <= 0 or chars < 0:
+         raise ValueError('invalid native dimensions or character count')
+@@ -102,6 +119,16 @@
+         raise ValueError('component census exceeds observed ink')
+     text_pixels = sum(c['area'] for c in text)
+     text_box = box_metrics(tight_box(text), width, height, xheight)
++    row_box = tight_box(text, labels=labels, angle_deg=angle_deg, centre=(width/2, height/2))
++    row_frame = None
++    if row_box is not None:
++        x0, y0, x1, y1 = row_box
++        corners = [[x0,y0], [x1,y0], [x1,y1], [x0,y1]]
++        if angle_deg != 0:
++            c, s = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
++            corners = [[c*(x-width/2)-s*(y-height/2)+width/2,
++                        s*(x-width/2)+c*(y-height/2)+height/2] for x,y in corners]
++        row_frame = dict(angle_deg=angle_deg, length=x1-x0, height=y1-y0, corners=corners)
+     body_box = box_metrics(tight_box(bodies), width, height, xheight)
+     letters = [c for c in components if c['role'] == 'letter']
+     def median(values):
+@@ -126,7 +153,7 @@
+     return dict(segment=dict(width=width, height=height, aspect=width/height,
+                              short_long=min(width,height)/max(width,height)),
+                 all_ink_box=box_metrics(ink_box,width,height,xheight),
+-                candidate_text_box=text_box, letter_component_box=body_box,
++                candidate_text_box=text_box, row_frame_text_box=row_frame, letter_component_box=body_box,
+                 neighbour_box=box_metrics(tight_box(neighbours),width,height,xheight),
+                 xheight_px=xheight, xheight_source=xheight_source, band_support=support_count,
+                 median_letter_component_width_px=letter_width,
+--- a/scripts/harvest/build_filter_versions.py
++++ b/scripts/harvest/build_filter_versions.py
+@@ -16,9 +16,9 @@
+       "numerics":("0.2",["N1 automatic ink candidate (rejected 0/5)","N1 assisted two-reader and lead-pixel release"],
+           [PROJECTS/"greek-ocr-toolkit-secondary/artifacts/n1/n1_v1_w1.jsonl"],"assisted separator corrections; failed automatic candidate is disabled"),
+       "dashes":("0.1",["dash tags; no general repair release"],[ROOT/"greekocr/harvest/line_pipeline.py"],"tag only"),
+-      "segmentation":("0.5",["29fa466 crop guides","5d664bf font normalized","cad8709 target-box normalization","b2f8d95 whole-word tolerance","405d4f1 padding 1.5 heights"],
++      "segmentation":("0.6",["29fa466 crop guides","5d664bf font normalized","cad8709 target-box normalization","b2f8d95 whole-word tolerance","405d4f1 padding 1.5 heights","0.5 + row-frame text box"],
+           [ROOT/"greekocr/harvest/filtering_assets/segmentation-policy.js",ROOT/"greekocr/harvest/filtering_assets/crop-tools.py",ROOT/"greekocr/harvest/filtering_assets/font-models.json",ROOT/"greekocr/harvest/filtering_assets/service.mjs",
+-           ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py",ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py"],"owner accepted current decisions unchanged on 2026-10-18"),
++           ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py",ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py"],"0.5 + row-frame text box; owner-authorized measurement and padding input change on 2026-10-19; frozen policy unchanged"),
+     }
+     for tool in ("content_gate","content_repair","composer","final_eligibility","census"):
+         definitions[tool]=("0.2",["first integrated graph implementation","Astra review: composed coverage, producer binding and atomic exports"],
+--- a/docs/harvest/line_pipeline/tool_versions.json
++++ b/docs/harvest/line_pipeline/tool_versions.json
+@@ -64,25 +64,26 @@
+       "digest": "50b06dd57cb18e0fb9b6e4e7ea64bc850057228f86085446565ce15809327749"
+     },
+     "segmentation": {
+-      "version": "0.5",
++      "version": "0.6",
+       "documented_iterations": [
+         "29fa466 crop guides",
+         "5d664bf font normalized",
+         "cad8709 target-box normalization",
+         "b2f8d95 whole-word tolerance",
+-        "405d4f1 padding 1.5 heights"
++        "405d4f1 padding 1.5 heights",
++        "0.5 + row-frame text box"
+       ],
+-      "iteration_count": 5,
+-      "scope": "owner accepted current decisions unchanged on 2026-10-18",
++      "iteration_count": 6,
++      "scope": "0.5 + row-frame text box; owner-authorized measurement and padding input change on 2026-10-19; frozen policy unchanged",
+       "components": {
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/segmentation-policy.js": "8334dd4028822edbd740a1a96a0ead6367c7af953e545bad8bd60a911c65a819",
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/crop-tools.py": "d04b7b48ca54c18dc416a9f402a95661db3ef15c7001e04e45e1a7f033888390",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/crop-tools.py": "eb472b9444a35357957ab45cbd7483ed337e809c0afc98ce220a1be0511c8223",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/font-models.json": "fb3f28f7d90c2b638bfe9c72ab42dcf060d59939a7ab410fc2e1cf6d898965de",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/service.mjs": "df1781fb469c92dfe3b7fe886b4297a7ca20878bb82006cf6825536ce537c911",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py": "1dd618bc2d884cf2490498456653f49b0276944f3bde83d38e26e633031eb641",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py": "038bd46af4535e6de6af58e11c4b7496e03e0434094cc8cd6b48668e2199ad77"
+       },
+-      "digest": "76baed43e99e40e6e7795c1431c77798c65be24a664fc449edcea2a26f687562"
++      "digest": "139d459850ccf51b8a16214530970e25548ced9c477ce67a38d4fef074c57603"
+     },
+     "content_gate": {
+       "version": "0.2",
+@@ -156,7 +157,7 @@
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py": "ea98ad249fc629da2c00331f39884b4fb75154de8e9ebe843a4055a4ba52f77d",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_sources.py": "d84f024f755d23543bd0b0601f14e2e7adae5d1eaadbc325e636bff3d628788e",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_parallel.py": "52aef74eb01e17669dc068c8532c7008c251e8d1b5308f8e38790c613db0197e",
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_native.py": "14baecbeb7a8169206a59a65bcec601c199896b5f0982ca55465771bb1fc793f",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_native.py": "e46de5f1d16ab500476d8088c2821f4ed10b05d9c45cc1de79797a0e98c422b4",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_runtime.py": "8687f59c0986eff6a3f008c890385724a880c0e6356d6e059d61ec192386d483",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/geometry_observations.py": "524972373acb094384f48055dfb1189f799c648df81370c5a9d5952c7798c695",
+         "greek-ocr-toolkit-sol-recut/scripts/harvest/clariden/worker.py": "8c8109606e50bf6b26f74d95436e555bc3bac0984ed5c584600fa2602b2ea5c7",
+@@ -165,7 +166,7 @@
+         "greek-ocr-toolkit-sol-recut/scripts/harvest/clariden/filter_worker.sbatch": "3b30cf18b1d72207000d0532afed44cfa9961982dc84dbd950d66de2b716153c",
+         "greek-ocr-toolkit-sol-recut/scripts/harvest/clariden/package.py": "cd4b9d0ae23e405ed61c81abb1a37029ce43abf456390abd2167df5b9b613da5"
+       },
+-      "digest": "9c58cec35f9b7256ecf3317b783b72bf0018194e5a117450bd0d47cc50dfaa08"
++      "digest": "c3f01e32054ba3d31b78696aa4a00fd09ec4d7bf6f540295f511de8bafdb5698"
+     },
+     "inventory": {
+       "version": "0.1",

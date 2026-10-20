@@ -1,5 +1,6 @@
 """CLI adapters; images/text/calibrate are offline, vlm is explicitly online."""
 from __future__ import annotations
+from greekocr.ops.data_root import input_path as _data_input
 import json
 from pathlib import Path
 from .images import readability_profile, render_overlay
@@ -88,7 +89,7 @@ def reading_records(path: Path) -> list[dict]:
 
 
 def _read_jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return [json.loads(line) for line in _data_input(path).read_text().splitlines() if line.strip()]
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:

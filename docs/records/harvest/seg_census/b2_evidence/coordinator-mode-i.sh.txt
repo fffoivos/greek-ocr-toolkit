@@ -1,0 +1,21 @@
+export W=/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3
+export CENSUS04_BUNDLE="$W/filter_pipeline_20261018/code/bb1ea164338b3068/docs/harvest/seg_census"
+RUN_ROOT="$W/filter_pipeline_20261018/census_04_seg08"
+mkdir -p "$RUN_ROOT/logs"
+submit_census04() {
+  local regression parity
+  regression=$(sbatch --parsable --chdir="$RUN_ROOT" --export=ALL \
+    --output="$RUN_ROOT/logs/regression-%j.log" "$CENSUS04_BUNDLE/jobs/regression.sbatch")
+  parity=$(sbatch --parsable --dependency="afterok:$regression" --chdir="$RUN_ROOT" --export=ALL \
+    --output="$RUN_ROOT/logs/parity-%j.log" "$CENSUS04_BUNDLE/jobs/parity.sbatch")
+  sbatch --dependency="afterok:$parity" --chdir="$RUN_ROOT" --export=ALL \
+    --output="$RUN_ROOT/logs/census-%j.log" "$CENSUS04_BUNDLE/jobs/census.sbatch"
+}
+
+# Mode (i): no split input pinned. Smoke first; inspect its publication before full.
+unset CENSUS04_SPLIT_FILE CENSUS04_SPLIT_SHA256 CENSUS04_CONFIG
+export E4_SMOKE=1 CENSUS04_ATTEMPT=smoke-mode-i-001
+submit_census04
+# Separate coordinator action only after successful smoke review:
+export E4_SMOKE=0 CENSUS04_ATTEMPT=full-mode-i-001
+submit_census04

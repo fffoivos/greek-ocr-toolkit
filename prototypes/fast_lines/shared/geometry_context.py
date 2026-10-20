@@ -10,7 +10,7 @@ import numpy as np
 from .contracts import bbox
 from .geometry import line_axis
 from .geometry_feature_paths import sparse, bands
-from .geometry_feature_correct import retention, keep_nearby_ink
+from .geometry_feature_correct import retention, retention_ink, keep_nearby_ink
 from ..layout_barriers.fast import scout
 
 
@@ -68,15 +68,16 @@ def correct_geometry(gray, pm, original_items, *, retained_source_indices=None,
                 continue
             local = positions[source]
             polygon = a['polygon']
-            audit = retention(gray, working, local, polygon, h)
+            prepared = retention_ink(gray, working[local], h)
+            audit = retention(gray, working, local, polygon, h, prepared=prepared)
             if audit['lost_ink']:
-                repaired, detail = keep_nearby_ink(gray, working, local, polygon, h)
+                repaired, detail = keep_nearby_ink(gray, working, local, polygon, h, prepared=prepared)
                 if repaired is None:
                     decisions.append(dict(line=source, decision='preserve',
                         reason='loss is not nearby envelope ink', retention=audit, repair=detail))
                     continue
                 polygon = repaired
-                audit = retention(gray, working, local, polygon, h)
+                audit = retention(gray, working, local, polygon, h, prepared=prepared)
             if audit['lost_ink']:
                 decisions.append(dict(line=source, decision='preserve',
                     reason='unique original ink would be removed', retention=audit))

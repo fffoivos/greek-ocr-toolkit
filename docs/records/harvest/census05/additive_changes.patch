@@ -1,0 +1,326 @@
+--- census04/prepare_config.py
++++ census05/prepare_config.py
+@@ -1,7 +1,7 @@
+ """Rebase code paths only; retain census_03 input bindings in full mode.
+ 
+ Smoke derives at most 40 rows per parent and subsets the same correction inputs.
+-All derived files stay inside the selected census_04 attempt.
++All derived files stay inside the selected census_05 attempt.
+ """
+ import argparse
+ from copy import deepcopy
+@@ -23,8 +23,11 @@
+     projects, out = Path(projects).resolve(), Path(out).resolve()
+     out.mkdir(parents=True, exist_ok=True)
+     for key in ('codec', 'versions'):
+-        if str(config[key]).startswith(BASE + '/'):
+-            config[key] = str(projects/Path(config[key]).relative_to(BASE))
++        value = str(config[key])
++        if value.startswith('@CENSUS05_PROJECTS@/'):
++            config[key] = str(projects/value.split('/', 1)[1])
++        elif value.startswith(BASE + '/'):
++            config[key] = str(projects/Path(value).relative_to(BASE))
+     config['component_roots'] = {k: str(projects/k) for k in source.get('component_roots', {})}
+     if split_input:
+         config['split_input'] = split_input
+@@ -73,7 +76,7 @@
+ 
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--source', type=Path, default=D/'census04_config.json')
++    parser.add_argument('--source', type=Path, default=D/'census05_config.json')
+     parser.add_argument('--projects', type=Path, default=D/'package/projects')
+     parser.add_argument('--out', type=Path, required=True)
+     parser.add_argument('--smoke', action='store_true')
+@@ -82,6 +85,8 @@
+     args = parser.parse_args()
+     if bool(args.split_file) != bool(args.split_sha256):
+         parser.error('split-file and split-sha256 must be pinned together')
++    if not args.smoke and not args.split_file:
++        parser.error('full mode requires split-file and split-sha256')
+     split = dict(path=args.split_file, sha256=args.split_sha256) if args.split_file else None
+     prepare(json.loads(args.source.read_text()), args.projects, args.out, smoke=args.smoke, split_input=split)
+ 
+--- census04/parity_check.py
++++ census05/parity_check.py
+@@ -1,33 +1,25 @@
+-"""Replay 0.8 saved evidence through the packaged policy, with no detector/reader."""
+-import argparse
+-import gzip
+-import json
++"""Census_04 policy replay shape, bound to SEG10's saved evidence and exact reasons."""
++import argparse,gzip,hashlib,json
+ from pathlib import Path
+ from greekocr.harvest.line_pipeline_native import ASSETS, JsonService, file_sha
++D=Path(__file__).resolve().parent
+ 
+-
+-def check(records):
+-    service = JsonService(['node', str(ASSETS/'service.mjs')])
+-    counts = {}
++def check():
++    receipt=json.loads((D/'parity/source_receipt.json').read_text());h=hashlib.sha256();counts={}
++    service=JsonService(['node',str(ASSETS/'service.mjs')])
+     try:
+-        with gzip.open(records, 'rt') as stream:
+-            for line in stream:
+-                r = json.loads(line)
+-                result = service.call(dict(operation='decide', policy_sha256=file_sha(ASSETS/'segmentation-policy.js'),
+-                                           evidence=r['after']['evidence']))
+-                assert result == {k: r['after'][k] for k in ('verdict', 'reason')}, r['line_id']
+-                counts[r['cohort']] = counts.get(r['cohort'], 0) + 1
+-    finally:
+-        service.close()
+-    assert counts == dict(segeval1=150, calibration=888)
+-    return dict(status='PASS', counts=counts, policy_sha256=file_sha(ASSETS/'segmentation-policy.js'), native_images_processed=0)
+-
+-
+-if __name__ == '__main__':
+-    parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument('--records', type=Path, default=Path(__file__).with_name('parity_inputs.jsonl.gz'))
+-    parser.add_argument('--out', type=Path, required=True)
+-    args = parser.parse_args()
+-    result = check(args.records)
+-    args.out.write_text(json.dumps(result, indent=2)+'\n')
+-    print(json.dumps(result))
++        for chunk in receipt['chunks']:
++            path=D/'parity'/chunk['path'];assert file_sha(path)==chunk['sha256']
++            data=gzip.decompress(path.read_bytes());h.update(data)
++            for line in data.splitlines():
++                r=json.loads(line)
++                if r['cohort'] not in ('segeval1','calibration'):continue
++                result=service.call(dict(operation='decide',policy_sha256=file_sha(ASSETS/'segmentation-policy.js'),evidence=r['after']['evidence']))
++                assert result=={k:r['after'][k] for k in ('verdict','reason')},r['line_id']
++                counts[r['cohort']]=counts.get(r['cohort'],0)+1
++    finally:service.close()
++    assert h.hexdigest()==receipt['sha256']
++    assert counts==dict(segeval1=150,calibration=888)
++    return dict(status='PASS',counts=counts,expectation_sha256=h.hexdigest(),verdict_and_reason_exact=True,native_images_processed=0)
++if __name__=='__main__':
++    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--out',type=Path,required=True);a=p.parse_args();result=check();a.out.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result))
+--- census04/mock_batch.py
++++ census05/mock_batch.py
+@@ -15,7 +15,7 @@
+ 
+ D = Path(__file__).resolve().parent
+ PROJECTS = D/'package/projects'
+-sys.path.insert(0, str(PROJECTS/'greek-ocr-toolkit-sol-recut'))
++sys.path.insert(0, str(PROJECTS/'greek-ocr-toolkit-pipe032'))
+ from greekocr.harvest import line_pipeline_census as census
+ from greekocr.harvest import line_pipeline_census04 as c4
+ from greekocr.harvest.line_pipeline import canonical, digest, identity
+@@ -29,11 +29,17 @@
+ def build(root):
+     records = [json.loads(s) for s in gzip.open(D/'mock_slice_inputs.jsonl.gz', 'rt')]
+     assert len(records) == 200
+-    versions_path = PROJECTS/'greek-ocr-toolkit-sol-recut/docs/harvest/line_pipeline/tool_versions.json'
++    versions_path = PROJECTS/'greek-ocr-toolkit-pipe032/docs/harvest/line_pipeline/tool_versions.json'
+     versions = json.loads(versions_path.read_text())['tools']
+     groups, metadata, observations, frozen = {}, dict(books={}), {}, []
++    fixture_groups = {}
+     for saved in records:
+         r = deepcopy(saved['row'])
++        original_parent=r['parent_id']
++        index=fixture_groups.get(original_parent,0);fixture_groups[original_parent]=index+1
++        # Mock-only parent groups preserve all 200 real raw rows under smoke's
++        # unchanged 40-row cap. Production parent config is never changed.
++        if index>=40: r['parent_id']=original_parent+'-mock-shard-'+str(index//40)
+         if saved['cohort'] == 'calibration':
+             r.update(split='train', source='bsb_poly1850')
+             r['book_id'] = 'calibration:'+r['id'].split('-p')[0]
+@@ -93,7 +99,7 @@
+     old = root/'frozen05.jsonl'; jsonl(old, frozen)
+     split = root/'split.jsonl'; jsonl(split, assignments)
+     jsonl(root/'observations.jsonl', [dict(key=k, result=v) for k, v in observations.items()])
+-    config = dict(versions=str(versions_path), codec=str(PROJECTS/'greek-ocr-toolkit-sol-recut/greekocr/_vendor/codec/v2.json'), metadata=str(meta), parents=parents, corrections=releases,
++    config = dict(routes_out_of_scope=['polytonic'], component_roots={p.name:str(p) for p in PROJECTS.iterdir() if p.is_dir()}, versions=str(versions_path), codec=str(PROJECTS/'greek-ocr-toolkit-pipe032/greekocr/_vendor/codec/v2.json'), metadata=str(meta), parents=parents, corrections=releases,
+         final_policy={}, native_workers=2, native_prefetch_factor=2,
+         frozen_05=dict(path=str(old), sha256=census.file_sha(old)))
+     path = root/'source_config.json'; path.write_text(canonical(config))
+@@ -140,58 +146,43 @@
+ ''')
+     srun.chmod(0o755)
+     env = dict(os.environ, PATH=str(bin_dir)+os.pathsep+os.environ['PATH'],
+-        W=str(root/'W'), CENSUS04_BUNDLE=str(D), CENSUS04_PYTHON=sys.executable, CENSUS04_CONFIG=str(source),
+-        SLURM_JOB_PARTITION='normal', MOCK_SRUN_LOG=str(root/'srun.jsonl'),
++        W=str(root/'W'), CENSUS05_BUNDLE=str(D), CENSUS05_PYTHON=sys.executable, CENSUS05_CONFIG=str(source),
++        SLURM_JOB_PARTITION='normal', CENSUS05_EXPECT_ROWS='200', MOCK_SRUN_LOG=str(root/'srun.jsonl'),
+         MOCK_OBSERVATIONS=str(root/'observations.jsonl'), MOCK_BATCH_SCRIPT=str(Path(__file__).resolve()))
+     results = {}
+-    for mode in ('mode-i', 'mode-ii'):
+-        current = dict(env, E4_SMOKE='0', CENSUS04_ATTEMPT=mode)
+-        if mode == 'mode-ii':
+-            current.update(CENSUS04_SPLIT_FILE=str(split), CENSUS04_SPLIT_SHA256=census.file_sha(split))
+-        script = spool/'census.sbatch'
+-        with (root/(mode+'.log')).open('w') as log:
+-            subprocess.run(['bash', str(script)], cwd='/private/tmp', env=current, stdout=log, stderr=subprocess.STDOUT, check=True)
+-        out = root/'W/filter_pipeline_20261018/census_04_seg08'/mode
+-        ds = [json.loads(s) for s in (out/'decisions.jsonl').read_text().splitlines()]
+-        assert len(ds) == 200 and not any(d['disposition']=='INFRA_ERROR' for d in ds)
+-        assert all(d['diagnostics']['frozen_05']['available'] for d in ds)
+-        v3 = [d for d in ds if d['binding']['parent_id'].startswith('collect-v3')]
+-        if mode == 'mode-i':
+-            assert all(d['binding']['split']=='unassigned' for d in v3)
+-            assert not any(d['disposition']=='ADMIT' for d in v3)
+-        else:
+-            assert any(d['disposition']=='ADMIT' for d in v3)
+-            assert {'train', 'dev', 'test', 'unassigned'} <= {d['binding']['split'] for d in v3}
+-        results[mode] = dict(rows=len(ds), complete=json.loads((out/'summary.json').read_text())['complete'],
+-            dispositions={k:sum(d['disposition']==k for d in ds) for k in ('ADMIT','DROP','HOLD')},
+-            split_counts={s:sum(d['binding']['split']==s for d in v3) for s in ('train','dev','test','unassigned')},
+-            output_root=str(out), actual_batch_script=True, slurm_spooled_script=True, unrelated_submit_cwd=True)
+-        # Remove or replace ALL diagnostics and compare every complete decision.
+-        config = json.loads((out/'inputs/config.json').read_text())
+-        normal = [{k:v for k,v in d.items() if k!='diagnostics'} for d in ds]
+-        os.environ['MOCK_OBSERVATIONS'] = env['MOCK_OBSERVATIONS']
+-        for tag, builder in [('removed', lambda *a: {}), ('altered', lambda *a: dict.fromkeys(ds[0]['diagnostics'], 'corrupt'))]:
+-            alternate = root/(mode+'-'+tag)
+-            c4.run(config, alternate, execute=True, segmenter_factory=native_factory, diagnostic_builder=builder)
+-            actual = [{k:v for k,v in json.loads(s).items() if k!='diagnostics'} for s in (alternate/'decisions.jsonl').read_text().splitlines()]
+-            assert actual == normal
+-        results[mode]['all_diagnostics_invariance'] = True
+-    # Run the smoke and validation job scripts from an unrelated submit cwd.
+-    for mode in ('mode-i', 'mode-ii'):
+-        current = dict(env, E4_SMOKE='1', CENSUS04_ATTEMPT='smoke-'+mode)
+-        if mode == 'mode-ii':
+-            current.update(CENSUS04_SPLIT_FILE=str(split), CENSUS04_SPLIT_SHA256=census.file_sha(split))
+-        for kind in ('census', 'regression', 'parity'):
+-            with (root/('smoke-'+mode+'-'+kind+'.log')).open('w') as log:
+-                subprocess.run(['bash', str(spool/f'{kind}.sbatch')], cwd='/private/tmp', env=current,
+-                               stdout=log, stderr=subprocess.STDOUT, check=True)
+-        smoke = root/'W/filter_pipeline_20261018/census_04_seg08'/('smoke-'+mode)
+-        results['smoke-'+mode] = dict(rows=json.loads((smoke/'summary.json').read_text())['input_rows'],
+-                                     E4_SMOKE=1, job_kinds=['census', 'regression', 'parity'])
++    for smoke in ('1','0'):
++        for mode in ('mode-i','mode-ii'):
++            tag=('smoke' if smoke=='1' else 'full')+'-'+mode
++            current=dict(env,E4_SMOKE=smoke,CENSUS05_ATTEMPT=tag)
++            if mode=='mode-ii': current.update(CENSUS05_SPLIT_FILE=str(split),CENSUS05_SPLIT_SHA256=census.file_sha(split))
++            with (root/(tag+'.log')).open('w') as log:
++                proc=subprocess.run(['bash',str(spool/'census.sbatch')],cwd='/private/tmp',env=current,stdout=log,stderr=subprocess.STDOUT)
++            if smoke=='0' and mode=='mode-i':
++                assert proc.returncode!=0
++                assert 'full mode requires' in (root/(tag+'.log')).read_text()
++                results[tag]=dict(refused=True,exit_code=proc.returncode);continue
++            assert proc.returncode==0,(tag,proc.returncode)
++            out=root/'W/census_05_20261020/attempts'/tag
++            ds=[json.loads(line) for line in (out/'decisions.jsonl').read_text().splitlines()]
++            assert len(ds)==200 and not any(d['disposition']=='INFRA_ERROR' for d in ds)
++            assert all(d['diagnostics']['frozen_05']['available'] for d in ds)
++            result=dict(rows=len(ds),complete=json.loads((out/'summary.json').read_text())['complete'],dispositions={k:sum(d['disposition']==k for d in ds) for k in ('ADMIT','DROP','HOLD')},output_root=str(out),actual_batch_script=True,slurm_spooled_script=True,unrelated_submit_cwd=True)
++            with (root/(tag+'-readout.log')).open('w') as log:
++                proc=subprocess.run(['bash',str(spool/'readout.sbatch')],cwd='/private/tmp',env=current,stdout=log,stderr=subprocess.STDOUT)
++            assert proc.returncode==0,(tag,'readout',proc.returncode)
++            report=json.loads(Path(str(out)+'.readout/readout.json').read_text())
++            assert all(v['status']=='PASS' for v in report['invariants'].values())
++            result.update(readout_last_line=Path(str(out)+'.readout/READOUT.md').read_text().strip().splitlines()[-1],readout_invariants=report['invariants'])
++            results[tag]=result
++    for kind in ('regression','parity'):
++        current=dict(env,E4_SMOKE='1',CENSUS05_ATTEMPT='validation',CENSUS05_PREDICTOR=str(D.parents[2].parent/'greek-ocr-toolkit-main-next/scripts/harvest/filter_runtime/target/debug/greekocr-frozen-font-predict'))
++        with (root/(kind+'.log')).open('w') as log:
++            subprocess.run(['bash',str(spool/(kind+'.sbatch'))],cwd='/private/tmp',env=current,stdout=log,stderr=subprocess.STDOUT,check=True)
++    results['validation_jobs']=['regression','parity']
+     calls = [json.loads(s) for s in (root/'srun.jsonl').read_text().splitlines()]
+-    assert len(calls)==12 and all('/census_04_seg08/' in r['cwd'] for r in calls)
++    assert all('/census_05_20261020/attempts/' in r['cwd'] or '/package/projects/greek-ocr-toolkit-pipe032' in r['cwd'] or r['cwd']=='/private/tmp' for r in calls)
+     results['srun_calls'] = len(calls)
+-    results['native_mock'] = 'saved freshly verified 0.8 measurements; corrections synthetic no-change fixtures; no reader'
++    results['native_mock'] = 'attempt-3 hash-verified native 0.13 measurements; corrections synthetic no-change fixtures; no reader'
+     (D/'mock_batch_results.json').write_text(json.dumps(results, indent=2)+'\n')
+     print(json.dumps(results, indent=2))
+ 
+--- census04/jobs/common.sh
++++ census05/jobs/common.sh
+@@ -1,21 +1,25 @@
+ #!/usr/bin/env bash
+ set -euo pipefail
+-bundle=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
++bundle=${CENSUS05_BUNDLE:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
+ projects="$bundle/package/projects"
+ W=${W:-/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3}
+ root="$W/filter_pipeline_20261018"
+-python=${CENSUS04_PYTHON:-$W/venv_l1/bin/python}
++runroot="$W/census_05_20261020"
++python=${CENSUS05_PYTHON:-$W/venv_l1/bin/python}
+ E4_SMOKE=${E4_SMOKE:-1}
+ case "$E4_SMOKE" in 1) mode=smoke;; 0) mode=full;; *) exit 2;; esac
+ split_mode=mode-i
+-if [[ -n "${CENSUS04_SPLIT_FILE:-}" ]]; then split_mode=mode-ii; fi
+-attempt="$root/census_04_seg08/${CENSUS04_ATTEMPT:-$mode-$split_mode}"
++if [[ -n "${CENSUS05_SPLIT_FILE:-}" ]]; then split_mode=mode-ii; fi
++attempt="$runroot/attempts/${CENSUS05_ATTEMPT:-$mode-$split_mode}"
++if [[ "$E4_SMOKE" == 0 && ( -z "${CENSUS05_SPLIT_FILE:-}" || -z "${CENSUS05_SPLIT_SHA256:-}" ) ]]; then
++  echo "full mode requires CENSUS05_SPLIT_FILE and CENSUS05_SPLIT_SHA256" >&2; exit 2
++fi
+ mkdir -p "$attempt/tmp" "$attempt/cache"
+ cd -- "$attempt"
+ export TMPDIR="$attempt/tmp" XDG_CACHE_HOME="$attempt/cache"
+ export PYTHONDONTWRITEBYTECODE=1 GIT_OPTIONAL_LOCKS=0
+ export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
+-export PYTHONPATH="$projects/greek-ocr-toolkit-sol-recut"
++export PYTHONPATH="$projects/greek-ocr-toolkit-pipe032"
+ export PATH="$root/runtime/node-v22.23.3-linux-arm64/bin:$PATH"
+ # Same codec injection as census_03; local mocks use the system codec.
+ if [[ -f "$root/runtime/png-codec/lib64/libz.so.1.3.1.zlib-ng" ]]; then
+--- census04/jobs/regression.sbatch
++++ census05/jobs/regression.sbatch
+@@ -5,12 +5,16 @@
+ #SBATCH --ntasks=1
+ #SBATCH --cpus-per-task=256
+ #SBATCH --time=00:05:00
+-#SBATCH --job-name=census04_regression
++#SBATCH --job-name=census05_regression
+ # Slurm stdout is selected with --output at submission, under census_04_seg08.
+ # Runtimes and margins: ../JOB_KINDS.md. This script never invokes sbatch.
+ # Slurm executes a spooled copy; the coordinator exports the deployed bundle.
+-bundle_path=${CENSUS04_BUNDLE:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
++bundle_path=${CENSUS05_BUNDLE:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
+ source "$bundle_path/jobs/common.sh"
++# Tests consume the same bound native predictor; binary remains a runtime input.
++mkdir -p "$PYTHONPATH/scripts/harvest/filter_runtime/target/debug"
++ln -sfn "${CENSUS05_PREDICTOR:-$root/runtime/rust-target/release/greekocr-frozen-font-predict}" "$PYTHONPATH/scripts/harvest/filter_runtime/target/debug/greekocr-frozen-font-predict"
++cd -- "$PYTHONPATH"
+ run_step "$python" -B -m pytest -q -p no:cacheprovider --basetemp="$attempt/job-test-tmp" \
+-  "$PYTHONPATH/tests/test_line_pipeline.py" "$PYTHONPATH/tests/test_fp3_numeric_adjacency.py" \
+-  "$PYTHONPATH/tests/test_fp3_external_crop_input.py" "$bundle/tests/test_census04.py"
++  tests/test_content_gate.py tests/test_line_pipeline.py tests/test_integration_fixes.py \
++  tests/test_numeric_cells.py tests/test_seg_gate.py tests/test_seg_deskew.py tests/test_seg_curve.py tests/test_seg_small.py
+--- census04/jobs/parity.sbatch
++++ census05/jobs/parity.sbatch
+@@ -5,10 +5,10 @@
+ #SBATCH --ntasks=1
+ #SBATCH --cpus-per-task=256
+ #SBATCH --time=00:05:00
+-#SBATCH --job-name=census04_parity
++#SBATCH --job-name=census05_parity
+ # Slurm stdout is selected with --output at submission, under census_04_seg08.
+ # Runtimes and margins: ../JOB_KINDS.md. This script never invokes sbatch.
+ # Slurm executes a spooled copy; the coordinator exports the deployed bundle.
+-bundle_path=${CENSUS04_BUNDLE:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
++bundle_path=${CENSUS05_BUNDLE:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
+ source "$bundle_path/jobs/common.sh"
+ run_step "$python" -B "$bundle/parity_check.py" --out "$attempt/job-policy-parity.json"
+--- census04/jobs/census.sbatch
++++ census05/jobs/census.sbatch
+@@ -5,16 +5,16 @@
+ #SBATCH --ntasks=1
+ #SBATCH --cpus-per-task=256
+ #SBATCH --time=04:00:00
+-#SBATCH --job-name=census04_census
++#SBATCH --job-name=census05_census
+ # Slurm stdout is selected with --output at submission, under census_04_seg08.
+ # Runtimes and margins: ../JOB_KINDS.md. This script never invokes sbatch.
+ # Slurm executes a spooled copy; the coordinator exports the deployed bundle.
+-bundle_path=${CENSUS04_BUNDLE:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
++bundle_path=${CENSUS05_BUNDLE:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}
+ source "$bundle_path/jobs/common.sh"
+-args=(--source "${CENSUS04_CONFIG:-$bundle/census04_config.json}" --projects "$projects" --out "$attempt/inputs")
++args=(--source "${CENSUS05_CONFIG:-$bundle/census05_config.json}" --projects "$projects" --out "$attempt/inputs")
+ if [[ "$E4_SMOKE" == 1 ]]; then args+=(--smoke); fi
+-if [[ -n "${CENSUS04_SPLIT_FILE:-}" ]]; then
+-  args+=(--split-file "$CENSUS04_SPLIT_FILE" --split-sha256 "${CENSUS04_SPLIT_SHA256:?}")
++if [[ -n "${CENSUS05_SPLIT_FILE:-}" ]]; then
++  args+=(--split-file "$CENSUS05_SPLIT_FILE" --split-sha256 "${CENSUS05_SPLIT_SHA256:?}")
+ fi
+ run_step "$python" -B "$bundle/prepare_config.py" "${args[@]}"
+ run_step "$python" -B -m greekocr.harvest.line_pipeline_census04 "$attempt/inputs/config.json" --out "$attempt" --execute

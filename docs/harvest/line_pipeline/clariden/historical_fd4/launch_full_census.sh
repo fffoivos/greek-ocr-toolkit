@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Prepared launch only; this file has not been executed.
+ssh -o BatchMode=yes clariden2 'sbatch --parsable --account=a0140 --partition=normal --time=12:00:00 --cpus-per-task=16 --job-name=ocr_filter_census --output=/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/filter_pipeline_20261018/logs/census_%j.log /iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/filter_pipeline_20261018/code/fd4d5e20283b4f1b/projects/greek-ocr-toolkit-sol-recut/scripts/harvest/clariden/filter_worker.sbatch /iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/filter_pipeline_20261018/code/fd4d5e20283b4f1b/projects /iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/filter_pipeline_20261018 census /iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/filter_pipeline_20261018/attempts/census_01 fd4d5e20283b4f1b55910872a17e36dd2f601d99b13111d92305ddc141d7d04a --config /iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/filter_pipeline_20261018/prepared/fd4d5e20283b4f1b/census_w16.json'

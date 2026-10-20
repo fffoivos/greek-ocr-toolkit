@@ -1,0 +1,77 @@
+--- scripts/labelfix/clariden/c1_run.py
++++ scripts/labelfix/clariden/tr2_c1_run.py
+@@ -99,12 +99,13 @@
+     ap.add_argument('--batch-size', type=int, default=16)
+     ap.add_argument('--chunk-size', type=int, default=512)
+     ap.add_argument('--mock', action='store_true')
++    ap.add_argument('--dry-run', action='store_true')
+     ap.add_argument('--compare-cache', type=Path)
+     a = ap.parse_args()
+     started = time.time()
+     rows = read_jsonl(a.selection)
+-    if a.mock:
+-        if len(rows) > 200 or a.device != 'cpu' or a.workers != 1:
++    if a.mock or a.dry_run:
++        if len(rows) > (500 if a.dry_run else 200) or a.device != 'cpu' or a.workers != 1:
+             raise ValueError('Mac mock requires <=200 rows, CPU, one worker')
+     elif not os.environ.get('SLURM_JOB_ID') or a.device != 'cuda':
+         raise ValueError('Full inference requires a Slurm GPU allocation')
+--- scripts/labelfix/clariden/sf7_recompose.py
++++ scripts/labelfix/clariden/tr2_recompose.py
+@@ -31,11 +31,11 @@
+     selected = _RECORDS
+     if sha256(path) != wanted_sha:
+         raise ValueError('runtime changed: '+str(path))
+-    seen = set(); counts = {v: Counter({s:0 for s in STATUSES}) for v in 'AB'}
++    seen = set(); counts = {v: Counter({s:0 for s in STATUSES}) for v in ('A',)}
+     out = Path(out); out.mkdir(parents=True, exist_ok=False)
+-    handles = {v:gzip.open(out/f'overlay_{v}.jsonl.gz', 'wt', encoding='utf-8', compresslevel=3) for v in 'AB'}
+-    controls = {v:gzip.open(out/f'ctrl_subset_{v}.jsonl.gz', 'wt', encoding='utf-8', compresslevel=3) for v in 'AB'}
+-    kept = {v:[] for v in 'AB'}
++    handles = {v:gzip.open(out/f'overlay_{v}.jsonl.gz', 'wt', encoding='utf-8', compresslevel=3) for v in ('A',)}
++    controls = {v:gzip.open(out/f'ctrl_subset_{v}.jsonl.gz', 'wt', encoding='utf-8', compresslevel=3) for v in ('A',)}
++    kept = {v:[] for v in ('A',)}
+     try:
+         for runtime in rows(path):
+             lid = runtime['id']
+@@ -46,7 +46,7 @@
+             if lid in seen:
+                 raise ValueError('duplicate runtime '+lid)
+             seen.add(lid); record = selected[lid]
+-            for v in 'AB':
++            for v in ('A',):
+                 value = gate.overlay(record, runtime, v, binding)
+                 handles[v].write(canonical(value)+'\n'); counts[v][value['status']] += 1
+                 if value['status'] in ('corrected', 'unchanged'):
+@@ -102,8 +102,8 @@
+             raise ValueError('L1R3 input verification changed')
+         if not baseline['complete'] or json.loads(prior_inputs.read_text())['inputs'] != verification['inputs']:
+             raise ValueError('SF7 inputs differ from saved L1R3 inputs')
+-    if not cfg.get('verification_only') and len(selected) != 124669:
+-        raise ValueError('production selection must have 124669 lines')
++    if not cfg.get('verification_only') and len(selected) != cfg['lines']:
++        raise ValueError('selection differs from configured split population')
+     if limit is not None:
+         if limit != 2000 or cfg.get('verification_only'):
+             raise ValueError('real-input dry run must be exactly 2000 lines')
+@@ -124,17 +124,17 @@
+     else:
+         shard_dirs = list(map(process_shard,pending))
+     release = out/'release'; release.mkdir()
+-    all_seen = []; counts = {v:Counter({s:0 for s in STATUSES}) for v in 'AB'}; kept = {v:[] for v in 'AB'}
++    all_seen = []; counts = {v:Counter({s:0 for s in STATUSES}) for v in ('A',)}; kept = {v:[] for v in ('A',)}
+     for directory in shard_dirs:
+         sr = json.loads((Path(directory)/'receipt.json').read_text()); all_seen += sr['ids']
+         for name,h in sr['outputs'].items():
+             if sha256(Path(directory)/name) != h:
+                 raise ValueError('shard output changed')
+-        for v in 'AB':
++        for v in ('A',):
+             counts[v].update(sr['counts'][v]); kept[v] += sr['kept'][v]
+     if len(all_seen)!=len(set(all_seen)) or set(all_seen)!=set(records):
+         raise ValueError('runtime/selection mismatch')
+-    for v in 'AB':
++    for v in ('A',):
+         for prefix in ('overlay','ctrl_subset'):
+             target = release/f'{prefix}_{v}.jsonl.gz'
+             # Concatenated gzip members preserve each verified shard payload.

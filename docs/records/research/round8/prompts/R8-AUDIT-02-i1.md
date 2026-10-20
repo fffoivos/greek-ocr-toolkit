@@ -1,0 +1,115 @@
+# R8-AUDIT-02 iteration 1 — close the record on the checked runtime
+
+Fresh worker, thread argument `-`, model `gpt-6.1-sol`, effort `high`, track `ff8-review`. Worktree `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-ff-review`, branch `astra/ff-review`. Start `<HEAD>` = checked **046bd52dddeea7ada7727971f1038d34328ba5b7** plus the coordinator's FP8an docs merge. The coordinator fast-forwards the clean review worktree from ancestor `fd7bdc52c1eff09c7b2b7ef531aaa817cd2585e6` before launch. Verify the supplied head and clean state; do not reset or audit the old review worktree's runtime. Record your returned thread ID.
+
+This is the **one and only allocated AUDIT iteration**. The old `R8-05.md` prompt and its two-iteration allocation are historical, not launch instructions. INK is CLOSED PARTIAL at 2/3; its i3 is retired, not transferred here. RUST likewise closed at 2/3, FONT's last slot stays parked, geometry/CURL closed PARTIAL. Read [SOL_WORKER_HANDOFF.md](../SOL_WORKER_HANDOFF.md). A fresh Sol auditor follows the owner's model/transfer direction; the old Astra review thread's reports remain inputs. The coordinator's separate Opus review remains independent and unchanged.
+
+Owner, verbatim:
+
+> basically the same code with roughly the same behaviour but more architectonically sound and we would expect it to be actually faster because of the fewer duplicate processes
+
+> Doesnt the correction mostly invovle removing things then? and building models that can help verify the existing mechanisms
+
+> But the whole point of this generation of our model was so that we odnt have to have duplicate checks
+
+> Don't be so pessimistic we are making progress. The only issue is that we should be working with a wider sample
+
+> Our goal now is smooth clear lines for segmentation, without overlap. If the lines are tight as normal on the page, the segments should then tesselate the plane
+
+> ok lets just normally continue with the rest of the tasks in the plan
+
+Your task is to establish **what was actually retained, what evidence supports it, and what remains open**, separately for architecture, physical method, output and speed. It is possible to complete this audit while those goals remain PARTIAL. Do not implement the remaining work to make the audit pass.
+
+## Read the source record
+
+FL = `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-astra-lines4/.astra/fast_lines`; STACK = `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-ff-r8-stack`; INK = `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-ff-ink`; MERGED = `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-ff-merged`. These are local evidence locations, not portable report links or private-page permission.
+
+Read the two original reviews and their machine ledgers: `FAST_LINES_ROUND7_MECHANISM_REVIEW.md` / `FAST_LINES_ROUND7_MECHANISMS.json`, `FAST_LINES_ROUND7_METHODOLOGY_REVIEW.md` / `FAST_LINES_ROUND7_METHODOLOGY.json`, and `FAST_LINES_ROUND7_ASSIGNMENT.md/.json`. Read the current method, generation and test guides under `docs/`, the preserved charter `docs/records/research/FAST_LINES_CHARTER_2026-10-10.md`, and current PLAN/ROSTER. These establish distinct software and physical-method criteria, not permission to copy the slow detector indiscriminately.
+
+Start with the full final independent checks under `FL/review_r8/`: `R8-INK-02-i2_check.md`, `R8-RUST-02-i2_check.md`, `R8-CURL-03-i3_check.md`, `R8-GEOM-04-i3_check.md`, `R8-GEOM-03-i3_check.md`, `R8-FONT-03-i2_check.md`. Follow their earlier checks for inherited retained changes: consolidation i2–i4, R8-02 i1/i2, R8-03 i1/i2, R8-04 i1, GEOM03 i2, GEOM04 i1, CURL03 i2, RUST02 i1 and INK02 i1. Read the corresponding report/handoff sections needed to verify each claim. Build one report/check/source inventory; do not consume all raw chats or duplicate every numerical catalogue.
+
+Reports are committed under `docs/records/research/round8/`; large evidence stays in the owning worktree's `.astra/fast_lines/out/round8/<task>/`. In particular INK02 evidence is in **INK**, not automatically in STACK after a merge. The parked M17 pilot is in `greek-ocr-toolkit-ff-rust` at 953fc4a, not assumed installed in the current tree. The failed physical model and Paddle-seeded adapter remain rejected references only. Use their checks to identify why; do not revive them.
+
+## 1. Builds on the existing code
+
+### Audit actual producers, consumers and deletions
+
+Trace `stack.pipeline.Stack/compose` and its imported providers at the checked head. Default is Python field backend, `bend=False`, `final_export=False`; verify source defaults and effective environment. Separate live default, explicit optional, parked other-branch and offline-only code before counting it.
+
+Use the stable mechanism IDs: the original 41 became **44 active R7 groups (M00–M40 and M53–M55)**; M41–M52 were historical proposals. For each, give current provider/callers, actual reach, retained/replaced/removed status, physical feature and units, explicit reference and input contract, fast/reference comparison scope, counterexample and remaining dependency. Add changed decisions within that map with explicit lineage; do not hide them by renaming or renumbering old IDs. Carry unchanged grades with source/evidence basis; independently reassess changed mechanisms. No need for a new occurrence-by-occurrence constant catalogue.
+
+Audit the four overlapping definition families from R7: scale/height, ink/reference, row/glyph ownership and bend/row paths. The latest reported counts remain **6/9/9/7**, DN subpolicies **2/2**; verify them against actual decision definitions using the same taxonomy, not by counting functions or shared objects. Different physical quantities need not collapse into one scalar. Show whether common ownership/geometry exists, and where incompatible policies still compete.
+
+Name concrete retained changes and the decisions they did or did not remove:
+
+- Consolidation: six `type_ink_*` copies deleted, callers migrated; unused caches removed; exact observations passed through changed-input invalidation. Count physical definitions separately from duplicated implementation and arithmetic.
+- Ink: M06 neighbour-row back-print propagation deleted; M35 now alone excludes the 15 transferred 0ce9 ghosts. Native glyph preparation/tiles are shared under exact contracts. `glyph_atlas` / `match_glyphs` now use one sealed ordered `GlyphAtlas` observation, including exemplar identity; that is a removed input authority, not a source policy. M55 `exclude_whole` remains centre-based; no offline frame provider is adopted. Verify the corrected 255 default B5 calls (207 ink, 26 type, 20 residual proposals, one residual completion, one refresh_children), with refresh_export counted separately as off-default.
+- Geometry: `geometry_page_field.invert_points` and `certify` treat undefined phases explicitly. `geometry_field_detector.native_bands/separate_bands/refine_corridor`, `type_completion.complete_request/corridor_hulls` and `geometry_rows.whole_children/analyze` supply the narrowly retained R and B gains. Trace their refresh and `stack_ownership.reconcile` consumer; do not count discarded children as final rows. `geometry_bands.smooth_band/shared_separator/crop_mask` reaches the retained R output; `tessellate` remains experimental behind final_export. Seven bend/path authorities were not consolidated away, and M33 `geometry_envelopes.guided/correct` remains unchanged after rejected CURL B.
+- Recovery: `type_residual_recovery.recover → type_barriers.protect` retains a supported side of an unverified separator (A). The support-bound hardening (H) constrains it; its test is a synthetic blank overhang, not another recovered text gain.
+- Speed/Rust: R8-04's exact live rewrites are Python gains. Rust pilots preserve numerical behaviour but do not become default gains by existing on disk. Trace the actual selector/counters and deployed Python route before crediting a port.
+
+Verify deletion claims by caller/import/source diffs against ff-merged R7 `52cee3b` and the task-specific bases, including d5dc3e2 for consolidation and 54cc8f9 for later speed/geometry work. Report added/deleted runtime lines **by reach**, with evidence/tests/docs separate. Do not sum overlapping task deltas or count the same removal twice. The charter's physical-method grades A–D are independent of code hygiene: required detector/infrastructure D is not automatically wrong or deletable; a numeric rewrite cannot promote a physical grade without native reference evidence.
+
+## 2. Inputs match what that code expects
+
+This is a read-only audit of code. Trace actual current item pools, image identity, ROI, scale, thresholds, label provenance and index spaces through consumers. Changed rows rebuild B5 anchors/votes and M35's eight-strip reference. `suppress_indices` in B5 indexes requested ROIs. The input atlas is not a row-owner cache. Masks or arrays from an exclusion-filled field image are not original-page ink.
+
+Reuse the **pixel-seeded** slow construction only through its own inputs: `greekocr/pages/lines.py:_discover/_pool_geometry/_assign/_make_lines/_boundaries` and `font.evidence/fit_guides`. Never put Paddle polygons in `PixelPage.boxes`. Saved slow 23-page evidence has known local errors; it is not ground truth. FONT's bodies-only adapter withheld detached marks; the separate λ fused-neck error does not excuse that input mismatch. No measured universal body-height or calibrated universal ink-mask provider has subsequently been installed.
+
+Compare actual `crop_mask` support, not just enclosing polygons or bboxes, including half-open seams. Keep full native glyphs/marks and foreign/duplicate support distinct from thresholded pixel counts. Components can be fragmented or joined; Otsu or relative-ink absence is not proof of no print. Distinguish field drawings with display-only slow fallback from a field actually invoked and consumed by default segmentation.
+
+Bind saved evidence to exact runtime/model/input hashes and effective selectors. A documentation merge preserves runtime, but a later changed provider needs new evidence or an explicit equivalence proof. Page and old segment identities use native coordinates/provenance, never current ordinal equality alone.
+
+## 3. Removal and verification scope
+
+### Account for owner cases and physical progress without extending the implementation
+
+Use the original r7 `COMMENTS.md`, `ROWS.md`, `TIMING.md` and source ledgers under MERGED's `.astra/fast_lines/out/stack/r7/`, plus FL's owner notes/row marks. Preserve **all 104 historical comment records and 256 marked segments**, original wording, author (owner versus coordinator), IDs, native polygons and previous verdicts. The 62 unmarked raw entries are not owner judgments. Rebind each record to the final checked export: retain inherited verdicts on identical masks with provenance, inspect any affected context, and mark genuinely unbound cases unknown. A count of intersections cannot close a two-row mark.
+
+Keep GEOM03's 42-case frozen cohort, its 25 marks, FONT22, GEOM04's 12-page audit, CURL41, INK's 59-page atlas cohort / 153-removal ledger, FRAME57 and the 22 owner-book appendix as separate denominators. Record which claims are new visual inspections, independent-check findings, inherited evidence or arithmetic equality. Only the fixed 208 development allowlist and separately authorised owner22 appendix may be processed; do not glob other page directories or access private 44.
+
+At minimum open source-bound native evidence for these distinct successes and open fronts, recording exactly what you viewed:
+
+- 4959 p5's four retained R rows, including #109 and its neighbouring seams, and 3229 p2 mark5's retained **lower** B row. Check the upper field-owned crop/reconcile and κατ’ limitation separately; no claim of two complete B children. The general smooth/tessellating whole-page output is still off-default.
+- 8686 p5's recovered body «τρου χωρητικότητος … ὀψίμως συλλεγομέ», its clipped/omitted risen endings and the M33 whole-row veto chain. The field follows many ends but current crops do not; complete curved-end gain remains zero. The breathing over ἐξόδων is already 20/20 in its own accepted strip, none above. Keep ἀποξήρανσίν retained.
+- A column/finite-domain counterexample (c8/e259), an unresolved multirow/mark case (a73d), and a table/leader negative (8314). Do not substitute a positive Jacobian or accepted valley for correct leaf/row identity.
+- The INK i2 decisive panels: 0ce9 source 40 panel 072 at `[1757,2644,2244,2697]`, separate from #34/#36; 8686 p26 panel 147; the mirrored digits in panels 113/128. The check resolves source 40 as ghost material below the current printing and panel 147 as mirrored «καὶ τῆς Γερουσίας». B5's 4/0 front vote and the slow all-row retention would return ghosts. Correct over-cautious handwritten/symmetric/unknown descriptions with dated, attributed adjudications where inspected; do not rewrite the original worker receipts. Exact originating leaf remains uncertified, and a contextual human reading is not a runtime classifier.
+- A representative unresolved M55 frame case, pale 1be6 p215 / weak 31f40 p1 controls, and the retained-ghost example below.
+
+The INK loss audit covers 153/153 worker-reviewed removals; the independent checker opened **38 on 13 pages**, found none to be current-leaf text, and strengthened several handedness readings. Report **zero confirmed losses, not proof that no loss exists across all 208 pages or all faint text**. M35 remains photometry/population-dependent. Its two suggested correction witnesses have counterexamples, so no further INK correction was justified. Do not promote every M35/source grade because these removals were acceptable. The longstanding strict faint-front xfail remains open; the reviewed removal population does not discharge that counterexample.
+
+Record retained-ghost backlog with exact native witnesses: `an-ef481610a820-p000151`, items19 `[1106,962,1170,1005]`, 23 `[1108,805,1168,851]`, 36 `[974,287,1160,339]`, mirrored margin marks in the same column as approved removals. Verify/bind those three existing observations only. **Do not expand this task into a fresh retained-ghost census or classifier.** A future broader audit must evaluate retained rows as well as removed siblings, preserve all front text, and avoid unsafe neighbour propagation. Asymmetric digits/full-stop side are observed cues, not an already validated new algorithm.
+
+### Test and timing qualification
+
+Create a source/evidence manifest and reconcile claimed suites with the check: current worktree 430 passed /15 strict xfails; bare 429 /one older local-image skip /15. The i2 checker caught 12/13 atlas mutants, including all i1 survivors. The remaining list-versus-tuple mutant is unreachable with current list input; deepcopy/pickle makes arrays writable but no live path copies an atlas. Record this API lifetime limit without spending an iteration hardening hypothetical copies. Also carry the Rust expected-fixture-manifest gap and remaining experimental geometry mutation holes. Reuse trustworthy final-source test receipts; run focused discriminating tests only to resolve a missing claim. No test, fixture or runtime edits to make a gate green. Use the established `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.venv/bin/python`, `PYTHONDONTWRITEBYTECODE=1` and pytest cache disabled; write any temporary archives/reproduction files only to scratch.
+
+Reconcile the final default 208 exports/masks with R7 and the successive accepted changes, using INK i2 `PARITY208`, hashes and saved outputs. Independently inspect every final difference rather than inferring all later claims from adjacent equality alone. No full inference rerun merely to reproduce a source-matched export ledger.
+
+**Close the final default timing evidence gap.** Seek two source-equivalent, uninstrumented full 208 passes with the stated selectors/settings; the latest instrumented 208 census and 59-page paired INK timings do not supply this automatically. If absent, run **two sequential full 208 passes**, forward and reverse, at the frozen final source using the established MacBook runner. Reuse one warm session per arm; record model hash, backend, requested/observed OpenCV/ONNX threads, start-up boundary and controls. No concurrent benchmark, profiler, rendering or debug capture in clocks. Report corrections and file-to-final median/p95/max, every ≥1 s page, the fixed agreement 40 clean-page control, detector time and stage contribution without adding nested timers. The owner gave no numerical definition of negligible overhead: report measured overhead, not an invented pass threshold.
+
+Do not compare two absolute medians from differently loaded runs as a speedup. Use existing source-bound paired receipts for the individual adopted speed claims; label full 208 descriptive timing separately if drift undermines it. Predetermine any focused repeat for an inconsistency; preserve invalid runs, do not rerun until success. Existing experimental final_export tails of 20–34 s remain experimental, not default. Rust M17's roughly 3–5% integrated pilot gain and the exact/slower shifts_many result are different experiments/populations; neither proves a default overall speedup. SLOW27's coherent Python upper 19.908% and combined-stage sensitivity 25.8–26.8% raw/23.3–25.0% scaled must retain their boundary caveats.
+
+### Finish the documentation, not another implementation
+
+Write `docs/records/research/round8/REPORT_R8-AUDIT-02-i1.md` plus `AUDIT.md` / `AUDIT.json`, with compact companion records as needed for mechanism/checklist, owner cases, current defaults/experiments, source receipts, cost and open backlog. JSON must embed stable IDs and decisive evidence pointers/counts so the conclusions do not depend entirely on ignored screenshots. Keep generated images/captures/timings in `.astra/fast_lines/out/round8/R8-AUDIT-02-i1/`. Link local-only evidence with its owning worktree. Do not commit Anemi scans, private material or large image packs; use existing permitted fixtures only.
+
+Reconcile the old assignment's 20 closure items as closed-with-evidence, partial, not closed or superseded-by-explicit-owner-direction. A cap or successor launch does not satisfy a feature condition. Update the existing documentation navigation to the final audit and correct stale active-task language in `docs/A_ocr_development/reference/LINE_SEGMENTATION.md`, `LINE_SEGMENTATION_TESTS.md`, `REPOSITORY_ORGANIZATION.md` and `docs/shared/DOCUMENTATION_INDEX.md` where needed. Clarify the three generations, real test scopes and methodology; no source moves, duplicate gen trees or new parallel tracker. Preserve charter/history and original owner quotations. Add a dated status/correction addendum for the actual INK commit046bd52 and coordinator private 44 outcome, rather than leaving its old “no worker commit” or private-gate-pending claim as current truth. Planner reconciles global PLAN/ROSTER after the audit check; append the worker's precise handoff without silently rescheduling tasks.
+
+## 4. No new pipeline or page model
+
+**No edits under `prototypes/` or `greekocr/`, no runtime/test/fixture changes, no selector promotion.** Read-only development reproduction, document changes and local evidence scripts are allowed. No broad repository code reorganisation, Rust port, new source/mark/font/curvature/row model, noise calibration or copied reference implementation. Do not implement a repair found by this audit; retain its native witness and first failing assumption.
+
+Both owner questions stay visible and **unallocated**: (a) shared-field crop bands beyond anchors, flat/no-curl behaviour and binding-side detection; (b) field-path resolution/pass changes for speed. Exact consumed-density-domain and deferred audit-list hypotheses also remain unallocated implementation backlog; the density blur is already shared. Record their proof requirements and estimated limits, not a measured gain. FONT stays parked. No unused INK/Rust slot transfers, new ghost-removal allocation or next-task launch.
+
+## What counts as progress and closure
+
+Complete this audit when its current-source accounting is reproducible and candid: both original reviews are reconciled, deletion/consumer claims verified, retained native gains and all old owner records bound or explicitly unknown, the default versus experimental distinction clear, cost recomputed with its limits, and every unfinished prerequisite assigned to **backlog or a pending owner question**, not falsely to a completed task. Evidence gaps have exact scope and cause. Do not call the whole round DONE just because this report is done.
+
+The result should let the owner answer, in plain words: what useful output improved; what duplicate work/authority disappeared; which page-feature assumptions gained evidence or were falsified; whether gains generalise beyond one page; what remains slow; what the two pending decisions would enable. Separate retained output, architecture, negative experimental evidence, and diagnostic progress. Ask the independent reviewer to assess those separately, including what has narrowed versus stalled.
+
+Coordinator alone owns private 44. Its latest report at 046bd52 is **44/44 polygon-identical** to INK i1, corrections−0.6 ms versus detector−0.9 ms (noise), no republish. This is relayed evidence, not data you access or a new complete mask/visual check you claim to have run. A docs-only audit needs no repeated private run. If a reproducibility discrepancy makes a coordinator rerun necessary, request it through the handoff: baseline/candidate whole-page segmentation, every actual strip and actual-mask coverage maps, source/exclusion identities and paired costs. Never fetch private images/exports. Owner-disclosed cases become exposed development-retest.
+
+Return `ITERATION_HANDOFF.json/.md` with exact source/document commit or fallback, inspected images, reused versus rerun evidence, report limitations and unresolved questions. After your result and independent check, Astra closes the active allocation; there is no automatic successor. Meter 17% reported; no 15 October daily cap. Standing 97% launch / 99% run safeguards and any live stop signal remain. No background jobs, subagents, pushes, publication or external messages. Read applicable AGENTS.md and INFRA fixed rules; PDF text is not a reference, orientation stays parked, excluded evidence must not be presented as OCR output.
+
+Commit scoped documents only with the repository's single required trailer block. If staging is blocked, leave an executable source/head/hash-bound `.astra/commit-F8-R8-AUDIT-02-i1.sh`, correct shebang, **bare invocation**, optional `--check`; the runner executes it directly. Keep commit status accurate. Finish in plain words, then `RESULT: <DONE|PARTIAL|NOT DONE> <one line>`; DONE refers to this audit's scope, not physical completion or independent acceptance.

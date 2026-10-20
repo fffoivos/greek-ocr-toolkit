@@ -15,7 +15,22 @@ from .geometry_feature_rules import refine,split_items
 from ..layout_barriers.fast import scout,correct
 
 
-def retention(gray,items,index,polygon,height,detail=False):
+def retention_ink(gray,item,height):
+    """Owned source-ROI ink for one audit/repair sequence; image stays immutable.
+
+    Polygons and neighbour ownership are deliberately absent from this value.
+    Those are rasterized afresh for each candidate and current item census.
+    """
+    bounds=tuple(roi(bbox(item),gray.shape));x0,y0,x1,y1=bounds
+    a,b,c,d=roi([x0-height,y0-height,x1+height,y1+height],gray.shape)
+    raw=gray[b:d,a:c]
+    paper=cv2.boxFilter(raw,cv2.CV_32F,(quantize(3*height)|1,)*2)
+    ink=(paper-raw>255*.06)[y0-b:y1-b,x0-a:x1-a].copy()
+    ink.flags.writeable=False
+    return gray,bounds,height,ink
+
+
+def retention(gray,items,index,polygon,height,detail=False,*,prepared=None):
     """Account for every thresholded pixel uniquely covered by the old box.
 
     Neighbour-owned ink may leave a straddling box; unique ink may not be silently
@@ -31,23 +46,23 @@ def retention(gray,items,index,polygon,height,detail=False):
         a=bbox(q)
         if min(a[2],x1)>max(a[0],x0) and min(a[3],y1)>max(a[1],y0):
             cv2.fillPoly(others,[np.rint(np.asarray(q['polygon'])-origin).astype(np.int32)],1)
-    px0,py0,px1,py1=roi([x0-height,y0-height,x1+height,y1+height],gray.shape)
-    raw=gray[py0:py1,px0:px1]
-    paper=cv2.boxFilter(raw,cv2.CV_32F,(quantize(3*height)|1,quantize(3*height)|1))
-    ink=(paper-raw>255*.06)[y0-py0:y1-py0,x0-px0:x1-px0]
+    if (prepared is None or prepared[0] is not gray or prepared[1]!=(x0,y0,x1,y1)
+            or prepared[2]!=height):
+        prepared=retention_ink(gray,items[index],height)
+    ink=prepared[3]
     unique=ink&(old>0)&(others==0);lost=unique&(new==0)
     audit=dict(unique_ink=int(unique.sum()),lost_ink=int(lost.sum()),
                lost_fraction=float(lost.sum()/max(1,unique.sum())))
     return (audit,unique,new,origin) if detail else audit
 
 
-def keep_nearby_ink(gray,items,index,polygon,h):
+def keep_nearby_ink(gray,items,index,polygon,h,*,prepared=None):
     """Enlarge a contour only enough to retain nearby originally owned marks.
 
     Refuse whole-row losses: a missing region farther than half a body-height
     from the proposed ribbon is topology uncertainty, not envelope padding.
     """
-    audit,unique,new,origin=retention(gray,items,index,polygon,h,True)
+    audit,unique,new,origin=retention(gray,items,index,polygon,h,True,prepared=prepared)
     lost=unique&(new==0)
     if not lost.any():return polygon,audit
     distance=cv2.distanceTransform(1-new,cv2.DIST_L2,5)
@@ -66,7 +81,7 @@ def keep_nearby_ink(gray,items,index,polygon,h):
     ids=np.unique(np.r_[np.arange(0,len(xx),quantize(.15*h)),len(xx)-1])
     p=np.vstack([np.c_[xx[ids],top[ids]],np.c_[xx[ids[::-1]],bot[ids[::-1]]]])
     p=np.clip(p,[0,0],[gray.shape[1],gray.shape[0]]).tolist()
-    second=retention(gray,items,index,p,h)
+    second=retention(gray,items,index,p,h,prepared=prepared)
     return (p if second['lost_ink']==0 else None),dict(before=audit,after=second)
 
 
@@ -91,10 +106,11 @@ def run(gray,pm,items,version=6):
             elif a['bend_h']<.25 and abs(np.tan(np.radians(a['angle_deg']))-line_axis(items[i])[1])*(bbox(items[i])[2]-bbox(items[i])[0])/h<.5:reason='dense geometry does not corroborate'
             if reason:
                 decisions.append(dict(line=i,decision='preserve',reason=reason));continue
-            p=a['polygon'];audit=retention(gray,out,i,p,h)
+            p=a['polygon'];prepared=retention_ink(gray,out[i],h)
+            audit=retention(gray,out,i,p,h,prepared=prepared)
             if version>=3 and audit['lost_ink']>0:
-                repaired,repair_audit=keep_nearby_ink(gray,out,i,p,h)
-                if repaired is not None:p=repaired;audit=retention(gray,out,i,p,h)
+                repaired,repair_audit=keep_nearby_ink(gray,out,i,p,h,prepared=prepared)
+                if repaired is not None:p=repaired;audit=retention(gray,out,i,p,h,prepared=prepared)
                 else:
                     decisions.append(dict(line=i,decision='preserve',reason='loss is not nearby envelope ink',retention=audit,repair=repair_audit));continue
             # V1 is an intentionally unguarded proposal for visual falsification.

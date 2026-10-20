@@ -60,13 +60,14 @@ def test_compose_single_rule_scout_and_stable_sources(monkeypatch):
     def ink(g,current,**kwargs):
         assert current[1]['source_ids']==[1]
         calls.append('ink')
-        return dict(items=[current[1]],removed=[0],ownership=dict(suppress_indices=[0]),scout_s=0,refinement_s=0)
+        return dict(items=[current[1]],removed=[0],ownership=dict(suppress_indices=[0],height=5,scout_s=0,seconds=0),removal_reasons={0:'back print'},ink_s=0,seal_s=0,discrete_scout_s=0,discrete_refinement_s=0,scout_s=0,refinement_s=0)
     def geo(g,pm,orig,current,w,p,**kwargs):
         assert orig is original and len(current)==1 and current[0]['source_ids']==[1]
         assert kwargs['forbidden_regions'][0]['source_ids']==[0]
         calls.append('geometry')
         return dict(items=current,changes=[],curved=None,fragments=dict(joins=[]),joined_reduction=0,scout_s=0,geometry_s=0,curved_s=0,fragment_s=0,column_s=0,columns=dict(changes=[]),witness=dict(trigger=False))
-    def typ(g,current,d,excluded_regions,column_evidence=None):
+    def typ(g,current,d,excluded_regions,column_evidence=None,tone_samples=None,glyph_samples=(),retain_support=False):
+        assert not retain_support
         assert excluded_regions[0]['source_ids']==[0] and current[0]['source_ids']==[1]
         if column_evidence is not None:assert column_evidence==dict(changes=[])
         calls.append('type')
@@ -78,8 +79,21 @@ def test_compose_single_rule_scout_and_stable_sources(monkeypatch):
         calls.append('smooth')
         return dict(items=current,changes=[])
     monkeypatch.setattr(pipeline,'smooth_envelopes',smooth)
+    def faint(g,current,ownership_evidence):
+        assert current[0]['source_ids']==[1] and ownership_evidence['suppress_indices']==[0]
+        calls.append('faint')
+        return dict(suppress_indices=[],scout_s=0)
+    monkeypatch.setattr(pipeline,'relative_faintness',faint)
+    def split_rows(g,current,*,forbidden_regions,refresh,retain_support=False):
+        assert not retain_support
+        assert forbidden_regions[0]["source_ids"]==[0]
+        assert callable(refresh)
+        assert current[0]['source_ids']==[1]
+        calls.append('rows')
+        return dict(items=current,changes=[],scout_s=0,native_s=0)
+    monkeypatch.setattr(pipeline,'split_rows',split_rows)
     r=pipeline.compose(np.ones((100,100),np.uint8),np.zeros((10,10)),original,object())
-    assert calls==['scout','ink','geometry','type','smooth']
+    assert calls==['scout','ink','geometry','type','smooth','faint','rows']
     assert r['counts']['back']==1 and r['items'][0]['source_ids']==[1]
 
 
@@ -111,7 +125,7 @@ def test_stack_uses_merged_track_functions():
 
 
 def test_join_audit_counts_only_real_image_pixels():
-    from .validate import retained_pixel_loss
+    from ..evidence.validate import retained_pixel_loss
     old=rect([2,2,10,8])
     assert retained_pixel_loss([old],rect([2,2,9,8]),(10,10))==0
     assert retained_pixel_loss([old],rect([2,2,8,8]),(10,10))==7

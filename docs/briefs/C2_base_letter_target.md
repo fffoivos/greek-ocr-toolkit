@@ -1,0 +1,120 @@
+# C2: the base-letter auxiliary target column (gpt-6.1-sol, medium, network ON for read-only `ssh clariden` and the final deploy `rsync` only, no spend, no jobs)
+
+**The coordinator's ruling** on DATA_NEEDS Q1 (`docs/harvest/collect_v3_admission/scaling_w3/DATA_NEEDS.md` §C2): the C2 auxiliary target is the **base-letter projection of the label**, with diacritics and case stripped and the result restricted to **codec v2.1 letters**. It is emitted as a **second label column in the same shards** (label-derived; **0 new images**). **No new tokenisation:** it is encoded with codec v2.1. The coordinator submits; you submit nothing. `W=/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3`.
+
+## Bases (read-only)
+- **The MIX1 export:** `docs/harvest/collect_v3_admission/mix1/` (MIX1.md, MIX1_RECORD.md, LOADER_CONTRACT.md, `run_record/EXPORT_RECEIPT.json`).
+  - The shared real v2.1 shards: 364,871 rows / 90 shards in `$W/scaling_w3/mix1_runs/MIX1D-8d25940f-export-001/`.
+  - The E1/A12 v2.1 derivatives in its prep dir.
+  - **export-001 is IMMUTABLE** (the training lead's request). Write nothing there.
+- **The wave-2 loader package:** `$W/e4_wave2_rel3_20261020/code/27a49e51fa735e8f`; local `~/Projects/greek-page-ocr-e4w2` (read-only): codec v2.1, `train/mix.py` (`load_rows`/`validate`), `bench/e4_codec_release.py` (`clone_build`).
+
+## Rules
+1. **The projection, as a pure function of the label string:**
+   1. NFD;
+   2. drop every combining mark (Unicode category Mn);
+   3. lowercase with `str.lower()`. Not casefold: **final ς stays ς**. Record this as a lead choice.
+   4. keep only the characters that are **letters in codec v2.1** (category L*, present in the codec) plus the ASCII space;
+   5. collapse runs of spaces and strip.
+
+   Encode the result with codec v2.1 into `base_label_ids`, and also store `base_label` text.
+   - Report the target alphabet (the size and the full list of letters that occur), the rows whose projection is empty (count, and how the loader should treat them), and 20 examples per script (Greek polytonic, Greek monotonic, Latin, Cyrillic).
+   - If any projected letter is **not** in codec v2.1, stop and report; never extend the codec.
+2. **"In the same shards" without touching export-001:**
+   - write **derivative shard sets** into a new attempt `$W/scaling_w3/mix1_runs/C2-<sha8>-001/`, mirroring the `clone_build` pattern;
+   - each derivative shard = the source shard's columns byte/value-identical, plus the two new columns;
+   - assert every original column is equal (as clone_build does);
+   - write an `encoding_derivation`-style receipt binding the source shard_inventory sha + codec sha + the projection function's source sha.
+   - Cover every shard set the MIX1 arm manifests reference: shared real, E1 v2.1, A12 v2.1. The arm index manifests stay valid: line_id and pool_index are unchanged, which you assert.
+   - If the loader contract can instead take a **sidecar keyed by line_id**, without trainer code changes, state it as an alternative in C2.md. Implement only the derivative shards.
+3. **Loader:** check that the wave-2 `load_rows`/full `validate()` still accept the derivative shards unchanged (extra columns ignored or allowed). If validate rejects unknown columns, stop and report the exact line; do not change trainer code.
+
+## Package (`docs/harvest/collect_v3_admission/scaling_w3/c2/`)
+- `build_c2.py` and a CPU sbatch (`--account=a0140`, normal, time sized from the measured local rows/s and the MIX1 export sizes; state the arithmetic).
+- `VERIFY.sh` (package + light inputs: export-001 receipt sha, codec sha), `submit_c2.sh`.
+- **Tests:**
+  - the projection on Greek polytonic/monotonic, Latin, Cyrillic, digits and punctuation;
+  - ς kept;
+  - an empty projection;
+  - a letter outside the codec stops the run;
+  - the original columns stay equal;
+  - a **real round trip on ≥ 1,000 real rows** from export-001 shards, read-only on Clariden: read, project, write the derivative into your own new scratch dir `$W/scaling_w3/c2_scratch/roundtrip_<sha8>/` (which must not exist beforehand; keep it as evidence), then `load_rows` + full `validate()`.
+- Delete your own local pytest basetemp after a passing run, keeping only tests.log/tests.xml.
+- Deploy to the **new** `$W/scaling_w3/c2_pkg/<sha8>/` and read every sha back.
+- `C2.md`: the projection, alphabet, empties, examples, derivative layout, the loader check, sizing and **the exact coordinator block**.
+
+Write a guarded commit list. Do not run `git add` or `git commit`. Touch nothing outside `c2/` and this brief.
+
+The last line must be exactly:
+`C2: done | projection NFD-Mn-lower(ς kept)-codec-letters+space | alphabet <n> | empty <n> | derivative shards (export-001 untouched) | real round trip <n> rows validate ok | package <root> VERIFY package ok | tests <n> passed | basetemp deleted | no jobs submitted`
+
+
+## C2 execution record (20 October 2026)
+
+Prepared package `23d89b45`; 95 observed letters; 18,683 empty projections across 592,180 physical rows. 16 tests passed and pytest-basetemp deleted. Corrected 1,000-real-row witness passed deployed full validate() and load_rows(), including original schema metadata. Production derivatives await the coordinator; no jobs submitted, no git add/commit.
+
+Every deployed file SHA was read back and compared locally (52/52, including PACKAGE.json). Both VERIFY package and light VERIFY inputs passed. The guarded proposed commit list is in c2/GUARDED_COMMIT_FILES.txt; this execution log and bulk evidence are outside that proposed commit.
+
+```json
+{
+  "checks": [
+    "VERIFY package ok 51",
+    "VERIFY inputs ok"
+  ],
+  "root": "/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/scaling_w3/c2_pkg/23d89b45",
+  "sha256": {
+    "BENCHMARK.json": "f27332875c9d7595a908038d712a9eefbb1d43ccff64cb4258da7ca7c12fe20e",
+    "C2.md": "cb5a6cd9bd467de5429e6409a0beb72d037624a06b98529fbae4c169168a58cc",
+    "COMMIT_GUARD.json": "455e8b020db51c5a51673bd0537e2b243308fe970adb280d05d8c489797f0115",
+    "GUARDED_COMMIT_FILES.txt": "b60ca631d8950e86e40a2c50ec36d96cdfb0f5f5c9207a129ddc3ca6769d0ec9",
+    "IDENTITY.json": "9116beca6ac747a6754030d7bb4ba19a2aa22007f50a87f1a71a6fb495562d85",
+    "INPUTS.json": "5a84aaa572f111d0b25fd8ef9022c7bc2c6d796cef859cfa2136625a3e27911e",
+    "LABEL_AUDIT.json": "c2dd4446f73916f602d0c62736a3839b1dee7ad5dfd718141b8c67228806ada9",
+    "LOCAL_ROUNDTRIP.json": "9923804486279ebb6515f77d32e65dd421fee6deb85ad38d052ab2fbd2d60c01",
+    "PACKAGE.json": "993ceac0f4bbd4d84a8e9085fce9ae59c63c0ddb68fa4bde58e941dea97f803b",
+    "ROUNDTRIP_RECEIPT.json": "c13bc867a22dc62fa4b5add0e528ceaf4b65c4214410cfaca84d8343e2f103bd",
+    "VERIFY.sh": "7d32c93dbec0c95405a8beef14329d6354264fcb18fc8fbd6add461fa5094d27",
+    "audit_labels.py": "0b1afdb90c36763e0df1573c31957476b3bfdad7e43d2c72f2691659676bdc65",
+    "build_c2.py": "d4a110e83aa541e61be9fc627e5ec79910aec9e576f22465b5867e2ac8d12e26",
+    "c2.sbatch": "36acae7aa62189646653777075c8a815fcaf205601baffd3972b34545766fc66",
+    "evidence/EXPORT_RECEIPT.json": "965fae30022b38fd285b624676f3b64819d6173c5a03c1fb3cb1595afcb242ed",
+    "evidence/M1/INDEX.json": "5b513aae8a1bff0721af856eb1e2ffffeee425a2c583b3c908a85f0ce89828cd",
+    "evidence/M1/mix.json": "764fcc861a06b25d5e4dac4560b255bbb6a5b2713da06f197bc832abfbda48c8",
+    "evidence/M2_curriculum/INDEX.json": "21d104d14d140928590fac70385c0028f3688bb1aa3a6044324021f05050dfac",
+    "evidence/M2_curriculum/mix.json": "28daf6c144faad43b3684bc705d28e8848b4bb5f955b620a16d8d1fd74acb980",
+    "evidence/M2_syn40/INDEX.json": "64c808d43c9b5151d6fc5e446eb6c263ce52da978d2796d51f84251cd3882bed",
+    "evidence/M2_syn40/mix.json": "749d8e7cb957d5ee6f3c8ab7bb0f601796402cf0e056ced5540ca67967f34043",
+    "evidence/M2_syn50/INDEX.json": "b88b6d9580001c7394e433ff42c32f9b19a63d9716e58e1afaf79e46deada8c1",
+    "evidence/M2_syn50/mix.json": "28daf6c144faad43b3684bc705d28e8848b4bb5f955b620a16d8d1fd74acb980",
+    "evidence/M2_syn60/INDEX.json": "a434494996f4247aeaa21de5de84abb94bbfb559ca2d71a98837875303ba3ec2",
+    "evidence/M2_syn60/mix.json": "4bb973c2b86ad030977f03b415e51729e04499d165cd5bd214f5bc47d3d04c8a",
+    "evidence/M3_capped/INDEX.json": "ab95b9d8bc2ebe044224932c3c2a92aa37beba0bb84c3c67341cda42afe720cb",
+    "evidence/M3_capped/mix.json": "28daf6c144faad43b3684bc705d28e8848b4bb5f955b620a16d8d1fd74acb980",
+    "evidence/M3_uncapped/INDEX.json": "bb0040e4bc9cf977fe69f79443f52c5ca7f110344aed51edd07bf45d1ff4a583",
+    "evidence/M3_uncapped/mix.json": "28daf6c144faad43b3684bc705d28e8848b4bb5f955b620a16d8d1fd74acb980",
+    "evidence/M4_alpha0.5/INDEX.json": "b088cd032a4146e60b208e85bb54a902e63ec55ad9a965537bcdfaa072bd3a49",
+    "evidence/M4_alpha0.5/mix.json": "28daf6c144faad43b3684bc705d28e8848b4bb5f955b620a16d8d1fd74acb980",
+    "evidence/M4_alpha1/INDEX.json": "dc23e6f02dafdfe8767253d7182fa29549a43dd0f530b5594bd540415b3243ac",
+    "evidence/M4_alpha1/mix.json": "28daf6c144faad43b3684bc705d28e8848b4bb5f955b620a16d8d1fd74acb980",
+    "evidence/SOURCE_BINDINGS.json": "38f2b0190a7eef91031a06c651e66a6a6950927eb755740702d7870fbfda8a27",
+    "evidence/labels.jsonl.gz": "bdd66c03aa53eec52c90f3cc6cb480a1bc1acdb0e97049b2f76a3f11504b21e8",
+    "evidence/prep/A12/build_info.json": "e81aa95bdc32113b398f16ebe9741782fc875a50eb3de6b75522b8183f258271",
+    "evidence/prep/E1/build_info.json": "dd2a2bb01ae5280a0ba262eedbef1184438312e14a9a20caeaa11ac38c16f287",
+    "evidence/sample.parquet": "0b0387148ceb88f54d87600a49f7651dcce26f839b5fc3f31a4a47d05effeed4",
+    "evidence/shared/real/build_info.json": "81c44dad7fbd71d844af74da2bac5b246e4734fbba4490ab6b6ddabb40a80ea6",
+    "evidence/wave2/codec/v2.1.json": "eae613e8eb18fd144314f68ae3b6424fb48dd778a2134fef417b06ac2353c4b6",
+    "evidence/wave2/train/mix.py": "bcce698fc47ab547bd4a4e3616148e16b11c117a962170053bca65e67716eba0",
+    "prepare_roundtrip.py": "357797668bf0b96a59ccd470f0fdbf4abe278b71bb1592c50c6f78e123e78be8",
+    "read_inputs.py": "c73f7ccb953ae514dae8117819093c6f3ec1b70707f3b81a309751307867a7cb",
+    "roundtrip/local_mix.json": "768dbe94043575f9d7ea199e86749e241d80bef772c6a50875916f5244b3b965",
+    "roundtrip/mix.json": "492218613bb8ec8b395c94a7156a2f4f158a0a10444120279b452eb852bf021d",
+    "roundtrip/real/build_info.json": "8c0fc36674ee345910f88474469366720d66035dfe8ee00dda5926aa37408c4e",
+    "roundtrip/real/train/shard-00000.parquet": "9475635a3a6ce89d254cb08e1db48e2527226f46817bb21a8adc264b3a15f7f3",
+    "submit_c2.sh": "bb36b161a94de977e43ccdc7290db1f9cf81eb4c844dd68b23d8526cb147b7c1",
+    "test_c2.py": "d1ce35be59194b33bc99b7d0bf09252dbd45848c37807a11aa4952d5339d628a",
+    "tests.log": "74d422abff089f247c3b6c332325df27ca6c964db6f58fb8835b8d90c6f6693f",
+    "tests.xml": "598cdf81fb9937a6ef454e89b8b6a638db87e3f38871a66ce968dd035d9290e1",
+    "validate_roundtrip.py": "6984582a9c52c04bf742374e229c7ddca3bd2b706bb80f8d56fa9a28b2b8de7d"
+  }
+}
+```

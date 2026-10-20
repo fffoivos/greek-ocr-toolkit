@@ -1,0 +1,2 @@
+# SCAN2R2 — re-review of scanner v4.5.1 (gpt-6.1-sol, medium, network OFF, READ-ONLY; write only out/scan2r2/REVIEW.md)
+Same criteria as docs/ocr_program_2026-10-06/briefs/SCAN2R_review_brief.md, plus: H1–H3 of out/scan2r/REVIEW.md are closed (re-run the three probes and try two new probes of the same classes); the rescan verdicts of the 15 rollouts are justified by P1–P3 only. Last line exactly: `SCAN2R2: <PASS|FAIL> | blocking <n> | high <n> | medium <n> | rescan justified <n>/15`

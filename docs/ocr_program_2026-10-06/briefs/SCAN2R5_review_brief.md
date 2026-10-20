@@ -1,0 +1,2 @@
+# SCAN2R5 — re-review of scanner v4.5.4 (gpt-6.1-sol, medium, network OFF, READ-ONLY; write only out/scan2r5/REVIEW.md)
+Criteria of SCAN2R_review_brief.md; re-run every probe of SCAN2R/R2/R3/R4 (all must VOID) plus two new recorder-cache variants; confirm `recorded_helpers()` uses independent_units() and the single cache/barrier; rescan verdicts justified by P1–P3 only. Last line exactly: `SCAN2R5: <PASS|FAIL> | blocking <n> | high <n> | medium <n> | rescan justified <n>/15`

@@ -1,0 +1,130 @@
+"""Build the SEG-DESKEW-1 hand-off from receipts, without rerunning crops."""
+from pathlib import Path
+import gzip
+import json
+import sys
+D=Path(__file__).resolve().parent
+ROOT=D.parents[4]
+commit=sys.argv[1] if len(sys.argv)>1 else 'pending'
+load=lambda name:json.loads((D/name).read_text())
+a=load('cp2_summary.json');b=load('cp3_calibration_summary.json');drift=load('calibration_drift_summary.json')
+checks={r['line_id']:r for r in drift['checks']}
+guard=load('scope_guard.json');validation=load('replay_validation.json')
+rows=[json.loads(s) for s in (D/'replay_segeval1.jsonl').read_text().splitlines()]
+calrows={r['line_id']:r for r in map(json.loads,(D/'replay_calibration.jsonl').read_text().splitlines())}
+site=ROOT.parent/'ocr-review-sites-20261018'
+savednative={r['id']:r for r in json.loads(gzip.decompress((site/'review-data/font-normalized/predicted-rows.json.gz').read_bytes()))}
+lines=[]
+def add(s=''):lines.append(s)
+def table(headers,values):
+ add('| '+' | '.join(headers)+' |');add('| '+' | '.join('---' for _ in headers)+' |')
+ for value in values:add('| '+' | '.join(str(v).replace('|','\\|') for v in value)+' |')
+ add()
+
+add('# SEG-DESKEW-1 hand-off')
+add()
+add('## Change')
+add()
+add('Implemented segmentation **0.6**, “0.5 + row-frame text box”, from worktree HEAD `602938bb54b728c3136c5e98493cac3fba651db7`. No network, Clariden, Slurm, OCR reader, policy tuning, predictor fitting, or push was used.')
+add()
+add('`NativeSegmenter.__call__` is this checkout’s segment entry point. It fits a straight line to every sample of the detected `side == "main"` row’s full `base` curve, using clockwise-positive image coordinates. Missing/flat main rows give 0°. A flatness guard covers only eight baseline ULPs of solver roundoff; there is no operational angle cutoff. The existing detector, refocus, roles, quarter-turn handling and neighbour reconciliation are unchanged.')
+add()
+add('`tight_box` rotates ink belonging to the existing TEXT_ROLES component IDs by −θ about `(crop_width/2, crop_height/2)`. It bounds continuous unit pixel cells analytically, without resampling, integer rounding, clipping or rotating component envelopes. `length` is the span along the row and `height` is the span normal to it. Corners are mapped back into the existing measurement-frame crop coordinates in row-frame top-left, top-right, bottom-right, bottom-left order. θ = 0 takes the original integer `tight_box` path.')
+add()
+add('The unchanged predictor receives `max(length,height)` and `min(length,height)`. The upright `box_evidence.bbox` remains available for drawing; only `box_evidence.row_frame = {angle_deg,length,height,corners}` is added. Padding now uses `(segment_height − upright_box_height) / row_frame.height`, and records `upright_box_height` and `row_frame_height`. Its unchanged 1.5 threshold therefore admits a crop height up to the upright envelope plus 1.5 row-normal heights. All nonmeasurement evidence differences seen in replay are itemized below and reproduced by the untouched adapter.')
+add()
+add(f'- Frozen policy SHA256: `{a["policy_sha256"]}`.')
+add(f'- Segmentation component digest: `{a["segmentation_digest"]}`.')
+add(f'- New complete toolchain digest (`digest(canonical(tool_versions["tools"]))`): `{a["toolchain_digest"]}`.')
+add('- `build_filter_versions.py` and its generated `tool_versions.json` were updated. Apart from segmentation 0.6, only the census component fingerprint/digest changes because it fingerprints `line_pipeline_native.py`; its version and behavior are unchanged.')
+add('- Scope proof: [source_changes.patch](source_changes.patch), [code_git_diff.patch](code_git_diff.patch), [scope_guard.json](scope_guard.json), [replay_validation.json](replay_validation.json). AST comparison permits only `NativeSegmenter.__call__`, `tight_box`, and `features_from_observation` in the two production code files. Policy, font coefficients and the entire predictor source/lock/config plus executable retain their initial hashes.')
+add()
+add('**Git limitation:** creating `sol/seg-deskew` in the requested worktree failed because its shared Git directory lies outside the writable sandbox. The exact error was `cannot lock ref ... /Projects/greek-ocr-toolkit/.git/refs/heads/sol/seg-deskew.lock: Operation not permitted`. The worktree remains on `sol/recut-v1`. A portable branch named `sol/seg-deskew`, rooted at the requested HEAD, is instead committed in an isolated writable Git directory and delivered in `SEGDESKEW1.bundle`. No shared Git ref/index was changed. The implementation commit below and a separate hand-off commit are in that bundle; the hand-off cites the implementation commit to avoid a self-referential commit hash.')
+add()
+add('The two production files, version builder and versions JSON already existed **untracked** at task start. Their initial bytes are retained in [baseline/](baseline/); the scoped patches compare against those exact bytes. Relative to HEAD, Git necessarily records those requested files as additions. Other pre-existing untracked runtime/dependency files were not staged or included. The bundle is a scoped worktree hand-off, not a standalone packaging of all pre-existing runtime inputs.')
+add()
+add('Initial and final tracked `git diff --stat` are identical; the five pre-existing edits were neither modified, staged, committed nor reverted:')
+add()
+add('```text\n'+guard['initial_diff_stat'].rstrip()+'\n```')
+add()
+add('## Tests')
+add()
+add('Checks ran CP1 → CP2 → CP3, using `.venv/`. The existing offline test fixture blocks live network connections; replay scripts also reject Python network connect/DNS audit events.')
+add()
+add('CP1 command: `.venv/bin/python -m pytest tests/test_seg_deskew.py -q` (with all four native thread limits set to 1 and bytecode writes disabled).')
+add()
+add('```text\n'+(D/'cp1_pytest.log').read_text().rstrip()+'\n```')
+add()
+add('The six tests cover three real upright crops against saved census evidence to the digit (bbox, expected, padding, and all other evidence after stripping the additive fields), upright renders rotated +2° and −2° (height within 1 px, length within 1%), and a tall synthetic crop exercising the owner’s padding formula and the unchanged height-reject verdict. The initial two failures exposed flat-baseline floating residue and are preserved in `cp1_initial_roundoff_failure.log`; the guard fixed them before CP2.')
+add()
+add('Existing pipeline regression command: `.venv/bin/python -m pytest tests/test_line_pipeline.py -q`.')
+add()
+add('```text\n'+(D/'regression_pytest.log').read_text().rstrip()+'\n```')
+add()
+add('Total: **136 passed** (6 new + 130 existing). Readback validation independently reproduces all **1,038** stored new predictor outputs and policy verdicts/reasons exactly, verifies every padding formula, verifies version rebuild identity, and rechecks protected hashes. This is in addition to pytest, not counted as extra pytest tests.')
+add()
+add('## Parity')
+add()
+add('### CP2 — 150 unseen SEGEVAL-1 rows')
+add()
+add(f'All **150/150** byte-bound crops replayed through the native segmenter with no row failures ({a["elapsed_seconds"]:.2f} s). Before = original census evidence/frame; after = native 0.6 result, with sealed raw text/binding/script metadata and owner reader state. See [replay_segeval1.jsonl](replay_segeval1.jsonl), [cp2_summary.json](cp2_summary.json), and [cp2_verification.log](cp2_verification.log).')
+add()
+add('**θ = 0 parity: 11/11 exact** for bbox, expected and total padding. Mismatches: **none**. No θ = 0 verdict changes; all 100 original KEEP rows remain KEEP. Counts change from KEEP 100 / DROP 50 to KEEP 106 / DROP 39 / UNCERTAIN 5.')
+add()
+add('The coordinator’s baseline count is confirmed: **29** reader-fine rejects, **27** of them rejected for OCR length (15 too much, 12 too little). The five named skew examples all clear their length failures. Only two of those five become KEEP: three retain unresolved neighbour geometry and become UNCERTAIN. Overall **3** length-rule false positives become KEEP, **3** flagged rejects become KEEP, and **5** other flips are DROP → UNCERTAIN. The suggested ≥5 FP → KEEP expectation was not reached; no thresholds or geometry behavior were changed to force it.')
+add()
+add('Census-to-Mac drift outside the intended measurements occurred on 13 rows. The untouched 0.5 adapter reproduces **all 13** new nonmeasurement evidence payloads exactly and their frames exactly after removing elapsed `seconds`, and reproduces all saved verdicts and boxes. These are pre-existing runtime/platform differences, not extra edits. The original strict replay assertion exposed them and remains visible in `cp2_replay.log`; `cp2_verification.log` records the completed attribution check. Full witnesses: [baseline_drift_rows.jsonl](baseline_drift_rows.jsonl), [baseline_drift_summary.json](baseline_drift_summary.json).')
+add()
+causes={
+'elstat--07520765bc203a33--s000-l0134':'Two sampled ascender/descender coordinates differ by 0.001 px.',
+'elstat--24e6586813212fd1--s001-l0357':'Two sampled ascender/descender coordinates differ by 0.001 px.',
+'gazette_modern--65492f4d3675f146--s000-l0001':'One sampled descender coordinate differs by 0.001 px.',
+'elstat--0877c813a8512b56--s000-l0037':'One saved context-group left edge is 27 vs local 26; orientation timings/floats also differ.',
+'gazette_modern--e1ffcad236d8706c--s000-l0266':'Orientation diagnostic internal box/support differs; final orientation/box/verdict are unchanged.'}
+table(['Line ID','Outside-measurement fields','Cause reproduced by untouched 0.5'],[(r['line_id'],', '.join(r['fields']),causes.get(r['line_id'],'Orientation elapsed seconds; some guide diagnostic floats differ at machine precision.')) for r in a['nonmeasurement_drift']])
+add('### CP3 — accepted 888 saved decisions and local crops')
+add()
+add('Ran the documented saved-metadata tool unchanged:')
+add()
+add('```sh\n.venv/bin/python scripts/harvest/verify_filter_parity.py \\\n  --out docs/harvest/collect_v3_admission/segeval1/deskew/cp3_saved_metadata_parity.json\n```')
+add()
+add('```text\n'+(D/'cp3_saved_metadata_parity.log').read_text().rstrip()+'\n```')
+add()
+add('It checks more than verdicts: **888 verdicts/reasons**, **888 predictions from saved long/short inputs** (max absolute error `1.4210854715202004e-13`), and **184 saved raw-context reconciliations**. It opens zero images and does **not** cover native box/baseline measurement or new row-frame evidence.')
+add()
+add('All **888/888 crops** are available in the local review site and were replayed. Crop orientation, glyph detector/refocus, baseline/labels, new box and padding run through the native adapter; page-context observations are the frozen raw observations already checked by `verify_filter_parity.py` and are re-reconciled by the unchanged service. Source-page detection is not rerun for this second cohort. Original text for 136 older rows came from hash-bound local population detail chunks; the first 704 completed results were retained when the remaining historical metadata was resolved. See [replay_calibration.jsonl](replay_calibration.jsonl), [cp3_calibration_summary.json](cp3_calibration_summary.json), and the two preserved initial metadata-lookup logs.')
+add()
+add('**16 historical-saved → native-0.6 verdict flips**: 3 DROP → KEEP, 5 KEEP → DROP, 2 UNCERTAIN → DROP, 5 DROP → UNCERTAIN, 1 KEEP → UNCERTAIN. Diagnostic replay with untouched 0.5 on all flips plus identity/box drift witnesses (33 unique rows) attributes **2 flips to pre-existing orientation handling** and confirms **14 of the 16 flips** between local 0.5 and 0.6. This is not a claim of calibration accuracy improvement. See [calibration_drift_summary.json](calibration_drift_summary.json).')
+add()
+add('There are **41 θ = 0 rows**, all with identical upright box/padding and no verdict flip. Against historical saved expected values, **30/41** match to the digit and **11/41** differ only by `4.44e-16`–`1.07e-14`. Every one of those eleven is reproduced identically by the untouched local 0.5 predictor, so this is pre-existing frozen predictor arithmetic, not a de-skew identity change. Every mismatch is listed here:')
+add()
+table(['Line ID','Saved expected','Local 0.5 = new 0.6 expected','Delta','Cause'],[(r['line_id'],repr(r['saved_expected']),repr(r['local05_expected']),repr(r['expected_delta']),'Pre-existing frozen predictor arithmetic') for r in drift['checks'] if r['theta0']])
+add('Nine calibration upright boxes differ from historical measurement. Each is reproduced by unchanged local 0.5; all nine use different historic/current quarter-turn handling, including historical visual overrides that the generic native producer does not consume. No orientation code was changed for this task:')
+add()
+values=[]
+for r in b['bbox_drift']:
+ old=savednative[r['line_id']]['frame'];new=calrows[r['line_id']]['after']['frame']
+ values.append((r['line_id'],r['before'],r['after'],f'{old["normalization_cw"]}° {old["status"]} → {new["normalization_cw"]}° {new["status"]}'))
+table(['Line ID','Saved bbox','Local bbox (0.5 = 0.6)','Frame cause'],values)
+add('## Flip tables')
+add()
+add('Ratios below use the **actual frozen policy ratio `(characters + 1) / (expected + 1)`**, not `characters / expected`. θ is clockwise positive. Heights are in pixels; displayed values are rounded here, full precision is retained in JSONL. `fine`/`flagged` come directly from the SEGEVAL-1 owner rows. Calibration owner values are saved owner ratings where present; `unrated` is not a reader judgment.')
+add()
+add('### Every flip on the 150 unseen rows')
+add()
+table(['Line ID','θ°','Upright h → row h','Policy ratio before → after','Verdict before → after','Reader state'],[(r['line_id'],f'{r["theta_deg"]:+.6f}',f'{r["upright_height"]} → {r["row_frame_height"]:.6f}',f'{r["ratio_before"]:.6f} → {r["ratio_after"]:.6f}',f'{r["verdict_before"]} → {r["verdict_after"]}',r['reader_state']) for r in a['flips']])
+add('Every before/after reason, full evidence payload, frame and reader state is in `replay_segeval1.jsonl`. All five new UNCERTAIN verdicts have reason “The complete neighbouring-word count or line extent is unresolved.”; their context was already unavailable in the saved census evidence.')
+add()
+add('### Every historical-saved flip on the 888 calibration crops')
+add()
+table(['Line ID','θ°','Upright h → row h','Policy ratio before → after','Verdict before → after','Saved owner rating','Attribution'],[(r['line_id'],f'{r["theta_deg"]:+.6f}',f'{r["upright_height"]} → {r["row_frame_height"]:.6f}',f'{r["ratio_before"]:.6f} → {r["ratio_after"]:.6f}',f'{r["verdict_before"]} → {r["verdict_after"]}',r['owner_rating']['decision'] if r['owner_rating'] else 'unrated','Inherited local 0.5 orientation change' if checks[r['line_id']]['saved_verdict']!=checks[r['line_id']]['local05_verdict'] else '0.5 → 0.6 measurement') for r in b['flips']])
+add('## Open issues')
+add()
+add('1. **Worktree branch/commit publication is sandbox-blocked.** The actual current worktree branch remains `sol/recut-v1`; only the isolated commit bundle carries `sol/seg-deskew`. Importing that branch into the shared repository requires its Git directory to be writable. No push was attempted. The implementation commit is `'+commit+'`.')
+add('2. **Height wording on non-elongated glyphs:** one θ = 0 calibration glyph (`bsb_poly1850--fe51c7e60c92453d--s034-l0003`) has a box taller than wide. Sorting sides for padding would violate the explicit θ = 0 identity requirement. This implementation preserves row-normal `height` for padding, while sorting the two sides only for the predictor. There is also one nonzero-angle near-square row on the 150 and two more nonzero-angle calibration rows where row-normal height exceeds along-row length. An optional owner clarification was requested; absent a reply, exact identity takes precedence. No role, orientation or detector workaround was introduced.')
+add('3. **Coverage is bounded:** three named skew false positives become UNCERTAIN because source context is absent; the patch does not invent that evidence. Large fitted main-row angles (including +27° examples) are used as detected, with no new rejection/capping heuristic. The calibration replay includes five KEEP → DROP measurement flips and two UNCERTAIN → DROP measurement flips; these remain reviewable counterexamples, not a generalization claim.')
+add('4. Historical calibration orientation overrides and frozen predictor float differences remain distinct from de-skew. The native 888 replay reuses saved raw page context and does not qualify new source-page geometry. This does not alter the saved-metadata parity PASS or the digit-exact 150-row θ = 0 result.')
+add()
+add(f'SEGDESKEW1: done | parity theta0: {a["theta0_exact"]}/{a["theta0_rows"]} | flips on 150: FP->KEEP {a["flip_counts"]["FP->KEEP"]}, flagged->KEEP {a["flip_counts"]["flagged->KEEP"]}, other {a["flip_counts"]["other"]} | 888: covered flips {b["flip_count"]} | tests: 136 passed | commit: {commit}')
+(D/'HANDOFF.md').write_text('\n'.join(lines)+'\n')
+print(D/'HANDOFF.md')

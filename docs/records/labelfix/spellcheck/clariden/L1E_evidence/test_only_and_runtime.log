@@ -1,0 +1,118 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+sbatch: Job 3679519 to start at 01:05:27 a using 288 processors on nodes nid007645 in partition debug
+L1E_DEPLOY_SHA256.txt: OK
+L1E_EXTERNAL_SHA256.txt: OK
+config/l1e_job.json: OK
+scripts/labelfix/clariden/l1e_job.sbatch: OK
+PartitionName=debug
+   AllowGroups=ALL AllowAccounts=ALL AllowQos=normal,stop,large-sc-qos
+   AllocNodes=ALL Default=NO QoS=debug-qos
+   DefaultTime=00:45:00 DisableRootJobs=NO ExclusiveUser=NO ExclusiveTopo=NO GraceTime=0 Hidden=NO
+   MaxNodes=4 MaxTime=01:30:00 MinNodes=0 LLN=NO MaxCPUsPerNode=UNLIMITED MaxCPUsPerSocket=UNLIMITED
+   Nodes=nid[005394-005399,005420-005425,006029-006059,006061,006063-006108,006110-006316,006457,006569-006579,006584-006593,006604-006609,006612-006877,006879-006939,006941-006969,006971-006977,006979-007002,007004-007015,007017-007064,007066-007117,007119-007127,007129-007137,007139-007292,007294-007353,007355-007387,007389-007393,007395-007425,007427-007669]
+   PriorityJobFactor=50 PriorityTier=20 RootOnly=NO ReqResv=NO OverSubscribe=EXCLUSIVE
+   OverTimeLimit=NONE PreemptMode=OFF
+   State=UP TotalCPUs=393984 TotalNodes=1368 SelectTypeParameters=NONE
+   JobDefaults=(null)
+   DefMemPerNode=UNLIMITED MaxMemPerNode=UNLIMITED
+   TRES=cpu=393984,mem=1190160000M,node=1368,billing=1400,gres/gpu=5472
+   TRESBillingWeights=CPU=0.003472,Mem=0.00120482G,GRES/gpu=0.25
+
+#!/usr/bin/env bash
+#SBATCH --account=a0140
+#SBATCH --partition=debug
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --exclusive
+#SBATCH --time=01:00:00
+#SBATCH --job-name=labelfix_L1_s6
+#SBATCH --output=/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/labelfix_l1_20261017/logs/L1_%j.log
+set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
+if [[ "${L1_MOCK:-0}" == 1 ]]; then
+  export PYTHONPATH="$PWD"
+  "${L1_PYTHON:?}" -B -u scripts/labelfix/clariden/l1_run.py \
+    --mock ${L1_WRITE_EXPECTED:+--write-expected} --detector "${L1_DETECTOR:-s6}" \
+    --binding artifacts/labelfix_l1/binding \
+    --source docs/harvest/collection/v2/import_real_v2_train.jsonl \
+    --c1-alignments "${L1_C1_ALIGNMENTS:?}" --ctc "${L1_CTC:?}" --r1 "${L1_R1:?}" \
+    --crop-root "${L1_CROP_ROOT:?}" --layout toolkit --out "${L1_OUT:?}"
+else
+  L1_ROOT=/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/labelfix_l1_20261017
+  E3_ROOT=/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3
+  L1_PYTHON="$E3_ROOT/venv_l1/bin/python"
+  cd "$L1_ROOT"
+  export PYTHONPATH="$L1_ROOT"
+  sha256sum --check L1_DEPLOY_SHA256.txt
+  sha256sum --check L1_EXTERNAL_SHA256.txt
+  "$L1_PYTHON" -B scripts/labelfix/clariden/l1_runtime.py --root "$E3_ROOT" --out "$L1_ROOT/runtime" --verify
+  srun --ntasks=1 --cpu-bind=none "$L1_PYTHON" -B -u scripts/labelfix/clariden/l1_run.py \
+    --detector "${L1_DETECTOR:-s6}" --binding artifacts/labelfix_l1/binding \
+    --source "$E3_ROOT/collection_v2/import_real_v2_train.jsonl" \
+    --c1-alignments "$E3_ROOT/labelfix_c1_20261016/output_3678590/C1_alignments.jsonl.gz" \
+    --ctc "$E3_ROOT/greek-page-ocr/out/e3b/jobA/runs/full_s0/best.pt" \
+    --r1 "$E3_ROOT/labelfix_r1_20261016/output_3678928/A/best.pt" \
+    --crop-root "$E3_ROOT/collection_v2/crops" --layout e3 --out "$L1_ROOT/output_${SLURM_JOB_ID}"
+fi
+{
+  "schema": "l1-run-v1",
+  "complete": true,
+  "mock": false,
+  "lines": 124669,
+  "parity": {
+    "schema": "l1-parity-v1",
+    "verification_only": true,
+    "never_L1_training_input": true,
+    "expected": 32,
+    "actual": 32,
+    "exact": 32,
+    "byte_equal_readings_and_hold_decisions": true,
+    "differences": [],
+    "expected_sha256": "6587287bef8da8af5d323a76c2dbfd0096dc4148aebf238a2a923cba7f07d305",
+    "actual_sha256": "6587287bef8da8af5d323a76c2dbfd0096dc4148aebf238a2a923cba7f07d305",
+    "comparison": "canonical UTF-8 JSON per line: detector readings/parts/localisation, full combined PRESENCE/FULL readings and every HOLD decision/reason",
+    "golden_entrypoint": "unchanged scripts.labelfix.m2_run.infer_line; frozen held-out recogniser text and cached spans",
+    "device": "cuda:0",
+    "checkpoint_sha256": "719a06b9b18f082ec627a64e7f60c501491bcb6c63a9a78e7eba41ec7adb4636"
+  },
+  "counts": {
+    "presence": {
+      "corrected": 2618,
+      "unchanged": 17565,
+      "hold": 104486,
+      "out_of_scope": 0
+    },
+    "full": {
+      "corrected": 2301,
+      "unchanged": 16438,
+      "hold": 105930,
+      "out_of_scope": 0
+    }
+  },
+  "elapsed_seconds": 1785.5437683130149,
+  "original_labels_unchanged": true,
+  "detector": "s6",
+  "binding_sha256": "5d5d9e19d2efd1e361ae262c21483b687eab44e4758fad9fa381bf319a95cb4b",
+  "step_receipts": {
+    "input_receipt.json": "dbac7f8e940f2de1a8ea6eaef18a09cdd0ac344663da8b2d2906568b66949a2f",
+    "parity_receipt.json": "da2e9a276905fd710051506f65fc5b098f5f4bc8b2ab2d666402ae1b11de76ea",
+    "verification/parity_receipt.json": "da2e9a276905fd710051506f65fc5b098f5f4bc8b2ab2d666402ae1b11de76ea",
+    "combined/shard-00963-receipt.json": "80731cb23be8942ef059f054b603cf3965cd7c832fc9ebad206c7b478c5c626a",
+    "combined/shard-00528-receipt.json": "80c24f22766a7e870d0d7aa036e1907e08ea6185796b807b224b45ca9f609b87",
+    "combined/shard-00858-receipt.json": "51f039122b668b99707e5b821ae44eaa9a19221a828cb4ba50029406fd043150",
+    "combined/shard-00379-receipt.json": "0d75921729e41f7cab2380539d86c9e8548d6409db888ed40edce5606c715054",
+    "combined/shard-00082-receipt.json": "f9662184d53098300f112bd85fb217b525b043686cff9f9dceabb80c3e2bba68",
+    "combined/shard-00353-receipt.json": "4f19fdea91a4a6dcdbbb4ab14b342dbee12581f507136cb4d57258671d0077a2",
+    "combined/shard-00063-receipt.json": "190a8c58e66c8c38b6590a80c3915789998ac7362307093ffec93cf1b1d11074",
+    "combined/shard-00108-receipt.json": "525f596b8b629712a5cebcd5f8dc89f6c4422c2006d3db3a14948ee4fe4667ec",
+    "combined/shard-00794-receipt.json": "7f37c39744f7a280465c014b261477f28f1b222f79bc5b3de5e412dda7bcf4be",
+    "combined/shard-00343-receipt.json": "bbe0e458cdd1e3d7c8a235a1fdb0d91e7ef8f934d6fb51583a39839c4bcf6d7e",
+    "combined/shard-00225-receipt.json": "f981e94207dcc95bd2819f11622adf492977b29308762e4f1a8558986dc56249",
+    "combined/shard-00962-receipt.json": "ac49fd629bce2318a9321cbda41495a36b38efb52abf51593594d6b462a87890",
+d50f638647ddea75f830a953e79e0172d9cd6ab1e9190485838a2cec23883d79  heldout_final/measurement_receipt.json
+e1668a143d0844d7f68a4eccd3d80446563e07a47790690b6ac827e7f46982e5  heldout_final/observation_recovery.json
+279d0bcf6e12a734f1f5266c0bbafdb67b67c1608e5feb81780b15dfcc8806b3  heldout_final/decisions.jsonl.gz
+690092b0d0e5c7da29a82ab16d5253f17accd0341bd0cd03e18113234d81af65  heldout_final/events.jsonl

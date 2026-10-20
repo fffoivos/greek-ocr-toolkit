@@ -17,6 +17,7 @@ from PIL import Image
 from scipy import ndimage as ndi
 
 ROOT=Path(__file__).resolve().parents[3];sys.path.insert(0,str(ROOT))
+from greekocr.ops.data_root import input_path as _data_input
 import greekocr.glyphs.oriented_page as oriented_module
 from greekocr.glyphs.oriented_page import oriented_page
 from greekocr.glyphs.orientation import Orientation,QuarterTurn,measure_orientation
@@ -29,8 +30,8 @@ OUT=ROOT/'.astra/out/orientation_eval'
 OLD=ROOT/'.astra/previous_round4_part2'
 
 
-def read(path):return json.loads(path.read_text())
-def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
+def read(path):return json.loads(_data_input(path).read_text())
+def sha(path):return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
 
 
 def compact_word(w,image):
@@ -95,7 +96,7 @@ def audit(out):
         save(out/'delivery'/f'{key}.json',dict(**row,word_records=words))
         draw_words(image,dict(image_size=image.size,words=words),out/(key+'.words.jpg'))
         pages.append(row)
-        annotation=ROOT/'docs/tables/annotations'/f'{key}.json'
+        annotation=ROOT/'docs/records/tables/annotations'/f'{key}.json'
         if annotation.exists():
             ann=read(annotation);gray=np.asarray(image);bg=ndi.maximum_filter(gray,size=max(3,round(.015*min(gray.shape))))
             ink=bg.astype(float)-gray>30

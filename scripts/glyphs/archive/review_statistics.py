@@ -53,7 +53,7 @@ def separation(a, b, name):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', type=Path, default=Path('.astra/out'))
-    parser.add_argument('--regions', type=Path, default=Path('docs/reviews/PAGE_LINES_Q2_OWNER_REGIONS.json'))
+    parser.add_argument('--regions', type=Path, default=Path('docs/records/reviews/PAGE_LINES_Q2_OWNER_REGIONS.json'))
     args = parser.parse_args()
     cases = []
     for case in json.loads(args.regions.read_text())['cases']:
@@ -165,7 +165,7 @@ def main():
         new_book_q1_hashes=protected,
         book_q1_preservation=dict(files=len(book_before), unchanged=len(book_before)-len(book_changed), changed=book_changed),
         artifact_audit=dict(counts=dict(artifact_counts), failures=failures), tests=tests)
-    Path('docs/reviews/PAGE_LINES_Q2_STATISTICS.json').write_text(json.dumps(report, indent=2, allow_nan=False)+'\n')
+    Path('docs/records/reviews/PAGE_LINES_Q2_STATISTICS.json').write_text(json.dumps(report, indent=2, allow_nan=False)+'\n')
     print('preservation', report['q1_preservation'], 'book preservation', report['book_q1_preservation'], 'artifacts', report['artifact_audit'], 'tests', tests)
     for b in book_results:
         print('book', b['book_id'], 'pages', b['pages'], 'letters', b['summary']['letter_bodies'],

@@ -1,0 +1,48 @@
+--- a/greekocr/harvest/line_pipeline.py
++++ b/greekocr/harvest/line_pipeline.py
+@@ -18,7 +18,7 @@
+ from . import admission as adm
+ from .text_primitives import codec_letter_script
+ 
+-PIPELINE_VERSION = "0.3.2"
++PIPELINE_VERSION = "0.3.3"
+ TOOLS = ("polytonic", "cyrillic", "numerics", "dashes", "content_repair")
+ SUCCESS = frozenset({"applied", "verified_no_change", "tag_only"})
+ 
+@@ -285,8 +285,15 @@
+         raise ValueError("result belongs to a different crop, split or raw parent")
+     if result.get("tool_digest") != versions[tool]["digest"]:
+         raise ValueError("tool implementation/release digest mismatch")
+-    if result.get("status") not in SUCCESS | {"proposal_only", "required_evidence_unresolved", "failed"}:
++    if result.get("status") not in SUCCESS | {"kept_unverified", "proposal_only", "required_evidence_unresolved", "failed"}:
+         raise ValueError("unknown tool result status")
++    if result["status"] == "kept_unverified":
++        evidence = result.get("evidence")
++        if tool != "polytonic":
++            raise ValueError("kept_unverified is qualified only for polytonic")
++        if (not isinstance(evidence, dict) or evidence.get("kept_unverified") is not True
++                or not isinstance(evidence.get("reason"), str) or not evidence["reason"].strip()):
++            raise ValueError("kept_unverified requires evidence flag and nonempty tool reason")
+     if result["status"]=="tag_only" and tool!="dashes":
+         raise ValueError("tag_only is qualified only for the dash tagger")
+     if result["status"] in SUCCESS and not result.get("evidence"):
+@@ -463,7 +470,7 @@
+                 results[tool] = result
+                 out["routes"][tool] = result
+             scheduled |= new
+-            unresolved = [dict(reason="correction_unresolved", tool=t, status=r["status"]) for t, r in results.items() if r["status"] not in SUCCESS | {"not_applied_out_of_scope"} and t != "content_repair"]
++            unresolved = [dict(reason="correction_unresolved", tool=t, status=r["status"]) for t, r in results.items() if r["status"] not in SUCCESS | {"not_applied_out_of_scope", "kept_unverified"} and t != "content_repair"]
+             if unresolved:
+                 return finish("HOLD", unresolved)
+             try:
+--- a/tests/test_content_gate.py
++++ b/tests/test_content_gate.py
+@@ -59,7 +59,7 @@
+ def test_clear_row_matches_pre_change_output_exactly():
+     before = json.loads((ARTIFACTS / 'clear-before.json').read_text())
+     assert before['pipeline_version'] == '0.3'
+-    before['pipeline_version'] = '0.3.2'
++    before['pipeline_version'] = '0.3.3'
+     assert engine().evaluate(row()) == before
+ 
+ 

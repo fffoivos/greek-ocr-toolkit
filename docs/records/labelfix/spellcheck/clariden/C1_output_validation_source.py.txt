@@ -1,0 +1,37 @@
+import gzip, hashlib, json, math
+from pathlib import Path
+root = Path('/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/labelfix_c1_20261016')
+selection = {r['crop']: r for r in map(json.loads, (root/'docs/labelfix/spellcheck/clariden/C1_selection.jsonl').open())}
+summary = json.loads((root/'output_3678590/summary.json').read_text())
+output = root/'output_3678590/C1_alignments.jsonl.gz'
+seen = set()
+spans = 0
+with gzip.open(output, 'rt', encoding='utf-8') as f:
+    for line in f:
+        r = json.loads(line)
+        assert set(r) == {'crop', 'alignment', 'prediction'}
+        key = r['crop']
+        assert key.startswith('docs/harvest/') and key in selection and key not in seen, key
+        seen.add(key)
+        a = r['alignment']
+        assert set(a) == {'prediction', 'n_frames', 'scale', 'strip_width', 'confidence', 'spans'}
+        assert r['prediction'] == a['prediction'] == ''.join(s[0] for s in a['spans'])
+        assert a['n_frames'] == (a['strip_width'] + 3) // 4
+        assert 64 <= a['strip_width'] <= 2560
+        assert math.isfinite(a['scale']) and a['scale'] > 0
+        assert math.isfinite(a['confidence']) and 0 <= a['confidence'] <= 1
+        for ch, f0, f1, x0, x1 in a['spans']:
+            assert len(ch) == 1 and 0 <= f0 < f1 <= a['n_frames']
+            assert math.isfinite(x0) and math.isfinite(x1) and 0 <= x0 <= x1
+        spans += len(a['spans'])
+assert seen == set(selection)
+assert len(seen) == summary['counts']['aligned'] == 91469
+with output.open('rb') as f:
+    digest = hashlib.file_digest(f, 'sha256').hexdigest()
+assert digest == summary['output_sha256']
+result = dict(status='PASS', records=len(seen), selected_coverage=len(seen)/len(selection),
+              duplicate_crops=0, missing_selected_crops=0, extra_crops=0, char_spans=spans,
+              prediction_equals_span_atoms=True, schema_and_frame_bounds_valid=True,
+              gzip_crc_valid=True, output_sha256=digest, model_or_image_processing=False)
+(root/'output_3678590/validation.json').write_text(json.dumps(result, indent=2)+'\n')
+print(json.dumps(result))

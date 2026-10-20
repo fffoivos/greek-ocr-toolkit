@@ -124,7 +124,7 @@ def geometry(annotation,records,image):
 
 
 def main():
- annotations=[json.loads(f.read_text()) for f in sorted((ROOT/'docs/tables/annotations').glob('*.json'))]
+ annotations=[json.loads(f.read_text()) for f in sorted((ROOT/'docs/records/tables/annotations').glob('*.json'))]
  art=OUT/'layout-artifacts';art.mkdir(exist_ok=True);link=art/'docling-project--docling-layout-heron'
  if not link.exists():link.symlink_to(rl.SNAPSHOT,target_is_directory=True)
  layout=rl.LayoutObjectDetectionModel(artifacts_path=art,accelerator_options=rl.AcceleratorOptions(device='cpu',num_threads=4),options=rl.LayoutObjectDetectionOptions())
@@ -187,7 +187,7 @@ def main():
      print('ERROR',key,table['id'],mode,repr(exc),flush=True)
     save('summary.json',summary)
   save(f'forwards-{mode}.json',forwards)
- save('manifest.json',dict(annotations={a['key']:hashlib.sha256((ROOT/'docs/tables/annotations'/f'{a["key"]}.json').read_bytes()).hexdigest() for a in annotations},
+ save('manifest.json',dict(annotations={a['key']:hashlib.sha256((ROOT/'docs/records/tables/annotations'/f'{a["key"]}.json').read_bytes()).hexdigest() for a in annotations},
    scripts={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in [Path(__file__),ROOT/'.astra/docling_research/research_tables.py',ROOT/'.astra/docling_research/research_layout.py']},
    offline=True,recognition='unique labels, not recognised text'))
 

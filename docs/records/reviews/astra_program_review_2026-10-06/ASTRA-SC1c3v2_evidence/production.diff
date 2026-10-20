@@ -1,0 +1,226 @@
+diff --git a/greekocr/labelfix/release_gate.py b/greekocr/labelfix/release_gate.py
+index 09b9cb5e..6f9311c0 100644
+--- a/greekocr/labelfix/release_gate.py
++++ b/greekocr/labelfix/release_gate.py
+@@ -14,9 +14,10 @@ import hashlib
+ import json
+ import unicodedata as ud
+ from . import reading as R
+-from .text import clusters, nfd, nfc, GREEK_LETTERS, ELISION, is_letter, word_final_elision
++from .text import (clusters, nfd, nfc, GREEK_LETTERS, ELISION, BREATHINGS,
++                   is_letter, word_final_elision, spacing_breathing, punctuation_sites)
+ 
+-POLICY = 'sf4-release-v1'
++POLICY = 'sf5-release-v1'
+ MODES = ('PRESENCE', 'FULL', 'ENSEMBLE_AB', 'ENSEMBLE_AE')
+ ENSEMBLE_CAVEAT = "A and B share training data (C1 agreement labels) and therefore share errors; agreement measures the reader's stability, not an independent pixel signal. Precision on the training waves is unmeasured until the training-wave DEV with print truth exists. Wave 1c on this release is a pseudo-label experiment."
+ R1_LETTERS = frozenset('αεηιουωρΑΕΗΙΟΥΩΡ')
+@@ -94,6 +95,9 @@ def _render_reading(text, slots):
+     by={s['start']:s for s in slots};out=[];cs=clusters(nfd(text))
+     for i,c in enumerate(cs):
+         if _word_final_elision(cs,i):continue
++        if (spacing_breathing(cs,i) and
++                {'psili','dasia'} & set(by.get(cs[i+1].start,{}).get('parts',()))):
++            continue
+         s=by.get(c.start)
+         if s is None:out.append(c.base)
+         else:
+@@ -110,12 +114,85 @@ def _punctuation(text):
+         if _word_final_elision(cs,i):continue
+         if not c.base.isalpha() or c.base in ELISION:
+             # Representation only: never drop a quote, space or attached mark.
+-            base = ('"' if c.base in LEADING_QUOTES else "'" if c.base in ELISION+'‘'
++            base = ('"' if c.base in LEADING_QUOTES else c.base if spacing_breathing(cs,i)
++                    else "'" if c.base in ELISION+'‘'
+                     else ' ' if c.base in '\u00a0\u202f' else c.base)
+             out.append(base+c.marks)
+     return ''.join(out)
+ 
+ 
++def _letters(text):
++    return [c for c in clusters(nfd(text)) if is_letter(c.base)]
++
++
++def _breathing_pair(original, proposal):
++    """Remove a spacing breathing and its duplicate only with an attached one.
++
++    This is the sole punctuation-guard exception for SF5: the same letter
++    boundary must carry a Google spacing breathing and a proposed combining
++    breathing. Internal/closing apostrophes do not qualify.
++    """
++    a,b=_letters(original),_letters(proposal)
++    if [c.base for c in a]!=[c.base for c in b]:return original,proposal
++    sites=punctuation_sites(original,spacing_breathing)
++    attached={k for k in sites if k<len(b) and set(b[k].marks)&BREATHINGS}
++    def remove(text):
++        cs=clusters(nfd(text));boundary=0;out=[]
++        for i,c in enumerate(cs):
++            if is_letter(c.base):boundary+=1
++            if (boundary in attached and c.base in ELISION and not c.marks
++                    and i+1<len(cs) and is_letter(cs[i+1].base)):
++                continue
++            out.append(c.base+c.marks)
++        return ''.join(out)
++    return remove(original),remove(proposal)
++
++
++def release_text(original, recogniser, proposal):
++    """SF5's two release-only rules; no slot decisions or reader votes change.
++
++    Consensus elisions survive detector absence. Existing Google elisions keep
++    their spelling, including on lines with real mark edits. A Google spacing
++    breathing is consumed atomically with attachment, else kept verbatim.
++    The single-source sites are observed, never promoted to consensus.
++    """
++    g=punctuation_sites(original);r=punctuation_sites(recogniser)
++    same=([c.base for c in _letters(original)]==[c.base for c in _letters(recogniser)]
++          ==[c.base for c in _letters(proposal)])
++    if not same:
++        return proposal,dict(aligned=False,google=len(g),recogniser=len(r))
++    breathings=punctuation_sites(original,spacing_breathing)
++    cs=clusters(nfd(proposal));letters=_letters(proposal)
++    attached={k for k in breathings if k<len(letters) and set(letters[k].marks)&BREATHINGS}
++    p=punctuation_sites(proposal);consensus=g.keys()&r.keys();out=[];boundary=0
++    for i,c in enumerate(cs):
++        if is_letter(c.base):
++            # Unattached spacing breathings belong immediately before this
++            # letter. A preceding source alias has already been suppressed.
++            if boundary in breathings and boundary not in attached:
++                out.append(breathings[boundary].base)
++            out.append(c.base+c.marks);boundary+=1
++            if boundary in consensus and boundary not in p:
++                out.append(g[boundary].base)
++        elif (boundary in breathings and c.base in ELISION and not c.marks
++              and i+1<len(cs) and is_letter(cs[i+1].base)):
++            continue
++        elif word_final_elision(cs,i) and boundary in g:
++            out.append(g[boundary].base)
++        else:out.append(c.base+c.marks)
++    text=nfc(''.join(out));final=punctuation_sites(text)
++    census=dict(aligned=True,google=len(g),recogniser=len(r),both=len(consensus),
++        google_only=len(g.keys()-r.keys()),recogniser_only=len(r.keys()-g.keys()),
++        both_kept=len(consensus&final.keys()),both_deleted=len(consensus-final.keys()),
++        google_only_kept=len((g.keys()-r.keys())&final.keys()),
++        google_only_deleted=len((g.keys()-r.keys())-final.keys()),
++        recogniser_only_kept=len((r.keys()-g.keys())&final.keys()),
++        recogniser_only_deleted=len((r.keys()-g.keys())-final.keys()),
++        added=len(final.keys()-g.keys()),spacing_breathings=len(breathings),
++        spacing_breathings_attached=len(attached))
++    return text,census
++
++
+ def edit_guard(original, proposal):
+     """Return rejection reasons; unchanged unsupported characters are preserved.
+ 
+@@ -141,7 +218,8 @@ def edit_guard(original, proposal):
+         for i,(x,y) in enumerate(zip(a,b)):
+             if (not _supported(x) or not _supported(y) or x.base not in GREEK_LETTERS) and (x.base+x.marks!=y.base+y.marks):
+                 reasons.append(f'edit_guard:unsupported_character:{i}')
+-    if _punctuation(original)!=_punctuation(proposal):reasons.append('edit_guard:punctuation_mismatch')
++    punct_a,punct_b=_breathing_pair(original,proposal)
++    if _punctuation(punct_a)!=_punctuation(punct_b):reasons.append('edit_guard:punctuation_mismatch')
+     return reasons
+ 
+ 
+diff --git a/greekocr/labelfix/text.py b/greekocr/labelfix/text.py
+index 755a0ff0..67e666b7 100644
+--- a/greekocr/labelfix/text.py
++++ b/greekocr/labelfix/text.py
+@@ -43,10 +43,41 @@ def is_letter(base: str) -> bool:
+ 
+ def word_final_elision(cs, i):
+     return (cs[i].base in ELISION and not cs[i].marks and i > 0
+-            and cs[i-1].base in GREEK_LETTERS
++            and is_letter(cs[i-1].base)
+             and (i+1 == len(cs) or not is_letter(cs[i+1].base)))
+ 
+ 
++def spacing_breathing(cs, i):
++    """A spacing psili/koronis before a capital or word-initial vowel.
++
++    Clusters keep any combining marks with their letter, so these predicates
++    also work on decomposed text without treating a combining mark as a word.
++    """
++    return (cs[i].base in '᾿᾽' and not cs[i].marks and i+1 < len(cs)
++            and is_letter(cs[i+1].base)
++            and (cs[i+1].base.isupper() or
++                 (cs[i+1].base in VOWELS and (i == 0 or not is_letter(cs[i-1].base)))))
++
++
++def punctuation_sites(text, predicate=word_final_elision):
++    """Map punctuation to its following letter boundary (aliases are one atom).
++
++    Boundary N is after N letters, ignoring combining marks. Callers comparing
++    lines must first establish the same letter sequence; offsets stay local.
++    """
++    cs=clusters(nfd(text));boundary=0;out={}
++    for i,c in enumerate(cs):
++        if is_letter(c.base):boundary+=1
++        elif predicate(cs,i):out[boundary]=c
++    return out
++
++
++def elision_alias_key(text):
++    """Comparison only. Prefix breathings and other quotes retain their bytes."""
++    cs=clusters(nfd(text))
++    return ''.join(('’' if word_final_elision(cs,i) else c.base)+c.marks for i,c in enumerate(cs))
++
++
+ PUNCT_EDGE = '.,;:·!?"\'«»()[]{}—–-‐‑*†‡§¶"“”‘’…/\\|'
+ PUNCT_EDGE += ELISION
+ HYPHENS = ('-', '‐', '‑')
+diff --git a/scripts/labelfix/clariden/l1_common.py b/scripts/labelfix/clariden/l1_common.py
+index 5a47378f..19f92b0a 100644
+--- a/scripts/labelfix/clariden/l1_common.py
++++ b/scripts/labelfix/clariden/l1_common.py
+@@ -9,8 +9,8 @@ from pathlib import Path
+ import unicodedata
+ 
+ from scripts.labelfix.clariden.r1_common import rows, write_rows, sha256, write_json
+-from greekocr.labelfix.text import nfd
+-from greekocr.labelfix.release_gate import compose_runtime, edit_guard, POLICY, ENSEMBLE_CAVEAT
++from greekocr.labelfix.text import nfd, elision_alias_key
++from greekocr.labelfix.release_gate import compose_runtime, edit_guard, release_text, POLICY, ENSEMBLE_CAVEAT
+ 
+ STATUSES = ('corrected', 'unchanged', 'hold', 'out_of_scope')
+ 
+@@ -53,7 +53,10 @@ def overlay(record, runtime, variant, binding):
+         for reason in slot['reasons']:
+             result['hold_slots'].append(dict(start=slot['start'], letter=slot['base'],
+                 reason=hold_reason(reason), detail=reason))
+-    proposal = mode['text']
++    proposal, census = release_text(original, runtime['recogniser_text'], mode['text'])
++    alias_only = (nfd(original)!=nfd(mode['text'])
++                  and elision_alias_key(original)==elision_alias_key(mode['text']))
++    result.update(alias_only=alias_only,elision_census=census)
+     for detail in edit_guard(original, runtime['recogniser_text']) + edit_guard(original,proposal):
+         result['hold_slots'].append(dict(start=0,letter='',reason='edit_guard',detail=detail))
+     if result['hold_slots']:
+@@ -102,6 +105,7 @@ def release(selection, runtime_paths, out, binding, source, input_receipt, varia
+     handles = {v: gzip.open(out / f'overlay_{v}.jsonl.gz', 'xt', encoding='utf-8', compresslevel=3)
+                for v in variants}
+     counts = {v: Counter({s: 0 for s in STATUSES}) for v in handles}
++    aliases = Counter()
+     coverage = {v: {'wave': {}, 'source': {}} for v in handles}
+     kept = {v: [] for v in handles}
+     control = {v: gzip.open(out / f'ctrl_subset_{v}.jsonl.gz', 'xt', encoding='utf-8', compresslevel=3)
+@@ -133,9 +137,11 @@ def release(selection, runtime_paths, out, binding, source, input_receipt, varia
+                 value = values[variant]
+                 handles[variant].write(canonical(value) + '\n')
+                 counts[variant][value['status']] += 1
++                aliases[variant] += value.get('alias_only',False) and value['status']=='unchanged'
+                 for dim, key in [('wave', record['wave']), ('source', record.get('source', record.get('source_dataset', 'UNKNOWN')))]:
+                     bucket = coverage[variant][dim].setdefault(key, Counter({s: 0 for s in STATUSES}))
+                     bucket[value['status']] += 1
++                    bucket['alias_only'] += value.get('alias_only',False) and value['status']=='unchanged'
+                 if value['status'] in ('corrected', 'unchanged'):
+                     kept[variant].append(identifier)
+                     control[variant].write(canonical(dict(line_id=identifier, label=record['label'],
+@@ -166,6 +172,7 @@ def release(selection, runtime_paths, out, binding, source, input_receipt, varia
+             variant=variant, overlay=op.name, overlay_sha256=sha256(op),
+             source_label_file=str(source), source_sha256=original_sha,
+             selection_sha256=sha256(selection), counts_by_status=dict(counts[variant]),
++            alias_only=aliases[variant],
+             coverage_per_wave=coverage[variant]['wave'], coverage_per_source=coverage[variant]['source'],
+             kept_line_ids=kp.name, kept_line_ids_sha256=sha256(kp), kept_lines=len(kept[variant]),
+             exclusion_receipts=input_receipt['exclusions'], out_of_scope=input_receipt['out_of_scope'],

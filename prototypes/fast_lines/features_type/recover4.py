@@ -8,7 +8,7 @@ from ..layout_barriers.fast import run as separators
 from ..shared.manifest import ROOT,digest
 from ..shared.type_grid_edges import analyze
 from ..shared.type_context import recover
-from ..shared.type_ink_motif_gate import inspect as motif
+from ..shared.ink_motif_gate import inspect as motif
 from ..shared.type_recovery import run as previous
 from ..shared.type_table_extent import analyze as extents
 from ..shared.detector import Detector,postprocess

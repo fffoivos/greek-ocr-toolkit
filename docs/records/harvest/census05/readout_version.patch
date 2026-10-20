@@ -1,0 +1,93 @@
+--- a/docs/records/harvest/census05/readout/census_readout.py
++++ b/docs/records/harvest/census05/readout/census_readout.py
+@@ -16,7 +16,6 @@
+ import time
+ 
+ DISPOSITIONS = ('ADMIT', 'HOLD', 'DROP')
+-PIPELINE_VERSION = '0.3'  # line_pipeline.PIPELINE_VERSION; not a verdict rule
+ TOOLS = ('polytonic', 'cyrillic', 'numerics', 'dashes', 'content_repair')
+ 
+ 
+@@ -89,7 +88,7 @@
+                 for name, counts in sorted(self.data.items())}
+ 
+ 
+-def readout(run, out, baseline=None, expect_rows=None):
++def readout(run, out, baseline=None, expect_rows=None, expect_pipeline_version=None):
+     started = time.time()
+     run, out = Path(run).resolve(), Path(out).resolve()
+     if out == run or run in out.parents:
+@@ -203,7 +202,7 @@
+         for tool, tool_version in d.get('toolchain_versions', {}).items():
+             tool_versions[(tool, tool_version)] += 1
+         version = d.get('pipeline_version', 'MISSING'); versions[version] += 1
+-        if version != PIPELINE_VERSION:
++        if not isinstance(version, str) or not version or version == 'MISSING' or version != (expect_pipeline_version if expect_pipeline_version is not None else next(iter(versions))):
+             problem('pipeline_version_mismatch', dict(parent=parent, id=row_id, version=version))
+         if disp != 'ADMIT' and not names:
+             problem('no_reason', dict(parent=parent, id=row_id, disposition=disp))
+@@ -370,7 +369,7 @@
+     result = dict(schema='census-readout-v1', generation=str(generation), files=list(files.values()),
+                   input_rows=sum(expected.values()), rows=rows, complete=complete, dispositions=dict(totals),
+                   admitted_train=admitted_train, gate=dict(gate), pending=pending, v3_splits=dict(v3),
+-                  pipeline_versions=dict(versions), expected_pipeline_version=PIPELINE_VERSION,
++                  pipeline_versions=dict(versions), expected_pipeline_version=expect_pipeline_version,
+                   tool_versions_binding=tool_binding,
+                   toolchain_versions_seen_note='toolchain_versions tables count values serialized in decisions',
+                   summary_reason_counts=dict(summary_reasons), route_status_counts=dict(route_statuses),
+@@ -450,8 +449,9 @@
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--run', required=True); parser.add_argument('--out', required=True)
+     parser.add_argument('--baseline'); parser.add_argument('--expect-rows', type=int)
++    parser.add_argument('--expect-pipeline-version')
+     args = parser.parse_args()
+-    r = readout(args.run, args.out, args.baseline, args.expect_rows)
++    r = readout(args.run, args.out, args.baseline, args.expect_rows, args.expect_pipeline_version)
+     print(markdown(r).splitlines()[-1])
+     return 0 if all(v['status'] == 'PASS' for v in r['invariants'].values()) and r['complete'] else 1
+ 
+--- a/docs/records/harvest/census05/readout/readout.sbatch
++++ b/docs/records/harvest/census05/readout/readout.sbatch
+@@ -14,7 +14,9 @@
+ # Inherit the allocation's uenv, exactly as seg_census/jobs/common.sh does.
+ # BUNDLE is the absolute deployed directory containing census_readout.py.
+ python=${CENSUS05_PYTHON:-${W:-/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3}/venv_l1/bin/python}
+-args=(--run "$CENSUS05_RUN" --out "$CENSUS05_READOUT_OUT")
++package=${CENSUS05_PROJECT_ROOT:-$CENSUS05_BUNDLE/../package/projects/greek-ocr-toolkit-pipe032}
++version=$(PYTHONPATH="$package" "$python" -B -c 'from greekocr.harvest.line_pipeline import PIPELINE_VERSION; print(PIPELINE_VERSION)')
++args=(--expect-pipeline-version "$version" --run "$CENSUS05_RUN" --out "$CENSUS05_READOUT_OUT")
+ if [[ -n "${CENSUS05_BASELINE:-}" ]]; then args+=(--baseline "$CENSUS05_BASELINE"); fi
+ if [[ -n "${CENSUS05_EXPECT_ROWS:-}" ]]; then args+=(--expect-rows "$CENSUS05_EXPECT_ROWS"); fi
+ srun -A a0140 --partition="${SLURM_JOB_PARTITION:?}" --cpu-bind=none --nodes=1 --ntasks=1 \
+--- a/docs/records/harvest/census05/readout/test_census_readout.py
++++ b/docs/records/harvest/census05/readout/test_census_readout.py
+@@ -167,7 +167,11 @@
+ os.execvpe(args[0],args,os.environ)
+ ''');srun.chmod(0o755)
+     out=tmp_path/'out';log=tmp_path/'srun.jsonl'
+-    env=dict(os.environ,PATH=str(bin_dir)+os.pathsep+os.environ['PATH'],CENSUS05_RUN=str(ATTEMPTS[0]),CENSUS05_READOUT_OUT=str(out),CENSUS05_BUNDLE=str(HERE),CENSUS05_PYTHON=sys.executable,SLURM_JOB_PARTITION='normal',MOCK_SRUN_LOG=str(log))
++    env=dict(os.environ,PATH=str(bin_dir)+os.pathsep+os.environ['PATH'],CENSUS05_RUN=str(make_run(tmp_path/'spool-run',n=200,corrupt=False)),CENSUS05_READOUT_OUT=str(out),CENSUS05_BUNDLE=str(HERE),CENSUS05_PYTHON=sys.executable,SLURM_JOB_PARTITION='normal',MOCK_SRUN_LOG=str(log))
++    decision_path=Path(env['CENSUS05_RUN'])/'generations/g1-test/decisions.jsonl'
++    ds=[json.loads(line) for line in decision_path.read_text().splitlines()]
++    for d in ds: d['pipeline_version']='0.3.2'
++    decision_path.write_text(''.join(reader.canonical(d)+'\n' for d in ds))
+     proc=subprocess.run(['bash',str(job)],cwd=str(unrelated),env=env,capture_output=True,text=True)
+     assert proc.returncode==0,proc.stderr
+     calls=[json.loads(line) for line in log.read_text().splitlines()]
+@@ -240,3 +244,16 @@
+     assert result['invariants'][fault]==dict(status='FAIL',count=1)
+     if fault=='pipeline_version_mismatch':
+         assert result['pipeline_versions']=={'0.3':9,'DIFFERENT':1}
++
++@pytest.mark.parametrize('version,expected,passes', [('0.3.2',None,True),('0.3.2','0.3.2',True),('0.3.2','0.3',False),(None,None,False),('',None,False)])
++def test_pipeline_version_argument(tmp_path,version,expected,passes):
++    run=make_run(tmp_path/'version-run',corrupt=False)
++    path=run/'generations/g1-test/decisions.jsonl'
++    ds=[json.loads(s) for s in path.read_text().splitlines()]
++    for d in ds:
++        if version is None: d.pop('pipeline_version')
++        else: d['pipeline_version']=version
++    path.write_text(''.join(reader.canonical(d)+'\n' for d in ds))
++    result=reader.readout(run,tmp_path/'version-out',expect_pipeline_version=expected)
++    assert (result['invariants']['pipeline_version_mismatch']['status']=='PASS') is passes
++    assert result['expected_pipeline_version']==expected

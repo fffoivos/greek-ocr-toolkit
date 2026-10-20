@@ -7,7 +7,7 @@ from shapely.geometry import Polygon
 from shapely.ops import unary_union
 from .round5_data import DEST,rows,load,ROOT
 from ..shared.timing import dump
-from ..stack.validate import retained_pixel_loss
+from ..evidence.validate import retained_pixel_loss
 
 
 def main():

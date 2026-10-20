@@ -69,7 +69,7 @@ node-side requirements. An inventory entry does not authorize their execution.
 | [double_eval.py](eval/double_eval.py) | Evaluation / acquisition | Double-line flag on rendered crops: half with a full second line, half single with neighbour tips. Seed 61. |
 | [eval_glyphs.py](eval/eval_glyphs.py) | Evaluation / acquisition | Letters / marks / neighbours / letter states vs renderer-only truth. Usage: eval_glyphs.py DIR N SEED P_NEIGHBOURS |
 | [extract_poly_lines.sh](eval/extract_poly_lines.sh) | Evaluation / acquisition | extract poly lines |
-| [fixture_double.py](eval/fixture_double.py) | Evaluation / acquisition | Double-line flag on the 44 real fixtures vs docs/glyphs_fixture_labels.json (provisional, in-sample threshold). |
+| [fixture_double.py](eval/fixture_double.py) | Evaluation / acquisition | Double-line flag on the 44 real fixtures vs docs/records/glyphs/glyphs_fixture_labels.json (provisional, in-sample threshold). |
 | [mark_stats.py](eval/mark_stats.py) | Evaluation / acquisition | Uncensored calibration evidence for NEIGHBOUR_GAP_ABOVE / _BELOW (CP-G1 F7): every small component outside the |
 | [neighbour_eval.py](eval/neighbour_eval.py) | Evaluation / acquisition | Neighbour-line placement (four-line model) vs the renderer's true neighbour baselines. Seed 71. |
 | [recut_summary.py](eval/recut_summary.py) | Evaluation / acquisition | recut summary |

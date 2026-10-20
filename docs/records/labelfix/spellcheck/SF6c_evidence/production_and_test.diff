@@ -1,0 +1,1224 @@
+diff --git a/greekocr/labelfix/ctc_align.py b/greekocr/labelfix/ctc_align.py
+index ecbdfc18..91217710 100644
+--- a/greekocr/labelfix/ctc_align.py
++++ b/greekocr/labelfix/ctc_align.py
+@@ -27,6 +27,18 @@ MAX_WIDTH = 2560
+ MIN_WIDTH = 64
+ 
+ 
++def recognition_fields(runtime):
++    """Carry saved score provenance through runtime copies, without upgrading it."""
++    from copy import deepcopy
++    fields = dict(recognition_confidence=runtime.get('recognition_confidence'),
++        recognition_evidence=deepcopy(runtime.get('recognition_evidence') or dict(
++            schema='ctc-window-score-v1', scored=False, scope='line', regions=[],
++            provenance='legacy_runtime_without_score_provenance' if runtime.get('recognition_confidence') is not None
++                       else 'missing_runtime_confidence')))
++    if 'image_width' in runtime:fields['image_width']=runtime['image_width']
++    return fields
++
++
+ def make_strip(image: Image.Image) -> tuple[np.ndarray, float]:
+     """Factory strip replica. Returns (uint8 [48, W] array, crop pixels per strip pixel)."""
+     im = image.convert('L')
+@@ -66,7 +78,8 @@ class Alignment:
+     n_frames: int = 0
+     scale: float = 1.0                          # crop px per strip px
+     strip_width: int = 0
+-    confidence: float = 0.0
++    confidence: float | None = None
++    frame_confidences: list | None = None       # max posterior, including blank, per valid frame
+ 
+     def span(self, i: int) -> CharSpan:
+         return self.spans[i]
+@@ -81,16 +94,65 @@ class Alignment:
+         return float(np.median(base)) if base else 0.0
+ 
+     def to_record(self) -> dict:
+-        return dict(prediction=self.prediction, n_frames=self.n_frames, scale=self.scale, strip_width=self.strip_width,
++        record = dict(prediction=self.prediction, n_frames=self.n_frames, scale=self.scale, strip_width=self.strip_width,
+                     confidence=self.confidence,
+                     spans=[[c.char, c.frame0, c.frame1, round(c.x0, 1), round(c.x1, 1)] for c in self.spans])
++        if self.frame_confidences is not None:
++            record['frame_confidences'] = list(self.frame_confidences)
++            import hashlib
++            record['frame_prediction_sha256'] = hashlib.sha256(self.prediction.encode()).hexdigest()
++        if getattr(self, 'transferred', False):record['transferred'] = True
++        return record
+ 
+     @classmethod
+     def from_record(cls, r: dict) -> 'Alignment':
+-        a = cls(r['prediction'], [], r['n_frames'], r['scale'], r['strip_width'], r.get('confidence', 0.0))
++        a = cls(r['prediction'], [], r['n_frames'], r['scale'], r['strip_width'], r.get('confidence'),
++                r.get('frame_confidences'))
+         a.spans = [CharSpan(ch, i, f0, f1, x0, x1) for i, (ch, f0, f1, x0, x1) in enumerate(r['spans'])]
++        import hashlib
++        if (r.get('transferred') or a.frame_confidences is not None
++                and r.get('frame_prediction_sha256') != hashlib.sha256(a.prediction.encode()).hexdigest()):
++            a.transferred = True
+         return a
+ 
++    def recognition_evidence(self, slots, image_width):
++        """Bind actual scored frames to each detector window; never fill legacy gaps.
++
++        A line mean (which includes blanks) cannot certify an omitted region.
++        Regional confidence is the minimum max-posterior of ALL overlapping
++        frames. This is model observation, not calibrated independent truth.
++        Transferred locations do not establish original frame ownership.
++        """
++        import hashlib
++        import json
++        import math
++        from .text import nfd
++        evidence = dict(schema='ctc-window-score-v1', scored=self.confidence is not None,
++            provenance='saved_alignment_confidence' if self.confidence is not None else 'missing_alignment_confidence',
++            scope='line', regions=[],
++            alignment_sha256=hashlib.sha256(json.dumps(self.to_record(),sort_keys=True).encode()).hexdigest(),
++            text_sha256=hashlib.sha256(nfd(self.prediction).encode()).hexdigest())
++        scores = self.frame_confidences
++        if (getattr(self, 'transferred', False) or scores is None or len(scores) != self.n_frames
++                or not self.scale > 0 or not math.isfinite(self.scale)
++                or not all(isinstance(x, (int, float)) and not isinstance(x, bool)
++                           and math.isfinite(x) and 0 <= x <= 1 for x in scores)):
++            return evidence
++        for slot in slots:
++            ev = slot.get('evidence', {})
++            ev = ev.to_record() if hasattr(ev, 'to_record') else ev
++            window = ev.get('window')
++            if not (isinstance(window, (list, tuple)) and len(window) == 2
++                    and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in window)
++                    and 0 <= window[0] < window[1] <= image_width):
++                continue
++            lo, hi = math.floor(window[0] / (STRIDE*self.scale)), math.ceil(window[1] / (STRIDE*self.scale))
++            if not 0 <= lo < hi <= len(scores):continue
++            evidence['regions'].append(dict(start=slot['start'], base=slot['base'], window=list(window),
++                image_width=image_width, scored=True, confidence=min(scores[lo:hi]),
++                frames=[lo, hi], provenance='minimum_max_frame_posterior_including_blank'))
++        return evidence
++
+ 
+ def _is_mark(c: str) -> bool:
+     import unicodedata
+@@ -203,7 +265,8 @@ class Recognizer:
+             ids = am[i, :L]
+             spans = frames_to_spans(ids, self._decode_atom, scales[i])
+             pred = ''.join(c.char for c in spans)
+-            results.append(Alignment(pred, spans, L, scales[i], widths[i], float(probs[i, :L].mean())))
++            results.append(Alignment(pred, spans, L, scales[i], widths[i], float(probs[i, :L].mean()),
++                                     probs[i, :L].tolist()))
+         return results
+ 
+     def align_paths(self, paths: list[str | Path], bs: int = 16, log=None) -> dict:
+diff --git a/greekocr/labelfix/release_gate.py b/greekocr/labelfix/release_gate.py
+index a5c1eb76..8a1c26bc 100644
+--- a/greekocr/labelfix/release_gate.py
++++ b/greekocr/labelfix/release_gate.py
+@@ -24,6 +24,7 @@ MODES = ('PRESENCE', 'FULL', 'ENSEMBLE_AB', 'ENSEMBLE_AE')
+ ENSEMBLE_CAVEAT = "A and B share training data (C1 agreement labels) and therefore share errors; agreement measures the reader's stability, not an independent pixel signal. Precision on the training waves is unmeasured until the training-wave DEV with print truth exists. Wave 1c on this release is a pseudo-label experiment."
+ R1_LETTERS = frozenset('αεηιουωρΑΕΗΙΟΥΩΡ')
+ LEADING_QUOTES = '“”«»„"'
++RECOGNISER_ABSENCE_FLOOR = 0.5
+ 
+ 
+ def policy_binding():
+@@ -32,7 +33,11 @@ def policy_binding():
+     paths = [Path(__file__), Path(R.__file__),Path(__file__).with_name('text.py'),
+              Path(__file__).with_name('segmentation.py'),
+              root/'scripts/labelfix/clariden/l1_common.py',root/'scripts/labelfix/clariden/l1r_recompose.py',
+-             root/'scripts/labelfix/owner_reading.py',root/'scripts/labelfix/owner_pages_build_combined.py']
++             root/'scripts/labelfix/owner_reading.py',root/'scripts/labelfix/owner_pages_build_combined.py',
++             Path(__file__).with_name('ctc_align.py'), root/'scripts/labelfix/m2_run.py',
++             root/'scripts/labelfix/clariden/r1_extract.py',root/'scripts/labelfix/clariden/l1_infer.py',
++             root/'scripts/labelfix/clariden/l1e_measure.py',root/'scripts/labelfix/clariden/l1e_run.py',
++             root/'scripts/labelfix/clariden/l1_detect.py',root/'scripts/labelfix/clariden/r1_common.py']
+     sources = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+     return dict(schema=POLICY, sources=sources,
+                 sha256=hashlib.sha256(json.dumps(sources,sort_keys=True).encode()).hexdigest())
+@@ -280,6 +285,52 @@ def _finite_span(value):
+             and 0<=value[0]<value[1])
+ 
+ 
++def _source_in_window(span, window, image_width=None, coverage=None):
++    """One coordinate contract for MOVE, reader absence and recogniser absence.
++
++    Source letter spans must belong to the saved target window. Padded reader
++    crops may be wider; their native target mask must still be inside the image.
++    Historical R1 extraction explicitly recorded out_of_image_span in uncertainty;
++    its known, scored, uncertainty-free records retain that bounds provenance.
++    Arbitrary finite coordinates alone never establish image bounds.
++    """
++    if not (_finite_span(span) and _finite_span(window)
++            and window[0]<=span[0]<span[1]<=window[1]):return False
++    if image_width is not None:
++        return (isinstance(image_width,(int,float)) and not isinstance(image_width,bool)
++                and math.isfinite(image_width) and span[1]<=image_width)
++    cov=coverage or {}
++    return bool(cov.get('window_contract',{}).get('schema')=='r1-trained-full-height-v1'
++                and cov.get('scored') is True and cov.get('evidence_state') not in (None,'UNKNOWN')
++                and cov.get('uncertainty')==[] and cov.get('span')==span)
++
++
++def _recogniser_scored(runtime, slot, window):
++    """An explicit line score AND scored observation of this entire window."""
++    def above_floor(value):
++        return (isinstance(value,(int,float)) and not isinstance(value,bool)
++                and math.isfinite(value) and RECOGNISER_ABSENCE_FLOOR<value<=1)
++    evidence=runtime.get('recognition_evidence') or {}
++    if not (above_floor(runtime.get('recognition_confidence'))
++            and evidence.get('schema')=='ctc-window-score-v1' and evidence.get('scored') is True
++            and evidence.get('provenance')=='saved_alignment_confidence'
++            and evidence.get('text_sha256')==hashlib.sha256(nfd(runtime.get('recogniser_text','')).encode()).hexdigest()
++            and isinstance(evidence.get('alignment_sha256'),str)
++            and len(evidence['alignment_sha256'])==64):return False
++    regions=[r for r in evidence.get('regions',()) if r.get('start')==slot.get('start')]
++    if len(regions)!=1:return False
++    region=regions[0];observed=region.get('window')
++    frames=region.get('frames')
++    return bool(region.get('base')==slot.get('base') and region.get('scored') is True
++        and region.get('provenance')=='minimum_max_frame_posterior_including_blank'
++        and above_floor(region.get('confidence')) and _finite_span(frames)
++        and all(isinstance(x,int) and not isinstance(x,bool) for x in frames)
++        and _source_in_window(observed,observed,region.get('image_width'))
++        and _finite_span(window) and observed[0]<=window[0]<window[1]<=observed[1]
++        and _source_in_window(slot.get('locator_span'),window,region.get('image_width'))
++        and (runtime.get('image_width') is None or runtime['image_width']==region['image_width']))
++
++
+ def deletion_guard(original, proposal, runtime, decision):
+     """SF6: two positive absences, except an R1-named same-kind breathing MOVE.
+ 
+@@ -337,8 +388,7 @@ def deletion_guard(original, proposal, runtime, decision):
+         for preds,covs in arms:
+             pred=preds.get(rc.start);cov=covs.get(rc.start)
+             named=bool(named and cov and not _reader_reasons(slot,pred,cov,'r1')
+-                and _finite_span(cov.get('span'))
+-                and window[0]<=cov['span'][0]<cov['span'][1]<=window[1]
++                and _source_in_window(cov.get('span'),window,runtime.get('image_width'),cov)
+                 and set(pred.get('parts',pred.get('cls','none').split('+')))&{'psili','dasia'}=={part})
+         if named:moves[x.start]=part
+     events=[]
+@@ -364,8 +414,9 @@ def deletion_guard(original, proposal, runtime, decision):
+             and ev.get('observation',{}).get(zone) not in ('UNSEEN','UNKNOWN'))
+         cov=coverage.get(c.start) if c else None
+         pred=predictions.get(c.start) if c else None
++        window=ev.get('window')
+         scored=bool(clean and cov and not _reader_reasons(s,pred,cov,'r1')
+-                    and _finite_span(cov.get('span')))
++                    and _source_in_window(cov.get('span'),window,runtime.get('image_width'),cov))
+         reader=bool(category=='mark' and part and c and c.base in R1_LETTERS and scored
+                     and part not in (pred.get('parts',pred.get('cls','none').split('+')) or []))
+         # The coordinator's A∧B is one reader absence in every release mode.
+@@ -375,7 +426,7 @@ def deletion_guard(original, proposal, runtime, decision):
+             pp=prediction_index(runtime.get('peer_predictions',{}).get(peer,())).get(c.start) if c else None
+             pc={x['start']:x for x in runtime.get('peer_coverage',{}).get(peer,())}.get(c.start) if c else None
+             reader=bool(reader and pc and not _reader_reasons(s,pp,pc,'peer')
+-                        and _finite_span(pc.get('span'))
++                        and _source_in_window(pc.get('span'),window,runtime.get('image_width'),pc)
+                         and part not in pp.get('parts',pp.get('cls','none').split('+')))
+         observed=ev.get('observation',{})
+         detector=bool(clean and _finite_span(ev.get('window')) and observed.get(zone)=='OBSERVED'
+@@ -391,10 +442,7 @@ def deletion_guard(original, proposal, runtime, decision):
+             detector=bool(clean and atom['key'][1]==0 and raw.get('opening_quotes')==[]
+                 and observed.get('above')=='OBSERVED' and observed.get('left')=='OBSERVED'
+                 and _finite_span(ev.get('window')))
+-        confidence=runtime.get('recognition_confidence')
+-        recogniser=bool(clean and _finite_span(s.get('locator_span'))
+-            and isinstance(confidence,(int,float)) and not isinstance(confidence,bool)
+-            and math.isfinite(confidence) and 0<=confidence<=1 and rec_atoms[atom['key']]==0)
++        recogniser=bool(clean and _recogniser_scored(runtime,s,window) and rec_atoms[atom['key']]==0)
+         # Text presence is decisive against absence, even if it has a score.
+         allowed=(detector and recogniser if category in ('apostrophe','quote','keraia')
+                  else reader and (detector or recogniser))
+@@ -614,8 +662,8 @@ def bind_runtime(runtime, k1_flags=()):
+         evidence['recogniser_nfd']=runtime['recogniser_nfd']
+     # SF6 uses this saved score to distinguish observed text absence from an
+     # unscored transcript. Bind its presence/value as well as all old inputs.
+-    if 'recognition_confidence' in runtime:
+-        evidence['recognition_confidence']=runtime['recognition_confidence']
++    for key in ('recognition_confidence','recognition_evidence','image_width'):
++        if key in runtime:evidence[key]=deepcopy(runtime[key])
+     if not isinstance(evidence['detector'],dict):evidence['detector']=serialize(evidence['detector'])
+     digest=hashlib.sha256(json.dumps(evidence,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+     if runtime.get('evidence_sha256',digest)!=digest:raise ValueError('runtime evidence binding mismatch')
+diff --git a/scripts/labelfix/clariden/l1_infer.py b/scripts/labelfix/clariden/l1_infer.py
+index 0f043f60..601b8806 100644
+--- a/scripts/labelfix/clariden/l1_infer.py
++++ b/scripts/labelfix/clariden/l1_infer.py
+@@ -9,6 +9,7 @@ import numpy as np
+ import torch
+ 
+ from greekocr.labelfix.release_gate import compose_runtime
++from greekocr.labelfix.ctc_align import recognition_fields
+ from scripts.labelfix.clariden.l1_common import canonical, rows, write_rows, write_json, sha256
+ from scripts.labelfix.clariden.r1_common import HEADS, LETTERS, compose
+ from scripts.labelfix.clariden.r1_model import MarkReader
+@@ -84,6 +85,7 @@ def run(data, checkpoint, out, device, batch_size=512, log_lines=False):
+         combined = []
+         for i, r in enumerate(records):
+             rr = dict(r,status='ok',r1_predictions=list(byline[i].values()))
++            rr.update(recognition_fields(r))
+             rr['modes']={mode:compose_runtime(rr,mode) for mode in ('PRESENCE','FULL')}
+             combined.append(rr)
+             if log_lines:
+diff --git a/scripts/labelfix/clariden/l1e_measure.py b/scripts/labelfix/clariden/l1e_measure.py
+index 21092295..caacc3fc 100644
+--- a/scripts/labelfix/clariden/l1e_measure.py
++++ b/scripts/labelfix/clariden/l1e_measure.py
+@@ -16,6 +16,7 @@ from greekocr.labelfix.text import nfd,clusters,strip_marks
+ from greekocr.labelfix.reading import LineReading,MARKS
+ from greekocr.labelfix.linemetric import mark_set
+ from greekocr.labelfix.release_gate import MODES,serialize,compose_runtime,edit_guard,policy_binding
++from greekocr.labelfix.ctc_align import recognition_fields
+ from scripts.labelfix.clariden.r1_common import rows,sha256,write_json,write_rows
+ from scripts.labelfix.clariden.l1e_run import decision_record
+ 
+@@ -66,6 +67,7 @@ def saved_runtime(line,meta,predictions):
+         opening_quotes=deepcopy(line.get('opening_quotes',[])),constraint_flags=deepcopy(line.get('reading_flags',[])))
+     if meta['recogniser_text']!=line['recogniser_text']:raise ValueError('recogniser identity mismatch')
+     return dict(id=line['line_id'],recogniser_text=line['recogniser_text'],recogniser_nfd=line['recogniser_text'],
++        **recognition_fields(meta),
+         detector=serialize(raw),coverage=meta['coverage'],font_size=meta['font_size'],r1_predictions=predictions['A'],
+         peer_predictions={a:predictions[a] for a in ('B','E')},peer_coverage={a:meta['coverage'] for a in ('B','E')})
+ 
+diff --git a/scripts/labelfix/clariden/l1e_run.py b/scripts/labelfix/clariden/l1e_run.py
+index dcd7d32e..469ad106 100644
+--- a/scripts/labelfix/clariden/l1e_run.py
++++ b/scripts/labelfix/clariden/l1e_run.py
+@@ -12,6 +12,7 @@ from scripts.labelfix.clariden.r1_model import MarkReader
+ from scripts.labelfix.clariden.r1_common import ARMS, LETTERS, rows, sha256, write_json, write_rows
+ from scripts.labelfix.clariden.l1e_windows import audit,checked,shard_inputs
+ from greekocr.labelfix.release_gate import policy_binding, compose_runtime, MODES
++from greekocr.labelfix.ctc_align import recognition_fields
+ 
+ 
+ def load_reader(checkpoint,arm,digest,device):
+@@ -74,6 +75,7 @@ def infer(historical,window_audit,checkpoints,out,code_hashes,device='cuda:0',ba
+             combined=[]
+             for i,r in enumerate(records):
+                 rr={k:v for k,v in r.items() if k!='modes'}
++                rr.update(recognition_fields(r))
+                 rr.update(peer_predictions={a:byline[a][i] for a in models},peer_coverage={a:r['coverage'] for a in models})
+                 combined.append(rr)
+             partial=dest.with_name(dest.name.replace('.jsonl.gz','.partial.jsonl.gz'))
+diff --git a/scripts/labelfix/clariden/r1_extract.py b/scripts/labelfix/clariden/r1_extract.py
+index eafea45f..d561b1cb 100644
+--- a/scripts/labelfix/clariden/r1_extract.py
++++ b/scripts/labelfix/clariden/r1_extract.py
+@@ -55,7 +55,9 @@ def extract_line(record, alignment, image, validation=False, evaluation=False):
+             continue
+         losses['vowel_rho_slots'] += 1
+         reason = None
+-        if alignment.get('confidence',0) < .5:
++        if alignment.get('confidence') is None:
++            reason = 'line_confidence_missing'
++        elif alignment['confidence'] < .5:
+             reason = 'line_confidence_below_0.5'
+         span = spans[c.start][3:5]
+         if reason is None:
+diff --git a/scripts/labelfix/m2_run.py b/scripts/labelfix/m2_run.py
+index 53d34b35..e0d5d949 100644
+--- a/scripts/labelfix/m2_run.py
++++ b/scripts/labelfix/m2_run.py
+@@ -125,7 +125,8 @@ def infer_line(identifier, image, alignment, detector_model, reader_model, *, sc
+     pred = reader_predictions(reader_model, ss, wide)
+     raw = reading.read_ink(ink.analyse(image), text, alignment, detector_model, filtered=False)
+     runtime = dict(id=identifier, status='ok', recogniser_text=nfc(text), recogniser_nfd=text,
+-        recognition_confidence=alignment.confidence, detector=serialize(raw),
++        recognition_confidence=alignment.confidence, image_width=image.width,
++        recognition_evidence=alignment.recognition_evidence(raw.slots,image.width), detector=serialize(raw),
+         r1_predictions=list(pred.values()), coverage=coverage, font_size=size, extraction_counts=dict(losses))
+     runtime['modes']={mode:compose_runtime(runtime,mode) for mode in ('PRESENCE','FULL')}
+     return runtime
+@@ -285,10 +286,14 @@ def replay_detector(substitutions, output, script_classes):
+         ar=als[identifier];assert ar['crop_sha256']==sha(item['crop'])
+         assert original['crop_sha256'][identifier]==ar['crop_sha256']
+         with Image.open(item['crop']) as image:
+-            raw=reading.read_ink(ink.analyse(image),ar['alignment']['prediction'],Alignment.from_record(ar['alignment']),model,
++            alignment=Alignment.from_record(ar['alignment'])
++            raw=reading.read_ink(ink.analyse(image),ar['alignment']['prediction'],alignment,model,
+                                  filtered=False,substitutions=substitutions)
++            score_evidence=alignment.recognition_evidence(raw.slots,image.width)
++            image_width=image.width
+         run={k:v for k,v in prior.items() if k not in ('detector','modes')}
+-        run.update(detector=serialize(raw),script_scope=annotation)
++        run.update(detector=serialize(raw),script_scope=annotation,image_width=image_width,
++                   recognition_confidence=alignment.confidence,recognition_evidence=score_evidence)
+         run['modes']={mode:compose_runtime(run,mode) for mode in ('PRESENCE','FULL')}
+         result.append(run)
+     write_rows(output/'runtime.jsonl',result)
+diff --git a/tests/labelfix/test_sf6.py b/tests/labelfix/test_sf6.py
+index 424c42fb..3888d0f2 100644
+--- a/tests/labelfix/test_sf6.py
++++ b/tests/labelfix/test_sf6.py
+@@ -25,6 +25,7 @@ def rich(text):
+     """Explicitly scored, fully observed fixture; never production evidence."""
+     rt=synthetic(text)
+     rt['recognition_confidence']=.9
++    rt['image_width']=1000
+     for i,s in enumerate(rt['detector']['slots']):
+         s.update(locator_span=[10+i*10,18+i*10],word_final=True)
+         s['evidence'].update(window=[8+i*10,20+i*10],above=[],below=[],apostrophes=[],
+@@ -32,6 +33,9 @@ def rich(text):
+             observation={z:'OBSERVED' for z in ('above','below','left','right')})
+     for cov in [rt['coverage'],*rt['peer_coverage'].values()]:
+         for c in cov:c['span']=[10+c['start']*10,18+c['start']*10]
++    from greekocr.labelfix.ctc_align import Alignment
++    rt['recognition_evidence']=Alignment(text,n_frames=250,confidence=.9,
++        frame_confidences=[.9]*250).recognition_evidence(rt['detector']['slots'],1000)
+     return rt
+ 
+ 
+--- /dev/null
++++ b/scripts/labelfix/clariden/l1_detect.py
+@@ -0,0 +1,133 @@
++"""CPU S6 detector and unchanged R1-A window extraction, receipt per shard."""
++from __future__ import annotations
++import argparse
++from collections import Counter
++import json
++import multiprocessing as mp
++import os
++from pathlib import Path
++import time
++
++from scripts.labelfix.clariden.l1_common import canonical, rows, write_rows, sha256, write_json
++from scripts.labelfix.clariden.r1_common import crop_key, crop_path
++
++_STATE = None
++
++
++def initialise(settings):
++    global _STATE
++    from greekocr.labelfix import case, markshape
++    case.configure_model('docs/labelfix/case_model_S5.json')
++    _STATE = settings, markshape.load_model('docs/labelfix/markshape_model_S4.json')
++
++
++def chunk(task):
++    import numpy as np
++    from PIL import Image
++    from greekocr.labelfix import ink, reading
++    from greekocr.labelfix.ctc_align import Alignment
++    from greekocr.labelfix.text import nfc
++    from scripts.labelfix.clariden.r1_extract import extract_line
++    from scripts.labelfix.owner_reading import serialize
++    number, records = task
++    settings, detector = _STATE
++    out, crop_root, layout, log_lines = settings
++    prefix = Path(out) / f'shard-{number:05d}'
++    runtime, windows, samples, timings = [], [], [], []
++    for r, ar in records:
++        with Image.open(crop_path(r['crop'], crop_root, layout)) as source:
++            image = source.convert('L')
++        al = Alignment.from_record(ar)
++        started = time.perf_counter()
++        raw = reading.read_ink(ink.analyse(image), al.prediction, al, detector, filtered=False)
++        detector_seconds = time.perf_counter() - started
++        started = time.perf_counter()
++        ss, wide, _, losses, coverage, size = extract_line(
++            dict(id=r['id'], recogniser_text=al.prediction, _line=len(runtime)), ar, image, evaluation=True)
++        window_seconds = time.perf_counter() - started
++        for s in ss:
++            samples.append(dict(line=len(runtime), start=s[3], letter=s[4], mask=s[7][0]))
++        windows.extend(wide)
++        runtime.append(dict(id=r['id'], recogniser_text=nfc(al.prediction), recogniser_nfd=al.prediction, detector=serialize(raw),
++            recognition_confidence=al.confidence,image_width=image.width,
++            recognition_evidence=al.recognition_evidence(raw.slots,image.width),
++            coverage=coverage, font_size=size, extraction_counts=dict(losses)))
++        timings.append(dict(id=r['id'], detector_seconds=detector_seconds, window_seconds=window_seconds, windows=len(ss)))
++        if log_lines:
++            print('LINE_TIMING ' + canonical(timings[-1]), flush=True)
++    write_rows(str(prefix) + '-detector.jsonl.gz', runtime)
++    write_json(str(prefix) + '-samples.json', samples)
++    np.save(str(prefix) + '-wide.npy', np.asarray(windows, dtype=np.uint8).reshape(-1, 64, 128), allow_pickle=False)
++    write_rows(str(prefix) + '-timings.jsonl', timings)
++    paths = [Path(str(prefix) + suffix) for suffix in ('-detector.jsonl.gz', '-samples.json', '-wide.npy', '-timings.jsonl')]
++    receipt = dict(shard=number, lines=len(runtime), windows=len(windows), complete=True,
++        detector_seconds=sum(t['detector_seconds'] for t in timings),
++        window_seconds=sum(t['window_seconds'] for t in timings),
++        sha256={p.name: sha256(p) for p in paths})
++    write_json(str(prefix) + '-receipt.json', receipt)
++    return receipt
++
++
++def run(selection, alignments, out, crop_root, layout, workers=64, chunk_size=128, log_lines=False):
++    out = Path(out)
++    out.mkdir(parents=True, exist_ok=False)
++    started = time.monotonic()
++    records = {r['crop']: r for r in rows(selection)}
++    seen = set()
++    def tasks():
++        batch, number = [], 0
++        for path in alignments:
++            for ar in rows(path):
++                key = crop_key(ar['crop'])
++                if key not in records:
++                    continue
++                if key in seen:
++                    raise ValueError('duplicate alignment ' + key)
++                seen.add(key)
++                batch.append((records[key], ar['alignment']))
++                if len(batch) == chunk_size:
++                    yield number, batch
++                    number += 1
++                    batch = []
++        if batch:
++            yield number, batch
++    settings = (str(out), str(crop_root), layout, log_lines)
++    receipts = []
++    if workers == 1:
++        initialise(settings)
++        for task in tasks():
++            receipts.append(chunk(task))
++    else:
++        with mp.get_context('spawn').Pool(workers, initializer=initialise, initargs=(settings,)) as pool:
++            for receipt in pool.imap_unordered(chunk, tasks(), chunksize=1):
++                receipts.append(receipt)
++                print(f'DETECTOR_SHARD {len(receipts)} complete; lines={receipt["lines"]}', flush=True)
++    assert seen == set(records), f'missing alignments: {len(set(records)-seen)}'
++    receipt = dict(schema='l1-detector-windows-v1', complete=True, lines=len(records),
++        selection_sha256=sha256(selection), alignment_sha256={str(p): sha256(p) for p in alignments},
++        workers=workers, elapsed_seconds=time.monotonic()-started,
++        detector_cpu_seconds=sum(r['detector_seconds'] for r in receipts),
++        window_cpu_seconds=sum(r['window_seconds'] for r in receipts),
++        windows=sum(r['windows'] for r in receipts), shards=sorted(receipts, key=lambda r:r['shard']))
++    write_json(out / 'detector_receipt.json', receipt)
++    return receipt
++
++
++def main():
++    ap = argparse.ArgumentParser(description=__doc__)
++    for name in ('selection', 'out', 'crop-root'):
++        ap.add_argument('--' + name, type=Path, required=True)
++    ap.add_argument('--alignments', type=Path, nargs='+', required=True)
++    ap.add_argument('--layout', choices=['toolkit', 'e3'], required=True)
++    ap.add_argument('--workers', type=int, default=64)
++    ap.add_argument('--mock', action='store_true')
++    a = ap.parse_args()
++    if a.mock:
++        assert len(list(rows(a.selection))) <= 192 and a.workers == 1
++    else:
++        assert os.environ.get('SLURM_JOB_ID'), 'bulk work requires a Slurm allocation'
++    print(canonical(run(a.selection, a.alignments, a.out, a.crop_root, a.layout, a.workers, log_lines=a.mock)), flush=True)
++
++
++if __name__ == '__main__':
++    main()
+--- /dev/null
++++ b/tests/labelfix/test_sf6_reviewer.py
+@@ -0,0 +1,105 @@
++"""SF6/SF6b-only release witnesses. Synthetic saved records; no inference."""
++from copy import deepcopy
++
++import pytest
++from greekocr.labelfix import release_gate as gate
++from greekocr.labelfix.ctc_align import Alignment
++from scripts.labelfix.clariden import l1_common
++from tests.labelfix.test_sf6 import rich,move_runtime,overlay
++
++POLICY=(gate,l1_common)
++
++
++def legacy_unscored_punctuation():
++    # Real loader: missing confidence must remain missing through infer_line.
++    legacy=dict(prediction='δ',spans=[['δ',1,2,10.,18.]],n_frames=10,scale=1.,strip_width=40)
++    alignment=Alignment.from_record(legacy)
++    assert 'confidence' not in legacy and alignment.confidence is None
++    rt=rich('δ');rt['recognition_confidence']=alignment.confidence
++    # Delta has no R1 mark head. Those inputs cannot certify punctuation.
++    rt['r1_predictions']=[];rt['coverage']=[];rt['peer_predictions']={};rt['peer_coverage']={}
++    return legacy,rt
++
++
++def ordinary_absence_outside_window(source):
++    if source=='reader':
++        rt=rich('ά');rt.pop('recognition_confidence')
++        rt['detector']['slots'][0]['parts']=[]
++        for preds in [rt['r1_predictions'],*rt['peer_predictions'].values()]:preds[0]['parts']=[]
++        for cov in [rt['coverage'],*rt['peer_coverage'].values()]:cov[0]['span']=[100000,100010]
++    else:
++        rt=rich('α')
++        # No detector absence observation: only the reader and alleged
++        # recogniser observation can authorize this deletion.
++        rt['detector']['slots'][0]['evidence'].pop('observation')
++        rt['detector']['slots'][0]['locator_span']=[100000,100010]
++    assert rt['detector']['slots'][0]['evidence']['window']==[8,20]
++    return rt
++
++
++@pytest.mark.parametrize('mode',gate.MODES)
++def test_missing_score_default_is_not_positive_recogniser_absence(mode):
++    _,rt=legacy_unscored_punctuation()
++    result=overlay(POLICY,"δ'",rt,mode)
++    assert result['status']=='hold' and 'label' not in result,result
++
++
++@pytest.mark.parametrize('mode',gate.MODES)
++@pytest.mark.parametrize('source',['reader','recogniser'])
++def test_deletion_source_must_cover_the_target_window(mode,source):
++    result=overlay(POLICY,'ά',ordinary_absence_outside_window(source),mode)
++    assert result['status']=='hold' and 'label' not in result,result
++
++
++@pytest.mark.parametrize('mode',gate.MODES)
++@pytest.mark.parametrize('defect',['missing_score','unscored_A','missing_B','clipped_top','uncertainty','missing_span'])
++def test_existing_negative_controls_hold(mode,defect):
++    rt=rich('α');rt['detector']['slots'][0]['evidence'].pop('observation')
++    if defect=='missing_score':rt.pop('recognition_confidence')
++    elif defect=='unscored_A':rt['coverage'][0]['scored']=False
++    elif defect=='missing_B':rt['peer_predictions'].pop('B');rt['peer_coverage'].pop('B')
++    elif defect=='clipped_top':rt['detector']['slots'][0]['evidence']['clipped_top']=True
++    elif defect=='uncertainty':rt['peer_coverage']['B'][0]['uncertainty']=['no_pixel_evidence']
++    elif defect=='missing_span':rt['detector']['slots'][0].pop('locator_span')
++    result=overlay(POLICY,'ά',rt,mode)
++    assert result['status']=='hold' and 'label' not in result
++
++
++@pytest.mark.parametrize('mode',gate.MODES)
++def test_positive_reader_detector_control(mode):
++    rt=rich('ά');rt.pop('recognition_confidence');rt['detector']['slots'][0]['parts']=[]
++    for preds in [rt['r1_predictions'],*rt['peer_predictions'].values()]:preds[0]['parts']=[]
++    result=overlay(POLICY,'ά',rt,mode)
++    assert (result['status'],result['label'])==('corrected','α')
++    assert result['deletion_checks'][0]['signals']==dict(reader=True,detector=True,recogniser=False)
++
++
++@pytest.mark.parametrize('mode',gate.MODES)
++@pytest.mark.parametrize('defect',['none','kind','unnamed','noncapital','extra_sign','other_deletion','outside_window'])
++def test_move_exception_is_confined_to_one_matching_spacing_sign(mode,defect):
++    original='-᾿Αλλα';proposal='-Ἀλλα'
++    if defect=='kind':proposal='-Ἁλλα'
++    if defect=='noncapital':original='-᾿αλλα';proposal='-ἀλλα'
++    if defect=='extra_sign':original='-᾿᾿Αλλα'
++    if defect=='other_deletion':original='“-᾿Αλλα'
++    rt=move_runtime(proposal);rt.pop('recognition_confidence')
++    if defect=='kind':rt['detector']['slots'][0]['evidence'].pop('observation')
++    if defect=='unnamed':rt['peer_predictions']['B'][0]['parts']=[]
++    if defect=='outside_window':rt['peer_coverage']['B'][0]['span']=[100000,100010]
++    result=overlay(POLICY,original,rt,mode)
++    if defect=='none':
++        assert (result['status'],result['label'])==('corrected',proposal)
++        assert len(result['deletion_checks'])==1
++        assert result['deletion_checks'][0]['operation']=='MOVE'
++        assert result['deletion_checks'][0]['signals']==dict(reader=False,detector=False,recogniser=False)
++    else:
++        assert result['status']=='hold' and 'label' not in result,result
++        assert any(not c['allowed'] for c in result['deletion_checks'])
++
++
++@pytest.mark.parametrize('old,new,n',[
++    ('άἀ','ὰἁ',2),("δ''",'δ',2),('“ά','α',2),('άα','αά',1),
++    ("δ'",'δ’',0),('α','ά',0),('-᾿Α','-Ἀ',1),
++])
++def test_replacements_multiple_edits_and_alias_inventory(old,new,n):
++    assert len(gate.google_deletions(old,new))==n
+--- /dev/null
++++ b/tests/labelfix/test_sf6c.py
+@@ -0,0 +1,150 @@
++"""SF6c score provenance, native bounds and real runtime-writer regressions."""
++from copy import deepcopy
++import json
++from pathlib import Path
++
++import pytest
++
++from greekocr.labelfix import release_gate as gate
++from greekocr.labelfix.ctc_align import Alignment, recognition_fields, transfer_alignment
++from scripts.labelfix.clariden import l1_common
++from tests.labelfix.test_sf6 import rich, overlay
++
++POLICY=(gate,l1_common)
++
++
++@pytest.mark.parametrize('value',[None,0.,.1,.5,True,False,float('nan'),float('inf'),-1,1.1,'0.9'])
++@pytest.mark.parametrize('mode',gate.MODES)
++def test_nonpositive_or_low_or_invalid_line_score_holds(value,mode):
++    rt=rich('δ');rt['recognition_confidence']=value
++    assert overlay(POLICY,"δ'",rt,mode)['status']=='hold'
++
++
++@pytest.mark.parametrize('defect',['absent','unscored','no_regions','zero_region','floor_region',
++    'wrong_text','wrong_base','wrong_start','no_provenance','line_mean_only','partial_window',
++    'outside_image','missing_image_width','duplicate_region','missing_frames','unscored_region'])
++def test_explicit_regional_scoring_is_required(defect):
++    rt=rich('δ');ev=rt['recognition_evidence'];region=ev['regions'][0]
++    if defect=='absent':rt.pop('recognition_evidence')
++    elif defect=='unscored':ev['scored']=False
++    elif defect=='no_regions':ev['regions']=[]
++    elif defect=='zero_region':region['confidence']=0.
++    elif defect=='floor_region':region['confidence']=gate.RECOGNISER_ABSENCE_FLOOR
++    elif defect=='wrong_text':ev['text_sha256']='0'*64
++    elif defect=='wrong_base':region['base']='α'
++    elif defect=='wrong_start':region['start']=1
++    elif defect=='no_provenance':ev.pop('provenance')
++    elif defect=='line_mean_only':region['provenance']='mean_line_posterior'
++    elif defect=='partial_window':region['window']=[10,18]
++    elif defect=='outside_image':rt['image_width']=region['image_width']=15
++    elif defect=='missing_image_width':region.pop('image_width')
++    elif defect=='duplicate_region':ev['regions'].append(deepcopy(region))
++    elif defect=='missing_frames':region.pop('frames')
++    elif defect=='unscored_region':region['scored']=False
++    assert overlay(POLICY,"δ'",rt)['status']=='hold'
++
++
++@pytest.mark.parametrize('score',[.500001,.9,1.])
++def test_genuine_regional_score_above_floor_can_certify_absence(score):
++    rt=rich('δ');rt['recognition_confidence']=score
++    rt['recognition_evidence']['regions'][0]['confidence']=score
++    out=overlay(POLICY,"δ'",rt)
++    assert (out['status'],out['label'])==('corrected','δ')
++    assert out['deletion_checks'][0]['signals']==dict(reader=False,detector=True,recogniser=True)
++
++
++@pytest.mark.parametrize('source',['A','B','E','recogniser'])
++@pytest.mark.parametrize('span',[[0,7],[21,25],[100000,100010],[8,21],[-1,12],[10,1001]])
++def test_each_source_must_belong_to_saved_window_and_image(source,span):
++    rt=rich('α');rt['detector']['slots'][0]['evidence'].pop('observation')
++    if source=='recogniser':rt['detector']['slots'][0]['locator_span']=span
++    else:
++        cov=rt['coverage'] if source=='A' else rt['peer_coverage'][source]
++        cov[0]['span']=span
++    assert overlay(POLICY,'ά',rt,'ENSEMBLE_AE')['status']=='hold'
++
++
++def test_native_bounds_are_not_inferred_from_a_finite_window():
++    rt=rich('ά');rt.pop('image_width');rt.pop('recognition_confidence')
++    rt['detector']['slots'][0]['parts']=[]
++    for preds in [rt['r1_predictions'],*rt['peer_predictions'].values()]:preds[0]['parts']=[]
++    assert overlay(POLICY,'ά',rt)['status']=='hold'
++    # The historical extractor explicitly checked native bounds, retaining
++    # out_of_image_span as uncertainty. Preserve that saved provenance.
++    for cov in [rt['coverage'],*rt['peer_coverage'].values()]:
++        cov[0]['window_contract']={'schema':'r1-trained-full-height-v1'}
++    assert overlay(POLICY,'ά',rt)['label']=='α'
++    rt['peer_coverage']['B'][0]['uncertainty']=['out_of_image_span']
++    assert overlay(POLICY,'ά',rt)['status']=='hold'
++
++
++def test_missing_alignment_score_roundtrips_without_becoming_zero():
++    record=dict(prediction='δ',n_frames=10,scale=1.,strip_width=40,spans=[['δ',1,2,10.,18.]])
++    al=Alignment.from_record(record)
++    assert al.confidence is None and Alignment('δ').confidence is None
++    assert Alignment.from_record(al.to_record()).confidence is None
++    assert recognition_fields({})['recognition_confidence'] is None
++    assert recognition_fields({})['recognition_evidence']['scored'] is False
++    assert recognition_fields({'recognition_confidence':0.})['recognition_evidence']['scored'] is False
++    assert transfer_alignment('δx',al).confidence is None
++
++
++def test_region_score_uses_all_window_frames_and_never_the_line_mean():
++    al=Alignment('δ',n_frames=10,confidence=.99,frame_confidences=[.99]*10)
++    slot=rich('δ')['detector']['slots'][0]
++    al.frame_confidences[2]=.2
++    ev=al.recognition_evidence([slot],40)
++    assert ev['regions'][0]['confidence']==.2 and ev['regions'][0]['frames']==[2,5]
++    assert Alignment.from_record(al.to_record()).recognition_evidence([slot],40)==ev
++    legacy=Alignment.from_record(dict(al.to_record(),frame_confidences=None))
++    assert legacy.recognition_evidence([slot],40)['regions']==[]
++    changed=transfer_alignment('δx',al)
++    assert Alignment.from_record(changed.to_record()).recognition_evidence([slot],40)['regions']==[]
++    from scripts.labelfix.clariden.r1_common import transfer_record
++    record=al.to_record();record['spans']=[['δ',1,2,10.,18.]]
++    transferred,changed=transfer_record('δx',record)
++    assert changed and Alignment.from_record(transferred).recognition_evidence([slot],40)['regions']==[]
++
++
++@pytest.mark.parametrize('key',['recognition_evidence','image_width'])
++def test_certification_provenance_and_bounds_are_content_bound(key):
++    rt=rich('α');bound=gate.bind_runtime(rt)
++    if key=='image_width':rt[key]=999
++    else:rt[key]['regions'][0]['confidence']=.8
++    assert gate.bind_runtime(rt)['evidence_sha256']!=bound['evidence_sha256']
++    bound[key]=rt[key]
++    with pytest.raises(ValueError,match='binding mismatch'):gate.bind_runtime(bound)
++
++
++@pytest.mark.parametrize('writer',['m2','l1'])
++def test_real_runtime_builders_preserve_missing_score(tmp_path,monkeypatch,writer):
++    from PIL import Image
++    from greekocr.labelfix import reading,ink
++    from scripts.labelfix import m2_run
++    from scripts.labelfix.clariden import l1_detect,r1_extract
++    raw=reading.LineReading('δ',rich('δ')['detector']['slots'],[])
++    extraction=([],[],[],{},[],{})
++    monkeypatch.setattr(reading,'read_ink',lambda *a,**k:raw)
++    monkeypatch.setattr(ink,'analyse',lambda image:None)
++    monkeypatch.setattr(r1_extract,'extract_line',lambda *a,**k:extraction)
++    monkeypatch.setattr(m2_run,'extract_line',lambda *a,**k:extraction)
++    monkeypatch.setattr(m2_run,'reader_predictions',lambda *a,**k:{})
++    al=Alignment('δ',n_frames=10,strip_width=40)
++    if writer=='m2':
++        rt=m2_run.infer_line('x',Image.new('L',(40,20)),al,None,None,script_class='greek_poly')
++    else:
++        image=tmp_path/'line.png';Image.new('L',(40,20)).save(image)
++        monkeypatch.setattr(l1_detect,'crop_path',lambda *a:image)
++        monkeypatch.setattr(l1_detect,'_STATE',((str(tmp_path),str(tmp_path),'toolkit',False),None))
++        l1_detect.chunk((0,[(dict(id='x',crop=str(image)),al.to_record())]))
++        from scripts.labelfix.clariden.r1_common import rows
++        rt=next(rows(tmp_path/'shard-00000-detector.jsonl.gz'))
++    assert rt['recognition_confidence'] is None
++    assert rt['recognition_evidence']['scored'] is False and rt['recognition_evidence']['regions']==[]
++
++
++def test_all_saved_reviewer_unsafe_releases_hold():
++    path=Path('docs/reviews/astra_program_review_2026-10-06/ASTRA-SC1c3v3_evidence/unsafe_release_witnesses.json')
++    for w in json.loads(path.read_text()):
++        out=overlay(POLICY,w['original'],w['runtime'],w['mode'])
++        assert out['status']=='hold' and out['changes']==[] and 'label' not in out
+--- /dev/null
++++ b/scripts/labelfix/sf6c_measure.py
+@@ -0,0 +1,75 @@
++"""SF6c offline certification replay; frozen SF6b versus current policy."""
++from collections import Counter
++from pathlib import Path
++from types import SimpleNamespace
++import json
++import shutil
++
++from greekocr.labelfix import release_gate as gate
++from scripts.labelfix.clariden import l1_common
++from scripts.labelfix.clariden.r1_common import rows, write_json, write_rows, sha256
++from scripts.labelfix import sf6_measure as sf6
++from scripts.labelfix.sf5_measure import baseline
++
++EV=sf6.DOC/'SF6c_evidence'
++FROZEN=Path('artifacts/labelfix_sf6c/before')
++PRIOR=sf6.DOC/'SF6b_evidence/after'
++
++
++def measure(target=None):
++    original=(sf6.EV,sf6.gate,sf6.common,sf6.BINDING)
++    try:
++        for phase,policy,consumer in [('before',*baseline(FROZEN)),('after',gate,l1_common)]:
++            if target and target!=phase:continue
++            if phase=='before':
++                policy.R=SimpleNamespace(**vars(policy.R))
++                policy.R.__file__=str((FROZEN/'greekocr/labelfix/reading.py').resolve())
++            dest=EV/phase;dest.mkdir(exist_ok=True)
++            for name in ('witness_inputs.jsonl.gz','witness_inputs_receipt.json','census_inputs.jsonl.gz'):
++                if (PRIOR/name).exists():shutil.copyfile(PRIOR/name,dest/name)
++            sf6.EV=dest;sf6.gate=policy;sf6.common=consumer
++            sf6.BINDING=dict(original[3],policy_sha256=policy.policy_binding()['sha256'],policy_binding=policy.policy_binding())
++            sf6.heldout();print(phase,'heldout complete',flush=True)
++            sf6.m2();print(phase,'M2 DEV complete',flush=True)
++            sf6.witnesses();print(phase,'witnesses complete',flush=True)
++    finally:
++        sf6.EV,sf6.gate,sf6.common,sf6.BINDING=original
++    changed=[];checks=[];summary={}
++    for cohort,path in [('heldout','heldout/release_labels.jsonl.gz'),('m2_dev','m2_dev/release_labels.jsonl.gz'),
++                        ('witness','witness_results.jsonl.gz')]:
++        a=list(rows(EV/'before'/path));b=list(rows(EV/'after'/path))
++        assert a==list(rows(PRIOR/path)),('SF6b baseline mismatch',cohort)
++        assert len(a)==len(b)
++        for old,new in zip(a,b):
++            assert (old['id'],old['mode'],old.get('cohort'))==(new['id'],new['mode'],new.get('cohort'))
++            assert old['before']==new['before']
++            if old['checks']!=new['checks']:
++                checks.append(dict(cohort=cohort,id=old['id'],mode=old['mode'],before=old['checks'],after=new['checks']))
++            effective_old={k:v for k,v in old['after'].items() if k!='deletion_checks'}
++            effective_new={k:v for k,v in new['after'].items() if k!='deletion_checks'}
++            if effective_old!=effective_new:
++                assert old['after']['status']!='hold' and new['after']['status']=='hold'
++                changed.append(dict(cohort=cohort,id=old['id'],mode=old['mode'],before=effective_old,after=effective_new))
++        summary[cohort]={phase:{mode:dict(Counter(r['after']['status'] for r in rr if r['mode']==mode))
++                               for mode in gate.MODES} for phase,rr in [('before',a),('after',b)]}
++        if cohort!='witness':
++            assert json.loads((EV/'before'/cohort/'metrics.json').read_text())==json.loads((PRIOR/cohort/'metrics.json').read_text())
++    write_rows(EV/'line_changes.jsonl',changed);write_rows(EV/'check_changes.jsonl',checks)
++    write_json(EV/'comparison.json',dict(policy_before=json.loads((EV/'before_receipt.json').read_text())['policy'],
++        policy_after=gate.policy_binding(),sf6b_baseline_exact=True,newly_hold=changed,changed_checks=len(checks),
++        release_counts=summary,network=False,detector_runs=0,r1_runs=0,ctc_runs=0,locked_ii_records_decoded=0))
++    unsafe_path=Path('docs/reviews/astra_program_review_2026-10-06/ASTRA-SC1c3v3_evidence/unsafe_release_witnesses.json')
++    unsafe=[]
++    binding=dict(sf6.BINDING,policy_sha256=gate.policy_binding()['sha256'])
++    for w in json.loads(unsafe_path.read_text()):
++        out=l1_common.overlay(dict(id='x',label=w['original'],script_class='greek_poly'),w['runtime'],w['mode'],binding)
++        assert out['status']=='hold' and not out['changes'] and 'label' not in out
++        unsafe.append(dict(case=w['case'],mode=w['mode'],overlay=out))
++    write_json(EV/'unsafe_witnesses_after.json',dict(input_sha256=sha256(unsafe_path),cases=unsafe))
++
++
++if __name__=='__main__':
++    import argparse
++    parser=argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--phase',choices=('before','after'))
++    measure(parser.parse_args().phase)
+--- /dev/null
++++ b/scripts/labelfix/sf6c_audit.py
+@@ -0,0 +1,151 @@
++"""Inventory saved runtime/score formats without evaluating locked M2 records."""
++from collections import Counter
++import gzip
++import json
++from pathlib import Path
++import re
++import subprocess
++
++import numpy as np
++from scripts.labelfix.clariden.r1_common import rows, sha256, write_json
++from scripts.labelfix.sf6c_measure import EV
++from scripts.labelfix.sf5_measure import baseline
++from greekocr.labelfix import release_gate as gate
++from scripts.labelfix.clariden import l1_common
++
++
++def score_summary(records,key):
++    counts=Counter();values=[];regional=0;total=0
++    for r in records:
++        total+=1;v=r.get(key)
++        state=('missing' if key not in r else 'null' if v is None else
++               'invalid' if not isinstance(v,(float,int)) or isinstance(v,bool) or not np.isfinite(v) else
++               'zero' if v==0 else 'below_or_at_floor' if v<=.5 else 'above_floor')
++        counts[state]+=1
++        if isinstance(v,(float,int)) and not isinstance(v,bool) and np.isfinite(v):values.append(v)
++        regional+=bool(r.get('recognition_evidence',{}).get('regions'))
++    return dict(records=total,states=dict(counts),regional_scores=regional,
++        quantiles=dict(zip(('min','p01','p05','median','p95','max'),np.quantile(values,[0,.01,.05,.5,.95,1]).tolist())) if values else {})
++
++
++def audit():
++    manifest=list(rows('docs/labelfix/spellcheck/SF3_evidence/m2_dev_manifest.jsonl'))
++    allowed={r['card_id'] for r in manifest}
++    dev_records={r['card_id']:dict(id=r['card_id'],label=r['google'],script_class='greek_poly') for r in manifest}
++    mock_records={r['id']:r for r in rows('artifacts/labelfix_l1e/mock/source.jsonl')}
++    mock_records.update({r['id']:r for r in rows('artifacts/labelfix_l1e/fixture_v4/mock/source.jsonl')})
++    oldgate,oldcommon=baseline(Path('artifacts/labelfix_sf6c/before'))
++    binding=dict(detector='saved',r1_sha256='saved',policy_sha256=gate.policy_binding()['sha256'])
++    def dev_rows(path):
++        # Extract the first id string only; never decode an excluded record.
++        op=gzip.open if path.suffix=='.gz' else open
++        with op(path,'rt') as f:
++            for line in f:
++                match=re.match(r'\{\s*"id"\s*:\s*("(?:[^"\\]|\\.)*")',line)
++                if not match:raise ValueError('id must be first: '+str(path))
++                if json.loads(match[1]) in allowed:yield json.loads(line)
++    paths=subprocess.check_output(['rg','--files','--hidden','.cache','artifacts','docs/labelfix/spellcheck'],text=True).splitlines()
++    inventory=[]
++    for name in sorted(paths):
++        p=Path(name)
++        if 'SF6c_evidence' in name:continue
++        if not (re.search(r'runtime[^/]*\.jsonl(\.gz)?$',name)
++                or re.search(r'/shard-[^/]*-(combined|detector)\.jsonl\.gz$',name)
++                or p.name=='witness_inputs.jsonl.gz'):continue
++        data=dev_rows(p) if '/m2/' in name or '/m2_' in name else rows(p)
++        data=list(data)
++        summary=score_summary((r.get('runtime',r) for r in data),'recognition_confidence')
++        effects=[];statuses={phase:Counter() for phase in ('before','after')}
++        for row in data:
++            rt=row.get('runtime',row);record=row.get('record') or dev_records.get(rt['id']) or mock_records.get(rt['id'])
++            if rt.get('status')=='skipped':continue
++            if record is None:raise ValueError('missing original label: '+rt['id'])
++            modes=(row.get('mode','ENSEMBLE_AB'),) if 'runtime' in row else gate.MODES
++            for mode in modes:
++                a=oldcommon.overlay(record,rt,mode,binding);b=l1_common.overlay(record,rt,mode,binding)
++                statuses['before'][a['status']]+=1;statuses['after'][b['status']]+=1
++                if (a['status'],a.get('label'))!=(b['status'],b.get('label')):
++                    assert a['status']!='hold' and b['status']=='hold'
++                    effects.append(dict(id=rt['id'],mode=mode,before=a['status'],after=b['status']))
++        inventory.append(dict(path=name,sha256=sha256(p),scope='DEV allowlist before decode' if '/m2/' in name or '/m2_' in name else 'all saved records',
++            status_counts={k:dict(v) for k,v in statuses.items()},newly_hold=effects,**summary))
++        print(name,'newly HOLD',len(effects),flush=True)
++    alignments=[]
++    for name in sorted(paths):
++        p=Path(name)
++        if not re.search(r'/align[^/]*\.jsonl(\.gz)?$|/C1_alignments\.jsonl\.gz$',name):continue
++        if 'align_locked' in name:
++            alignments.append(dict(path=name,sha256=sha256(p),scope='locked; not decoded'));continue
++        data=dev_rows(p) if '/m2/' in name else rows(p)
++        alignments.append(dict(path=name,sha256=sha256(p),scope='DEV allowlist before decode' if '/m2/' in name else 'saved alignment metadata',
++            **score_summary((r.get('alignment',r) for r in data),'confidence')))
++    held={r['crop'].split('/docs/',1)[-1] for r in rows('docs/labelfix/spellcheck/R0_evidence/continuity_666.jsonl')}
++    held_scores=[]
++    for r in rows('.cache/labelfix/align_s0.jsonl'):
++        if r['crop'].split('/docs/',1)[-1] in held:held_scores.append(r['alignment'])
++    assert len(held_scores)==666
++    writers={
++        'scripts/labelfix/m2_run.py':'direct Alignment confidence, image width and actual window frame scores; missing stays None',
++        'scripts/labelfix/clariden/l1_detect.py':'active builder from immutable L1 reference; same certification fields as M2',
++        'scripts/labelfix/clariden/l1_infer.py':'copies original fields; missing confidence becomes None with scored false provenance',
++        'scripts/labelfix/clariden/l1e_run.py':'preserves original score/provenance; legacy unknown explicitly scored false',
++        'scripts/labelfix/clariden/l1e_measure.py':'passes only saved metadata scores; absent metadata explicitly unknown',
++        'scripts/labelfix/sf5_measure.py':'overlay recovery retains no recognition confidence; unavailable, never defaulted',
++        'scripts/labelfix/sf6_measure.py':'heldout has no recognition score or B/E coverage; frozen-slot instrument only',
++        'scripts/labelfix/sf4_measure.py':'saved predictions only; no recognition confidence synthesized',
++        'scripts/labelfix/owner_pages_build_combined.py':'complete runtime copied or partial runtime without score; partial stays unavailable',
++        'artifacts/labelfix_l1e/reference/l1_detect.py':'immutable historical builder omits score entirely; safe unavailable',
++    }
++    write_json(EV/'runtime_audit.json',dict(runtime_sources=inventory,alignment_sources=alignments,
++        heldout_alignment_distribution=score_summary(held_scores,'confidence'),
++        reviewer_runtime_distribution=score_summary((r['runtime'] for r in json.loads(Path('docs/reviews/astra_program_review_2026-10-06/ASTRA-SC1c3v3_evidence/unsafe_release_witnesses.json').read_text())),'recognition_confidence'),
++        writer_audit={p:dict(sha256=sha256(p),behavior=v) for p,v in writers.items()},
++        locked_ii_records_decoded=0,network=False,inference_runs=0))
++
++
++def archives():
++    """Check packed runtime snapshots too; never extract or modify an archive."""
++    import hashlib
++    import tarfile
++    receipt=json.loads((EV/'runtime_audit.json').read_text());packed=[]
++    oldgate,oldcommon=baseline(Path('artifacts/labelfix_sf6c/before'))
++    binding=dict(detector='saved',r1_sha256='saved',policy_sha256=gate.policy_binding()['sha256'])
++    for name in subprocess.check_output(['rg','--files','artifacts'],text=True).splitlines():
++        if not name.endswith(('.tar','.tar.gz','.tgz')):continue
++        members=[]
++        with tarfile.open(name,'r:*') as archive:
++            files={m.name:m for m in archive.getmembers() if m.isfile()}
++            originals={}
++            for member,m in files.items():
++                if member.endswith('/source.jsonl'):
++                    for line in archive.extractfile(m).read().decode().splitlines():
++                        r=json.loads(line);originals[r['id']]=r
++            for member,m in files.items():
++                if not re.search(r'(runtime[^/]*\.jsonl(\.gz)?$|shard-[^/]*-(combined|detector)\.jsonl\.gz$)',member):continue
++                data=archive.extractfile(m).read()
++                if member.endswith('.gz'):data=gzip.decompress(data)
++                records=[json.loads(line) for line in data.decode().splitlines() if line.strip()]
++                effects=[]
++                for rt in records:
++                    if rt.get('status')=='skipped':continue
++                    record=originals[rt['id']]
++                    for mode in gate.MODES:
++                        a=oldcommon.overlay(record,rt,mode,binding);b=l1_common.overlay(record,rt,mode,binding)
++                        if (a['status'],a.get('label'))!=(b['status'],b.get('label')):
++                            assert a['status']!='hold' and b['status']=='hold'
++                            effects.append(dict(id=rt['id'],mode=mode))
++                members.append(dict(member=member,decoded_sha256=hashlib.sha256(data).hexdigest(),
++                    newly_hold=effects,**score_summary(records,'recognition_confidence')))
++        packed.append(dict(path=name,sha256=sha256(name),runtime_members=members))
++    receipt['archive_sources']=packed
++    receipt['label_sources']={p:sha256(p) for p in ('docs/labelfix/spellcheck/SF3_evidence/m2_dev_manifest.jsonl',
++        'artifacts/labelfix_l1e/mock/source.jsonl','artifacts/labelfix_l1e/fixture_v4/mock/source.jsonl')}
++    write_json(EV/'runtime_audit.json',receipt)
++
++
++if __name__=='__main__':
++    import argparse
++    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--archives-only',action='store_true')
++    args=parser.parse_args()
++    if not args.archives_only:audit()
++    archives()
+--- /dev/null
++++ b/scripts/labelfix/sf6c_report.py
+@@ -0,0 +1,100 @@
++"""Append SF6c from verified saved replay receipts; preserve SF6/SF6b verbatim."""
++from collections import Counter,defaultdict
++import json
++import re
++
++from greekocr.labelfix import release_gate as gate
++from scripts.labelfix.clariden.r1_common import rows
++from scripts.labelfix.sf6c_measure import EV,FROZEN
++from scripts.labelfix.sf6b_measure import table,arrow,vector
++
++
++def read(p):return json.loads(p.read_text())
++
++
++def report():
++    c=read(EV/'comparison.json');audit=read(EV/'runtime_audit.json')
++    assert c['policy_after']==gate.policy_binding()
++    log=(EV/'tests_after.log').read_text();assert 'FAILED ' not in log
++    passed=int(re.findall(r'(\d+) passed',log)[-1]);errors=int(re.findall(r'(\d+) error',log)[-1]) if re.findall(r'(\d+) error',log) else 0
++    assert '75 passed' in (EV/'reviewer_after.log').read_text()
++    assert '12 failed, 63 passed' in (EV/'reviewer_before.log').read_text()
++    L=['','## SF6c — evidence certification (B01/B02)','',
++       'Before = **SF6b** (`8c5ad361` production sources); after = **SF6c**. Policy id remains `sf6-release-v1`. The SF6 Boolean rule, character inventory, SF5 composer, slot decisions and same-kind capital MOVE exception are unchanged. This section supersedes the original SF6 claim that the old loader never filled a missing score.', '',
++       f'Policy sha **`{c["policy_after"]["sha256"]}`**, previously `{c["policy_before"]["sha256"]}`. The binding now covers the score loader, frame-score provenance and all live M2/Clariden runtime builders, as well as the original gate/consumer sources. [Comparison and source binding](SF6c_evidence/comparison.json).', '',
++       '### Diffs and confidence floor','',
++       '- **B01:** `Alignment.confidence` defaults to `None`; omitted/null scores remain missing through load, save, transfer, M2 and Clariden. Legacy runtime copies explicitly retain `scored: false` with missing/unprovenanced provenance. A genuine **0.0 is never positive**. Recogniser absence requires an explicit finite line score **> 0.5**, plus explicit scored observation of the complete saved target window, also **> 0.5**. A finite line average alone cannot authorize absence.',
++       '- The `ctc-window-score-v1` envelope binds the alignment digest, transcript digest, NFD start/base, image width, target window, valid frame range and score method. Regional confidence is the **minimum** max posterior over **every overlapping frame**, including blanks. New alignments retain actual frame probabilities with their original transcript digest; legacy alignments without them produce **no regional scores**. Object transfers preserve a transferred flag; record transfers are detected by the frame/transcript ownership digest. Transferred spans cannot supply regional observation. The historical shared transfer helper and its old scoring receipt remain unchanged. No saved frame score is invented.',
++       '- M2 inference and cached-detector replay write those fields. `l1_infer`, `l1e_run` and the held-out L1E builder preserve explicit score/provenance or explicitly mark it unavailable. The historical L1 detector builder existed only in the immutable `artifacts/labelfix_l1e/reference/` snapshot: `scripts/labelfix/clariden/l1_detect.py` is the same builder with only confidence, regional evidence and native width added. Historical references/deploy snapshots remain unchanged. R1 extraction records `line_confidence_missing`, rather than converting missing to zero.',
++       '- **B02:** MOVE, ordinary reader A/B/E absence, and recogniser locator/window validation all call `_source_in_window`. Native source spans must be finite, inside the image, and contained in the saved target-letter window. A scored recogniser region must cover the **whole** target window. Padded reader inputs need not have the detector window dimensions. Historical R1 coverage retains the extractor’s explicit native-span check (`window_contract`, known/scored state, recorded empty uncertainty); `out_of_image_span` disqualifies it. Generic finite spans without native bounds provenance remain unavailable. This preserves both saved capital MOVEs without inventing image widths.',
++       '- Recognition score, regional provenance and image width are included in the content-bound runtime envelope. No recogniser/detector/reader decisions, alias handling, independent-signal combinations or whole-line HOLD dispatch change.', '',
++       '**Floor justification.** `0.5` is the existing saved R1 extraction admissibility cutoff, not a threshold fitted to release outcomes. A strict majority posterior on every observed frame is a conservative lower bound for a positive scored observation; zero and values at the floor HOLD. The saved distribution below places all 666 held-out and all 273 DEV line scores above it, while the broader saved C1 cache has 8/91,469 at or below it. Thus the floor does not manufacture a yield change in these cohorts. These are **line averages**, not regional minimum scores or calibrated absence probabilities: the saved evidence cannot calibrate regional accuracy. Missing regional observations HOLD regardless of a high line mean. Provenance and full-window observation, not the floor alone, repair B01.', '']
++    dist=[('held-out matching S0 alignments',audit['heldout_alignment_distribution']),
++          ('M2 DEV runtime',next(r for r in audit['runtime_sources'] if r['path']=='.cache/labelfix/m2/runtime.jsonl')),
++          ('C1 saved alignment cache',next(r for r in audit['alignment_sources'] if 'C1_alignments' in r['path']))]
++    L+=table(['Saved score population','n','min','p01','median','max','at/below 0.5'],[[n,r['records'],*[f'{r["quantiles"][k]:.6f}' for k in ('min','p01','median','max')],r['states'].get('below_or_at_floor',0)] for n,r in dist])
++    L+=['','### Runtime-source audit and newly held lines','',
++        'Every loose runtime/combined/detector-shard and witness-input source on disk was enumerated and hashed; original-label overlays were compared under frozen SF6b and SF6c. DEV filtering occurs **before JSON decoding** for every M2 variant. The locked R0 alignment file was hashed only; locked stratum (ii) decoded/composed **0**. [Per-file audit, distributions, writer paths and status counts](SF6c_evidence/runtime_audit.json).','']
++    L+=table(['Source','Records audited','Score representation','Regional score records','New HOLD line/mode records'],[[r['path'],r['records'],', '.join(f'{k}={v}' for k,v in r['states'].items()),r['regional_scores'],len(r['newly_hold'])] for r in audit['runtime_sources']])
++    L+=['','Nine packed code/measurement/mock archives were also checked without extraction or mutation. Four runtime members (64 records each) in the two mock64 archives all omit confidence and regional scores; SF6c adds zero HOLDs. The other seven archives contain no runtime members. Their complete hashes and member results are in the same audit receipt.','']
++    L+=table(['Archive','Runtime member','n','Missing scores','New HOLD line/mode records'],[[ar['path'],r['member'],r['records'],r['states'].get('missing',0),len(r['newly_hold'])] for ar in audit['archive_sources'] for r in ar['runtime_members']])
++    L+=['','The 40 missing-score records per S7 runtime are already skipped/out of scope. All 168 SF6/SF6b witness runtimes omit the confidence key (56 SF5 + 48 L1A + 64 synthetic quote probes); the held-out SF6 instrument also omits it for all 666 lines. The five local Clariden mock detector/combined sources each omit it for all 64 records. No observed production score is silently reclassified as zero. The reviewer fixtures separately retain explicit missing/default-zero cases.', '',
++        f'**New HOLDs:** held-out 0; M2 DEV 0; SF5/L1A/quote witnesses 0; all other audited local runtime sources {sum(len(r["newly_hold"]) for r in audit["runtime_sources"])}. The main replay changes {c["changed_checks"]} M2 line/mode check records on 11 unique lines: recogniser absence becomes unavailable because regional scoring was never saved. Every affected line was already HOLD. No mark or release outcome changes. [Exact check changes](SF6c_evidence/check_changes.jsonl), [new-HOLD list](SF6c_evidence/line_changes.jsonl).','']
++    changes=defaultdict(list)
++    for r in rows(EV/'check_changes.jsonl'):changes[r['id']].append(r['mode'])
++    L+=table(['Already-held DEV line','Modes with recogniser signal revoked'],[[k,', '.join(v)] for k,v in changes.items()])
++    L+=['','### Held-out 666 — SF6b → SF6c','']
++    a=read(EV/'before/heldout/metrics.json');b=read(EV/'after/heldout/metrics.json');rr=[]
++    for m in gate.MODES:
++        x=a['marks']['after'][m];y=b['marks']['after'][m]
++        rr.append([m,'mark',*[arrow(x[k],y[k]) for k in ('corrected','wrong','missed','HOLD','new','lines_held')]])
++        rr.append([m,'elision kept/deleted/added',arrow('/'.join(str(a['elision']['after'][m][k]) for k in ('kept','deleted','added')),'/'.join(str(b['elision']['after'][m][k]) for k in ('kept','deleted','added'))),'—','—','—','—','—'])
++        rr.append([m,'raw deleted mark/apostrophe/quote/keraia/other',arrow(vector(a['deletions'][m]['after']),vector(b['deletions'][m]['after'])),'—','—','—','—','—'])
++    L+=table(['Mode','Row','Corrected /80, K/D/A or raw deleted','Wrong','Missed','HOLD errors','New','Instrument lines held /666'],rr)
++    L+=['','This remains the **incomplete local frozen-slot instrument**, not full-runtime recomposition. It has no saved B/E extraction coverage, no recogniser score and no positive absence signals. The original 81,700 slot/mode records stay identical. The 11 AB corrected marks are an instrument result; actual AB released corrected **lines** remain 6. [Before](SF6c_evidence/before/heldout/metrics.json), [after](SF6c_evidence/after/heldout/metrics.json).','',
++        '### M2 DEV 273 — SF6b → SF6c','']
++    da=read(EV/'before/m2_dev/metrics.json');db=read(EV/'after/m2_dev/metrics.json');rr=[]
++    for m in gate.MODES:
++        x=da['marks']['after']['modes'][m];y=db['marks']['after']['modes'][m]
++        rr.append([m,'mark',*[arrow(x['errors'].get(k,0),y['errors'].get(k,0)) for k in ('corrected','wrong','missed','HOLD')],arrow(x['accepted_changed_slots'],y['accepted_changed_slots']),arrow(x['lines_with_HOLD'],y['lines_with_HOLD'])])
++        rr.append([m,'elision','UNKNOWN → UNKNOWN','—','—','—','—','—'])
++        rr.append([m,'raw deleted mark/apostrophe/quote/keraia/other',arrow(vector(da['deletions'][m]['after']),vector(db['deletions'][m]['after'])),'—','—','—','—','—'])
++    L+=table(['Mode','Row','Corrected /43 or raw deleted','Wrong','Missed','HOLD errors','Changed control slots','Instrument lines held /273'],rr)
++    L+=['','B/E remain missing; no reader is copied into another arm. DEV punctuation truth remains UNKNOWN. [Before](SF6c_evidence/before/m2_dev/metrics.json), [after](SF6c_evidence/after/m2_dev/metrics.json).','',
++        'Actual whole-line status counts (corrected/unchanged/HOLD):','']
++    L+=table(['Cohort','Mode','SF6b → SF6c'],[[pool,m,arrow('/'.join(str(x['release_counts']['after'][m].get(k,0)) for k in ('corrected','unchanged','hold')),'/'.join(str(y['release_counts']['after'][m].get(k,0)) for k in ('corrected','unchanged','hold')))] for pool,x,y in [('held-out',a,b),('M2 DEV',da,db)] for m in gate.MODES])
++    L+=['','### Witnesses — SF6b → SF6c','']
++    wa=list(rows(EV/'before/witness_results.jsonl.gz'));wb=list(rows(EV/'after/witness_results.jsonl.gz'));rr=[]
++    for cohort in ('sf5','l1a','quote_probe'):
++        for mode in gate.MODES:
++            old=[r for r in wa if r['cohort']==cohort and r['mode']==mode];new=[r for r in wb if r['cohort']==cohort and r['mode']==mode]
++            if not old:continue
++            def statuses(rs):return '/'.join(str(sum(r['after']['status']==k for r in rs)) for k in ('corrected','unchanged','hold'))
++            rr.append([cohort,mode,len(old),arrow(statuses(old),statuses(new))])
++    L+=table(['Witness cohort','Mode','n','Corrected/unchanged/HOLD: SF6b → SF6c'],rr)
++    L+=['','Deletion-related HOLD lines by class (classes may overlap; unchanged across SF6b → SF6c):','']
++    wma=read(EV/'before/witness_metrics.json');wmb=read(EV/'after/witness_metrics.json');rr=[]
++    pools=[('held-out',a['deletions'],b['deletions']),('M2 DEV',da['deletions'],db['deletions'])]
++    pools.extend((cohort,wma['cohorts'][cohort],wmb['cohorts'][cohort]) for cohort in ('sf5','l1a','quote_probe'))
++    for pool,old,new in pools:
++        for mode in gate.MODES:
++            if pool in ('sf5','l1a') and mode!='ENSEMBLE_AB':continue
++            rr.append([pool,mode,arrow(vector(old[mode]['all_held']),vector(new[mode]['all_held']))])
++    L+=table(['Cohort','Mode','mark/apostrophe/quote/keraia/other HOLD lines'],rr)
++    L+=['','Both saved capital witnesses still release the exact SF6b labels with one `operation=MOVE`, no absence signals. Mismatched kind, unnamed reader, extra deletion and invalid-location controls HOLD. The keraia witness remains HOLD and quote probes remain 64/64 HOLD. Raw spacing-sign removals remain 2 per SF5/L1A cohort, all MOVEs; true released deletions remain zero. Punctuation-deletion HOLD counts by class are unchanged. Census witnesses remain pending: the requested L1R2 report/census is absent on disk.', '',
++        'All **16/16** saved reviewer JSON cases now HOLD: the 12 formerly unsafe releases (3 witness paths × 4 modes) plus 4 already-held missing-key controls. [Inputs retained read-only](../../reviews/astra_program_review_2026-10-06/ASTRA-SC1c3v3_evidence/unsafe_release_witnesses.json), [after overlays](SF6c_evidence/unsafe_witnesses_after.json).','',
++        '### Tests, scope and reproduction','',
++        'The reviewer’s 75 cases are now `tests/labelfix/test_sf6_reviewer.py`: frozen SF6b reproduces **12 failed / 63 passed**; SF6c passes **75/75**. Its only harness adaptation changes the obsolete loader-default assertion from `0.0` to `None`; every release/HOLD assertion is preserved. The shared positive synthetic fixture now explicitly supplies image width and actual synthetic regional frame scores; production saved evidence is untouched. Every existing test assertion is unchanged. An additional 95 certification cases cover missing/zero/floor/invalid scores, regional provenance, all reader arms, bounds, transfers, both real runtime writers under mocked inference, and the saved unsafe JSON.', '',
++        f'Full labelfix: **{passed} passed, {errors} environment setup error, 0 assertion failures**. Baseline was **1260 passed, 1 identical setup error**. The unchanged `test_capture.py::test_server_appends_each_decision_and_serves_static` cannot bind a loopback socket in this sandbox (`PermissionError: [Errno 1] Operation not permitted`). No skip, deselection, mock or test weakening is used for that test. **All-green acceptance remains unmet in this environment**. [Baseline log](SF6c_evidence/tests_before.log), [full after log](SF6c_evidence/tests_after.log), [reviewer before](SF6c_evidence/reviewer_before.log), [reviewer after](SF6c_evidence/reviewer_after.log).', '',
++        'Saved evidence only; network OFF; detector/R1/CTC inference runs 0; no `.git` writes by this run; other worktrees read-only. This checkout’s HEAD, branch and index remain unchanged. Concurrent activity changed the separate `spellcheck-s8` worktree’s shared Git metadata; those differences are recorded separately and were not restored or edited. [Git custody differences](SF6c_evidence/git_metadata_changes.json). Before replay matches every saved SF6b row and metric. [Scope/custody verification](SF6c_evidence/verification.json).','',
++        '```sh','export PYTHONPATH="$PWD" PYTHONDONTWRITEBYTECODE=1','PY=/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.venv/bin/python',
++        '$PY scripts/labelfix/sf6c_measure.py','$PY scripts/labelfix/sf6c_audit.py',
++        '$PY -m pytest tests/labelfix/test_sf6_reviewer.py -q -p no:cacheprovider > docs/labelfix/spellcheck/SF6c_evidence/reviewer_after.log 2>&1',
++        '$PY -m pytest tests/labelfix -q -p no:cacheprovider > docs/labelfix/spellcheck/SF6c_evidence/tests_after.log 2>&1',
++        '$PY scripts/labelfix/sf6c_report.py','$PY scripts/labelfix/sf6c_verify.py','```','',
++        f'SF6c RESULT: B01 fixed yes (floor 0.5); B02 fixed yes; reviewer tests 75/75; held-out AB corrected {b["marks"]["after"]["ENSEMBLE_AB"]["corrected"]}, wrong {b["marks"]["after"]["ENSEMBLE_AB"]["wrong"]}; tests {passed} passed; policy sha {c["policy_after"]["sha256"]}']
++    path=EV.parent/'SF6_REPORT.md';prefix=(FROZEN/'docs/labelfix/spellcheck/SF6_REPORT.md').read_text()
++    path.write_text(prefix.rstrip()+'\n'+'\n'.join(L)+'\n')
++
++
++if __name__=='__main__':report()
+--- /dev/null
++++ b/scripts/labelfix/sf6c_verify.py
+@@ -0,0 +1,119 @@
++"""Verify SF6c source scope, saved custody, fixed witnesses and report offline."""
++import ast
++import json
++from pathlib import Path
++
++from greekocr.labelfix import release_gate as gate
++from scripts.labelfix.clariden.r1_common import rows,sha256,write_json
++from scripts.labelfix.sf6_verify import git_snapshot
++from scripts.labelfix.sf6c_measure import EV,FROZEN,PRIOR
++
++
++def funcs(path):
++    return {n.name:ast.dump(n,include_attributes=False) for n in ast.parse(path.read_text()).body
++            if isinstance(n,(ast.FunctionDef,ast.ClassDef))}
++
++
++def verify():
++    initial=json.loads((EV/'before_receipt.json').read_text())
++    def check_git():
++        current=git_snapshot()
++        changes=[dict(path=k,before=initial['git'].get(k),after=current.get(k))
++                 for k in sorted(initial['git'].keys()|current.keys()) if initial['git'].get(k)!=current.get(k)]
++        # The common Git directory also contains independently active worktrees.
++        # Do not restore, edit, or attribute their concurrent commits to SF6c.
++        assert all('/worktrees/greek-ocr-toolkit-spellcheck-s8/' in r['path']
++                   or r['path'].endswith(('/refs/heads/opus/spellcheck-s8','/logs/refs/heads/opus/spellcheck-s8'))
++                   for r in changes),changes
++        write_json(EV/'git_metadata_changes.json',changes)
++        return changes
++    check_git()
++    scope={}
++    allowed={
++        'greekocr/labelfix/release_gate.py':{'policy_binding','_source_in_window','_recogniser_scored','deletion_guard','bind_runtime'},
++        'greekocr/labelfix/ctc_align.py':{'recognition_fields','Alignment','Recognizer'},
++        'scripts/labelfix/m2_run.py':{'infer_line','replay_detector'},
++        'scripts/labelfix/clariden/l1_infer.py':{'run'},
++        'scripts/labelfix/clariden/l1e_run.py':{'infer'},
++        'scripts/labelfix/clariden/l1e_measure.py':{'saved_runtime'},
++        'scripts/labelfix/clariden/r1_extract.py':{'extract_line'},
++        'tests/labelfix/test_sf6.py':{'rich'},
++    }
++    for name,expected in allowed.items():
++        a,b=funcs(FROZEN/name),funcs(Path(name))
++        changed={k for k in a.keys()|b.keys() if a.get(k)!=b.get(k)}
++        assert changed==expected,(name,changed,expected)
++        scope[name]=sorted(changed)
++    for name in initial['policy']['sources']:
++        if name=='greekocr/labelfix/release_gate.py':continue
++        assert sha256(name)==initial['policy']['sources'][name],name
++    assert sha256('scripts/labelfix/clariden/r1_common.py')==sha256(FROZEN/'scripts/labelfix/clariden/r1_common.py')
++    old=ast.parse(Path('artifacts/labelfix_l1e/reference/l1_detect.py').read_text())
++    new=ast.parse(Path('scripts/labelfix/clariden/l1_detect.py').read_text())
++    for node in ast.walk(new):
++        if isinstance(node,ast.Call):
++            node.keywords=[k for k in node.keywords if k.arg not in ('recognition_confidence','recognition_evidence','image_width')]
++    assert ast.dump(old,include_attributes=False)==ast.dump(new,include_attributes=False)
++    original=funcs(Path('docs/reviews/astra_program_review_2026-10-06/ASTRA-SC1c3v3_evidence/test_sf6_reviewer.py'))
++    imported=funcs(Path('tests/labelfix/test_sf6_reviewer.py'))
++    assert original.keys()==imported.keys()
++    assert all(imported[n]==v for n,v in original.items() if n!='legacy_unscored_punctuation')
++    assert gate.POLICY=='sf6-release-v1' and gate.RECOGNISER_ABSENCE_FLOOR==.5
++    comparison=json.loads((EV/'comparison.json').read_text())
++    assert comparison['policy_after']==gate.policy_binding()
++    assert comparison['policy_before']==initial['policy']
++    assert comparison['newly_hold']==[] and comparison['changed_checks']==28
++    for phase in ('before','after'):
++        for cohort in ('heldout','m2_dev'):
++            root=EV/phase/cohort;receipt=json.loads((root/'receipt.json').read_text())
++            for name,digest in receipt['inputs'].items():assert sha256(name)==digest,name
++            for name,digest in receipt['outputs'].items():assert sha256(root/name)==digest,name
++            if phase=='after':assert receipt['policy']==gate.policy_binding()
++    for cohort,path in [('heldout','heldout/release_labels.jsonl.gz'),('m2_dev','m2_dev/release_labels.jsonl.gz'),('witness','witness_results.jsonl.gz')]:
++        before=list(rows(EV/'before'/path));after=list(rows(EV/'after'/path))
++        assert before==list(rows(PRIOR/path))
++        assert len(before)==len(after)
++        for a,b in zip(before,after):
++            assert (a['after']['status'],a['after']['label'])==(b['after']['status'],b['after']['label'])
++    witnesses=list(rows(EV/'after/witness_results.jsonl.gz'))
++    for r in witnesses:
++        if r['cohort']=='quote_probe':assert r['after']['status']=='hold'
++        if r['id'] in ('a963b33d02c23d4127f5ec26-p000012-l0029','32aae9fec147d3b483deb96e-p000060-l0057'):
++            assert r['after']['status']=='corrected' and r['checks'][0]['operation']=='MOVE'
++    unsafe=json.loads((EV/'unsafe_witnesses_after.json').read_text())
++    assert unsafe['input_sha256']==sha256('docs/reviews/astra_program_review_2026-10-06/ASTRA-SC1c3v3_evidence/unsafe_release_witnesses.json')
++    assert len(unsafe['cases'])==16 and all(w['overlay']['status']=='hold' for w in unsafe['cases'])
++    audit=json.loads((EV/'runtime_audit.json').read_text())
++    for row in audit['runtime_sources']+audit['alignment_sources']:assert sha256(row['path'])==row['sha256']
++    for name,row in audit['writer_audit'].items():assert sha256(name)==row['sha256']
++    for name,digest in audit['label_sources'].items():assert sha256(name)==digest
++    for ar in audit['archive_sources']:
++        assert sha256(ar['path'])==ar['sha256']
++        assert all(not r['newly_hold'] for r in ar['runtime_members'])
++    assert all(not r['newly_hold'] for r in audit['runtime_sources'])
++    assert '75 passed' in (EV/'reviewer_after.log').read_text()
++    log=(EV/'tests_after.log').read_text();assert 'FAILED ' not in log and '1430 passed, 1 error' in log
++    assert 'ERROR tests/labelfix/test_capture.py::test_server_appends_each_decision_and_serves_static' in log
++    prefix=(FROZEN/'docs/labelfix/spellcheck/SF6_REPORT.md').read_bytes()
++    report=(EV.parent/'SF6_REPORT.md').read_bytes();assert report.startswith(prefix)
++    assert report.decode().splitlines()[-1].endswith('policy sha '+gate.policy_binding()['sha256'])
++    # Keep a reviewable patch including newly added live sources and tests.
++    import subprocess
++    tracked=subprocess.check_output(['git','diff','--no-ext-diff','--','greekocr/labelfix','scripts/labelfix','tests/labelfix'],env={**__import__('os').environ,'GIT_OPTIONAL_LOCKS':'0'})
++    import difflib
++    added=''
++    for name in ('scripts/labelfix/clariden/l1_detect.py','tests/labelfix/test_sf6_reviewer.py','tests/labelfix/test_sf6c.py',
++                 'scripts/labelfix/sf6c_measure.py','scripts/labelfix/sf6c_audit.py','scripts/labelfix/sf6c_report.py','scripts/labelfix/sf6c_verify.py'):
++        added+=''.join(difflib.unified_diff([],Path(name).read_text().splitlines(keepends=True),fromfile='/dev/null',tofile='b/'+name))
++    (EV/'production_and_test.diff').write_bytes(tracked+added.encode())
++    shared_git_changes=check_git()
++    write_json(EV/'verification.json',dict(policy=gate.policy_binding(),scope=scope,
++        new_l1_builder_matches_historical_except_certification=True,reviewer_test_assertions_preserved=True,
++        sf6b_prefix_preserved=True,current_worktree_git_metadata_unchanged=True,
++        unrelated_s8_git_changes=shared_git_changes,network=False,inference_runs=0,
++        locked_ii_records_decoded=0,reviewer_tests=75,tests_passed=1430,environment_setup_errors=1,
++        all_green=False,newly_hold=0,unsafe_cases_held=16,
++        evidence_outputs={str(p.relative_to(EV)):sha256(p) for p in EV.rglob('*') if p.is_file() and p.name!='verification.json'}))
++
++
++if __name__=='__main__':verify()

@@ -8,7 +8,7 @@ from PIL import Image,ImageDraw
 from ..shared.contracts import bbox
 from ..shared.geometry import height_proxy,roi
 from ..shared.ink_strokes import measure
-from ..shared.ink_photometry import glyphs,match_glyphs,tones
+from ..shared.ink_photometry import tones
 from ..shared.ink_ownership import analyze
 from ..shared.timing import dump
 from ..round2 import ROOT, get_baseline

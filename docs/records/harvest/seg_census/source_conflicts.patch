@@ -1,0 +1,102 @@
+--- branch/greekocr/harvest/geometry_observations.py
++++ sol-recut/greekocr/harvest/geometry_observations.py
+@@ -79,6 +79,31 @@
+     if digest != PARAMS_SHA:
+         raise ValueError('foreign-ink parameters changed')
+     return digest
++
++
++def prepare_geometry_row(r, structural, ink, labels, ownership):
++    """Established CP2 row validation/quarantine, shared with live observations.
++
++    Only a nonpositive outer envelope is row-local unavailability. Never fix
++    curves or suppress malformed arrays, labels, identities or body guides.
++    """
++    foreign_ink._centre_fit(r)
++    n = r['x1'] - r['x0']
++    curves = {k: np.asarray(r[k], dtype=float) for k in ownership.CURVES}
++    if (not 0 <= r['x0'] < r['x1'] <= ink.shape[1] or
++            any(v.shape != (n,) or not np.isfinite(v).all() for v in curves.values())):
++        raise ValueError('invalid_detector_geometry')
++    delta = curves['bottom'] - curves['top']
++    if np.any(delta <= 0):
++        if not structural.get('line_indices'):
++            raise ValueError('missing_invalid_row_line_indices')
++        return None, dict(r, status='invalid_geometry',
++            reason='nonpositive_row_envelope', minimum_bottom_minus_top=float(delta.min()),
++            unavailable_box=[min(r['x0'], r['owned_box'][0]),
++                min(r['owned_box'][1], *(float(v.min()) for v in curves.values())),
++                max(r['x1'], r['owned_box'][2]),
++                max(r['owned_box'][3], *(float(v.max()) for v in curves.values()))])
++    return ownership.prepare_row(r, ink, labels), None
+ 
+ 
+ def load_cached_page(source, cache, expected_sha, *, collector=COLLECTOR):
+@@ -131,26 +156,9 @@
+             raise ValueError('inconsistent_structural_row')
+         if not r['component_ids'] or not set(r['component_ids']) <= present_ids:
+             raise ValueError('missing_native_component')
+-        foreign_ink._centre_fit(r)  # Validate saved curves, never fit/refit.
+-        # Only an inverted/zero envelope is row-local unavailability. All
+-        # identity, native-label, body-guide and array checks remain strict.
+-        n = r['x1'] - r['x0']
+-        curves = {k: np.asarray(r[k], dtype=float) for k in ownership.CURVES}
+-        if (not 0 <= r['x0'] < r['x1'] <= size[0] or
+-                any(v.shape != (n,) or not np.isfinite(v).all() for v in curves.values())):
+-            raise ValueError('invalid_detector_geometry')
+-        delta = curves['bottom'] - curves['top']
+-        if np.any(delta <= 0):
+-            if not structural.get('line_indices'):
+-                raise ValueError('missing_invalid_row_line_indices')
+-            invalid_rows.append(dict(r, status='invalid_geometry',
+-                reason='nonpositive_row_envelope', minimum_bottom_minus_top=float(delta.min()),
+-                unavailable_box=[min(r['x0'], r['owned_box'][0]),
+-                    min(r['owned_box'][1], *(float(v.min()) for v in curves.values())),
+-                    max(r['x1'], r['owned_box'][2]),
+-                    max(r['owned_box'][3], *(float(v.max()) for v in curves.values()))]))
+-            continue
+-        rows.append(ownership.prepare_row(r, ink, labels))
++        prepared,invalid=prepare_geometry_row(r,structural,ink,labels,ownership)
++        if invalid is not None:invalid_rows.append(invalid)
++        else:rows.append(prepared)
+     ink.flags.writeable = labels.flags.writeable = False
+     binding.update(source=str(source), source_sha256=expected_sha, frame=0,
+                    cache_directory=str(cache.resolve()),
+--- branch/greekocr/harvest/row_inclusion.py
++++ sol-recut/greekocr/harvest/row_inclusion.py
+@@ -28,7 +28,7 @@
+     return np.split(columns, np.flatnonzero(np.diff(columns) != 1)+1)
+ 
+ 
+-def supported_rows(page, box):
++def supported_rows(page, box, *, magnitude_loader=None):
+     """Count physical row ids per structural column before choosing an owner.
+ 
+     Complete means zero guide-band cut over a LOCAL occupied run, corroborated
+@@ -44,7 +44,7 @@
+         return dict(status='unavailable', reason='invalid_geometry',
+             invalid_row_ids=invalid, invalid_geometry_count=page.get('invalid_geometry_count', 0),
+             crop_box=list(box), decision_status='unqualified_cp3', merged=None)
+-    band_cut = vendor_magnitude()['band_cut']
++    band_cut = (magnitude_loader or vendor_magnitude)()['band_cut']
+     x0, y0, x1, y1 = box
+     observations = []
+     addresses = {}
+--- branch/pyproject.toml
++++ sol-recut/pyproject.toml
+@@ -19,6 +19,7 @@
+ 
+ [project.scripts]
+ greekocr = "greekocr.cli:main"
++greekocr-filter-lines = "greekocr.harvest.line_pipeline_census:main"
+ 
+ [project.entry-points.docling]
+ glossapi = "greekocr.deploy.docling_plugin.docling_plugin"
+@@ -33,6 +34,7 @@
+ "greekocr.deploy.docling_plugin" = ["recognizer/*.json"]
+ "greekocr.annotate" = ["fixtures/*.json"]
+ "greekocr.verify" = ["sample_distribution.json"]
++"greekocr.harvest" = ["filtering_assets/*.json", "filtering_assets/*.js", "filtering_assets/*.mjs", "filtering_assets/*.py", "filtering_assets/collector/collect_v3/vendor/geometry/*.py"]
+ 
+ [tool.pytest.ini_options]
+ testpaths = ["tests"]

@@ -5,6 +5,7 @@ both image bytes and processor options. An attempted request without a durable
 response is deliberately not retried (its billing outcome may be unknown).
 """
 from __future__ import annotations
+from greekocr.ops.data_root import input_path as _data_input
 
 import argparse
 from collections import Counter, defaultdict
@@ -46,7 +47,7 @@ NUMBER_SELECTIONS = {
 
 
 def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
 
 
 def canonical(value) -> str:

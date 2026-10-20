@@ -1,0 +1,47 @@
+--- Sol-reading/launchers/run_bed.sh
++++ CAPS1/launchers/run_bed.sh
+@@ -2,8 +2,8 @@
+ # run_bed.sh <bed> <reader> : one blind Sol reading run with limit probes, rollout leak scan, mapping and ledger entry.
+ # Stops (exit 8) before the run if weekly used >= 78%. Exit 2 = leak (run void).
+ set -u; BED=$1; RDR=$2
+-S=$(cd "$(dirname "$0")" && pwd); W=~/Projects/greek-ocr-toolkit-sol-reading; D=$W/docs/harvest/sol_reading
+-RD=$S/sol_reading_packs/$BED/$RDR; P=$S/prompts_rendered/${BED}_${RDR}.md; LABEL=SR-$BED-$RDR
++S=/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-sol-recut/docs/harvest/recut_v1/w1_masked/caps1/launchers; W=/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-sol-recut; D=$W/docs/harvest/recut_v1/w1_masked/caps1
++RD=/private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/8014ea5c-bc18-4a66-b4b1-93bd1d0a9cc4/scratchpad/sol_packs/$BED/$RDR; P=$S/prompts_rendered/${BED}_${RDR}.md; LABEL=SR-$BED-$RDR
+ case $RDR in r1) CL="";; *) CL=" (The README mentions cards_reverse.jsonl for reader 2: your cards.jsonl is already in your assigned order; use it as given.)";;esac
+ python3 - "$D/prompts/$BED.md" "$P" "$CL" <<'PY'
+ import sys; t=open(sys.argv[1]).read().replace('{{READER2_CLAUSE}}',sys.argv[3]); open(sys.argv[2],'w').write(t)
+@@ -16,8 +16,8 @@
+ RUN=$("$S/run_read.sh" "$LABEL" "$RD" "$P" medium | tail -1); echo "$RUN"
+ ROLL=$(echo "$RUN" | python3 -c "import json,sys; print(json.loads(sys.stdin.read())['rollout'])")
+ mkdir -p "$D/answers/$BED"; cp "$P" "$D/answers/$BED/$RDR.prompt.md"
+-cd "$W"; /usr/bin/arch -x86_64 /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 -B "$D/tools/scan_rollout.py" "$ROLL" "$RD" > "$D/answers/$BED/$RDR.scan.json"; SC=$?
+-echo "scan rc=$SC $(head -c 300 "$D/answers/$BED/$RDR.scan.json")"
++cd "$W"; /usr/bin/arch -x86_64 /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 -B "$D/tools/scan_rollout.py" "$ROLL" "$RD" > "$D/scan/$BED/$RDR.scan.json"; SC=$?
++echo "scan rc=$SC $(head -c 300 "$D/scan/$BED/$RDR.scan.json")"
+ [ -f "$RD/answers.jsonl" ] && cp "$RD/answers.jsonl" "$D/answers/$BED/$RDR.jsonl"
+ python3 -B "$D/tools/map_answers.py" "$BED" "$RDR" "$D/answers/$BED/$RDR.jsonl"; MC=$?; echo "map rc=$MC"
+ AFTER=$("$S/limit_probe.sh" "after:$BED/$RDR" | tail -1); echo "$AFTER"
+
+--- Sol-reading/launchers/run_read.sh
++++ CAPS1/launchers/run_read.sh
+@@ -4,7 +4,7 @@
+ # Asserts the model from the rollout and prints token usage + wall time; prints <label>_DONE / _FAILED.
+ set -u; LABEL=$1; RD=$2; PROMPT=$3; EFFORT=${4:-medium}; shift 4 2>/dev/null || shift $#
+ IMGS=(); [ "${1:-}" = "--" ] && { shift; for f in "$@"; do IMGS+=(-i "$f"); done; }
+-S=$(cd "$(dirname "$0")" && pwd); LOG="$S/logs/$LABEL.codexlog"; OUT="$S/logs/${LABEL}_final.md"; MODEL=gpt-6.1-sol
++S=/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-sol-recut/docs/harvest/recut_v1/w1_masked/caps1/launchers; LOG="$S/logs/$LABEL.codexlog"; OUT="$S/logs/${LABEL}_final.md"; MODEL=gpt-6.1-sol
+ B=$(date +%s); echo "[$(date '+%H:%M:%S')] $LABEL START effort=$EFFORT dir=$RD images=${#IMGS[@]}"
+ codex exec -m "$MODEL" -c "model_reasoning_effort=$EFFORT" -c approval_policy=never -c project_doc_max_bytes=0 -c features.multi_agent=false \
+   -c features.remote_plugin=false -c features.apps=false -c sandbox_workspace_write.network_access=false -c 'web_search="disabled"' \
+
+--- Sol-reading/launchers/limit_probe.sh
++++ CAPS1/launchers/limit_probe.sh
+@@ -1,6 +1,6 @@
+ #!/usr/bin/env bash
+ # limit_probe.sh <tag>: one-word non-ephemeral gpt-6.1-sol call; prints the rate-limit buckets from its rollout; appends to limit_probe.log
+-S=$(cd "$(dirname "$0")" && pwd); TAG=${1:-probe}; D=$(mktemp -d "$S/probe.XXXX")
++S=/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-sol-recut/docs/harvest/recut_v1/w1_masked/caps1/launchers; TAG=${1:-probe}; D=$(mktemp -d "$S/probe.XXXX")
+ for i in 1 2 3; do
+   LOG="$D/p$i.log"
+   codex exec -m gpt-6.1-sol -c model_reasoning_effort=low -c project_doc_max_bytes=0 -c features.remote_plugin=false -c features.apps=false \

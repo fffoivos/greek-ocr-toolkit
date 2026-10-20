@@ -1,0 +1,79 @@
+%% Canonical graph: ../../B_training_data/c_pipeline/pipeline.mmd
+%% B.c — pipeline 0.3.2; current manifest: segmentation 0.13 (label 0.9-s5), gate/final 0.3, census 0.7.
+%% Current graph: docs/B_training_data/c_pipeline/pipeline.mmd; no execution implied.
+flowchart TD
+    P["Frozen parents and hashes: v2 train/dev/test; W1/W2 unassigned"] --> B["Bind source/book/edition/page/split, raw parent text, crop bytes/SHA and source raster"]
+    META["Page override > book expectations > source policy; reviewed profiles; pinned correction releases; codec v2"] --> I
+    B --> I["Inventory ALL raw rows in durable ledger before filtering"]
+    I --> G{"Content gate 0.3: scripts then raw-text length"}
+    G -->|"Mixed-script word"| D["DROP; preserve reasons and skipped routes"]
+    G -->|"Unexpected script or missing cell dimensions"| H["HOLD; preserve unresolved evidence"]
+    G -->|"Short ordinary line; single-character cell/numeric"| D
+    G -->|"Pass; repairable suspicion retained"| C{"Crop identity bound?"}
+    C -->|"No"| H
+    C -->|"Yes"| O["Segmentation 0.13 / 0.9-s5: verify exact crop SHA; h>w turns 90 degrees clockwise"]
+    O --> SB["S4 branch: <=8 saved chars and aspect <=6; no-main-row abstention defers; positive other-line evidence remains"]
+    SB --> S{"Crop-only other-row gate: complete extra row or >2 whole neighbour words; each whole-word body >=95% visible"}
+    S -->|"DROP"| D
+    S -->|"UNCERTAIN"| H
+    S -->|"PASS"| BOX["S4: ALL-component box; non-small: S3 base-curve box; frozen predictor"]
+    BOX --> L{"Length ratio: chars+1 / expected+1 in 0.30..2.00"}
+    L -->|"DROP"| D
+    L -->|"UNCERTAIN"| H
+    L -->|"KEEP"| PAD{"Padding <=1.5 row-frame heights; native result"}
+    PAD -->|"DROP"| D
+    PAD -->|"UNCERTAIN"| H
+    PAD -->|"KEEP"| R["Schedule every relevant route; empty release scope is default"]
+    R --> OS["Configured excluded correction route: not_applied_out_of_scope; no edits; content repair cannot be excluded"]
+    OS --> M
+    R --> PT["SF7 / polytonic 0.7: orthography-driven, including missing marks"]
+    R --> CY["RU1 / Cyrillic 0.3: historical Russian word-final soft-to-hard sign only"]
+    R --> NU["N1 / numerics 0.3: qualified separator evidence"]
+    R --> DA["Dashes 0.1: tag only"]
+    R --> CR["Content repair 0.2: independent row/text/profile-bound evidence"]
+    PT --> M["Composer 0.3: validate parent/split/crop/text/version/digest; merge raw-coordinate spans"]
+    CY --> M
+    NU --> M
+    DA --> M
+    CR --> M
+    R -->|"No relevant route"| M
+    M -->|"Proposal, missing evidence or conflicting edits"| H
+    M --> V["Re-inventory; new routes; composed candidate coverage; reviewed profiles; NFC/whitespace only"]
+    V -->|"New route; bounded iteration"| R
+    V -->|"Unresolved recheck or instability"| H
+    V --> E{"Split and edition bound?"}
+    E -->|"Unassigned/unresolved"| H
+    E -->|"Yes"| F{"Final eligibility 0.3: shared raw length; cells alnum>1 only for length/shape; content/confidence/codec/CTC/held-out editions"}
+    F -->|"Failure"| D
+    F -->|"Unresolved required steps"| H
+    F -->|"ADMIT candidate"| DU{"Train: exact crop protection, duplicate and conflicting-label checks"}
+    DU -->|"Registered or configured held-out crop; same-label duplicate"| D
+    DU -->|"Conflicting labels"| H
+    DU -->|"Eligible unique train"| AT["admitted_train.jsonl"]
+    DU -->|"Non-train cohort retained"| EV["evaluation_diagnostics.jsonl: all non-train rows including unassigned"]
+    I -.-> EV
+    D --> ALL["All-row decisions.jsonl and admission_records.jsonl; pending correction queues; accounting"]
+    H --> ALL
+    AT --> ALL
+    EV --> ALL
+    ALL --> PUB["Immutable generations/gN-id; atomic current switch; CURRENT.json publication receipt"]
+    PUB --> COMPLETE["Complete requires all phases and zero UNPROCESSED/INFRA_ERROR; HOLD may remain"]
+%% Read native stage as ordered short-circuit rules: a decisive gate/length failure skips later work.
+%% History before SEG10: external heldout_crop_sha256 hook was absent. Current dedup unions configured and observed held-out crops.
+%% History before SEG10: numeric negatives rejected any punctuation. Current numerics 0.3 checks digit/separator/digit adjacency.
+%% Historical s4 band was 0.50..1.50; current 0.30..2.00 adoption is a coordinator decision, not an owner ruling.
+%% PIPE032 excluded routes bypass correction lookup only; in-scope missing evidence still HOLDs.
+%% Historical census04 package is segmentation 0.8/gate 0.2, deployed/test-only, not this build.
+%% Sources read
+%% - greekocr/harvest/line_pipeline.py
+%% - greekocr/harvest/line_pipeline_census.py
+%% - greekocr/harvest/line_pipeline_sources.py
+%% - greekocr/harvest/line_pipeline_native.py
+%% - greekocr/harvest/filtering_assets/crop-tools.py
+%% - greekocr/harvest/filtering_assets/service.mjs
+%% - greekocr/harvest/filtering_assets/segmentation-policy.js
+%% - docs/harvest/line_pipeline/tool_versions.json
+%% - docs/records/harvest/line_pipeline_legacy/README.md
+%% - docs/records/harvest/line_pipeline_legacy/pipeline.mmd
+%% - docs/records/harvest/seg_census/remote_evidence/integration_fixes.diff
+%% - docs/records/harvest/seg_census/receipt.json

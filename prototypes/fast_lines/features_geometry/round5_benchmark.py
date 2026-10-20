@@ -9,7 +9,7 @@ from time import perf_counter
 import cv2,numpy as np
 from .round5_data import rows,load,DEST,ROOT
 from ..stack.pipeline import Stack
-from ..stack.__main__ import signature
+from ..evidence.__main__ import signature
 from ..shared.review import detector_record
 from ..shared.timing import dump
 from ..shared.contracts import bbox
@@ -62,7 +62,7 @@ def render(gray,result,path):
     labels=[]
     for rank,i in enumerate(ordered,1):
         q=active[i];new=q.get('type_slot') is not None or q in result.get('added',[])
-        color=(0,155,0) if new else ((220,60,20) if q['polygon'] in polys else (180,0,180))
+        color=(180,0,180) if q.get('row_partition') else ((0,155,0) if new else ((220,60,20) if q['polygon'] in polys else (180,0,180)))
         draw(q,color,2);a,b,c,d=bbox(q);x=int(a+min(12,(c-a)/4));y=int((b+d)/2)
         labels.append((rank,x,y,color))
     sc=min(1,1700/im.shape[1]);im=cv2.resize(im,None,fx=sc,fy=sc)

@@ -1,0 +1,209 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Label Failure Modes</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; a status strip per class; faults as compact rows with the example in the print's own letters */
+:root{
+  --bg:#f8f6f1; --fg:#1d1b17; --muted:#6b665c; --rule:#d9d3c7; --panel:#fffdf8;
+  --accent:#7a3b1e; --greek:#2c4a6b;
+  --ok:#2f6f3e; --warn:#9a6b11; --bad:#9b2f2f; --none:#8a8378;
+  --display:"Source Serif 4",Georgia,"Times New Roman",serif;
+  --body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;
+  --mono:"IBM Plex Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#17161a; --fg:#ece8df; --muted:#a39d91; --rule:#3a373f; --panel:#1f1e23;
+  --accent:#d9956b; --greek:#8fb0d4; --ok:#6fbf7f; --warn:#d9ad4a; --bad:#e07c7c; --none:#8a8378; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#17161a; --fg:#ece8df; --muted:#a39d91; --rule:#3a373f; --panel:#1f1e23;
+  --accent:#d9956b; --greek:#8fb0d4; --ok:#6fbf7f; --warn:#d9ad4a; --bad:#e07c7c; --none:#8a8378; color-scheme:dark }
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.5;padding-block:28px 64px;padding-inline:clamp(16px,4vw,40px)}
+main{max-width:72rem;margin:0 auto}
+h1{font-family:var(--display);font-weight:600;font-size:clamp(26px,3.4vw,36px);line-height:1.15;margin:0 0 6px;text-wrap:balance}
+.lede{font-family:var(--display);font-size:17px;color:var(--muted);max-width:62ch;margin:0 0 22px}
+.legend{display:flex;flex-wrap:wrap;gap:10px 18px;font-size:13px;color:var(--muted);margin:0 0 26px;padding:10px 0;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
+.legend b{color:var(--fg);font-weight:500}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:999px;border:1px solid currentColor;line-height:1.5;white-space:nowrap}
+.ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)} .none{color:var(--none)}
+section.cls{margin:0 0 30px;padding:18px 20px;background:var(--panel);border:1px solid var(--rule);border-radius:6px}
+section.cls header{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px;margin-bottom:6px}
+section.cls h2{font-family:var(--display);font-weight:600;font-size:22px;margin:0}
+.stats{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.stats b{color:var(--fg);font-weight:500}
+.model{margin:8px 0 12px;font-size:14px;max-width:70ch}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+.wrap{overflow-x:auto}
+th{font-weight:600;text-align:left;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--rule)}
+td{padding:7px 8px;border-bottom:1px solid var(--rule);vertical-align:top;min-width:0}
+tr:last-child td{border-bottom:0}
+td.ex{font-family:var(--display);font-size:15px;color:var(--greek);white-space:nowrap}
+td.ex .arrow{color:var(--muted);font-family:var(--body);font-size:12px;padding:0 4px}
+td.rate{font-variant-numeric:tabular-nums;white-space:nowrap}
+.dir{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.xcut h2{font-size:20px}
+.foot{margin-top:28px;font-size:13px;color:var(--muted);max-width:70ch}
+.foot code{font-family:var(--mono);font-size:12px}
+@media (max-width:520px){ td.ex{white-space:normal} section.cls{padding:14px} }
+</style>
+<main>
+<h1>Google label failure modes by class</h1>
+<p class="lede">What Document AI gets wrong in each training class, as measured on the 17 October quality cards, the E3 edit analysis and the adjudication audits, with the model's own error on that class and what corrects the fault today.</p>
+
+<div class="legend">
+  <span><b>Model CER</b> = E3 full model on v2_test, by class or line type.</span>
+  <span><b>Rate</b> = cards or lines out of 100 carrying the fault, where measured.</span>
+  <span><span class="pill ok">corrected</span> a gate or tool acts on it</span>
+  <span><span class="pill warn">screened</span> admission filters it, nothing corrects</span>
+  <span><span class="pill bad">tagged</span> counted only</span>
+  <span><span class="pill none">unmeasured</span></span>
+</div>
+
+<section class="cls">
+  <header><h2>Polytonic Greek, 1850–1890 print</h2>
+    <div class="stats"><span>model CER <b>1.58%</b>, 78% of all edits</span><span>label mark errors <b>8–13 / 100 lines</b></span><span>coverage vs plan <b>on track</b></span></div></header>
+  <p class="model">Model: marks are 28% of its edits and about half of those are the label's fault, not the model's. Letters on clean crops are right 93–96 of 100.</p>
+  <div class="wrap"><table>
+    <tr><th>Fault</th><th>Example (print → label)</th><th>Rate</th><th>Status</th></tr>
+    <tr><td>Grave written as acute before punctuation</td><td class="ex">χθονὸς<span class="arrow">→</span>χθονός</td><td class="rate">3–4 / 100</td><td><span class="pill ok">corrected</span> reader + gate; Sol word pass 25/26</td></tr>
+    <tr><td>Breathing dropped on a capital</td><td class="ex">Ἡ<span class="arrow">→</span>Η &nbsp; Ῥ<span class="arrow">→</span>'Ρ</td><td class="rate">3–5 / 100</td><td><span class="pill ok">corrected</span> gate rule; R2a capitals slice</td></tr>
+    <tr><td>Iota subscript dropped, or inserted where none is printed</td><td class="ex">ἀπαντᾷ<span class="arrow">→</span>ἀπαντά &nbsp; τῆ<span class="arrow">→</span>τῇ</td><td class="rate">2–3 / 100</td><td><span class="pill warn">screened</span> insertions need the SF7 rule; the sf6 audit found 13/17 release errors here</td></tr>
+    <tr><td>Circumflex written as acute</td><td class="ex">θλῖψις<span class="arrow">→</span>θλίψις</td><td class="rate">1–2 / 100</td><td><span class="pill ok">corrected</span> reader names it</td></tr>
+    <tr><td>Elision and quotation marks normalised</td><td class="ex">’ ᾿ ʼ<span class="arrow">→</span>'</td><td class="rate">frequent</td><td><span class="pill warn">screened</span> never deleted by the gate; codec v2.1 proposal folds them</td></tr>
+  </table></div>
+</section>
+
+<section class="cls">
+  <header><h2>Polytonic Greek, 1900–1982 modern faces</h2>
+    <div class="stats"><span>model CER <b>in the 1.58% pool</b></span><span>label mark errors <b>13–16 / 100 lines</b></span><span>coverage vs plan <b>thin</b>, masking now admits three sources</span></div></header>
+  <p class="model">Model: no separate instrument yet. The label bias is systematic: Google normalises this period toward monotonic, so a trained model learns to write acute for grave.</p>
+  <div class="wrap"><table>
+    <tr><th>Fault</th><th>Example (print → label)</th><th>Rate</th><th>Status</th></tr>
+    <tr><td>Grave written as acute or dropped, mid-sentence</td><td class="ex">φωνὲς<span class="arrow">→</span>φωνές &nbsp; νὰ<span class="arrow">→</span>να</td><td class="rate">9–12 / 100 cards; 87% of final accents print a grave</td><td><span class="pill warn">screened</span> stratum flagged <span class="dir">marks_bias: grave_to_acute</span>; Sol word pass qualified for audits</td></tr>
+    <tr><td>Crasis and coronis flattened</td><td class="ex">θἆταν<span class="arrow">→</span>θάταν &nbsp; σἂ<span class="arrow">→</span>σὰ</td><td class="rate">1–2 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+    <tr><td>Breathing dropped on capitals, or turned into a quote or asterisk</td><td class="ex">῎Αδεια<span class="arrow">→</span>"Αδεια &nbsp; Ἆ<span class="arrow">→</span>*Α</td><td class="rate">3–5 / 100</td><td><span class="pill ok">corrected</span> gate rule for the quote form</td></tr>
+    <tr><td>Misprint silently corrected to the dictionary form</td><td class="ex">λέμβσυς<span class="arrow">→</span>λέμβους &nbsp; στεναγωριόταν<span class="arrow">→</span>στεναχωριόταν</td><td class="rate">1 / 100</td><td><span class="pill none">unmeasured</span> violates the print rule; needs a letter-level reader</td></tr>
+  </table></div>
+</section>
+
+<section class="cls">
+  <header><h2>Capitals and all-caps lines</h2>
+    <div class="stats"><span>model CER <b>4.12%</b>, the weakest line type</span><span>coverage vs plan <b>4%</b>, no rows admitted</span></div></header>
+  <p class="model">Model: display faces, letter-spacing and clipped tall headings; headings were rejected at admission and excluded from masking, so the model has barely seen them.</p>
+  <div class="wrap"><table>
+    <tr><th>Fault</th><th>Example (print → label)</th><th>Rate</th><th>Status</th></tr>
+    <tr><td>Breathings and accents dropped on capitals</td><td class="ex">Ἀ.<span class="arrow">→</span>Α. &nbsp; ΦΙΛΟΣΟΦΙΑ with marks lost</td><td class="rate">3–5 / 100 in prose</td><td><span class="pill ok">corrected</span> gate; R2a trains bare and marked capitals side by side</td></tr>
+    <tr><td>Case error: capital labelled as lowercase, or a lowercase word in capitals</td><td class="ex">Λ<span class="arrow">→</span>λ &nbsp; потужитъ<span class="arrow">→</span>ПОТУЖИТЬ</td><td class="rate">1 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+    <tr><td>Small capitals read as digits or Latin</td><td class="ex">II<span class="arrow">→</span>11 &nbsp; 1353<span class="arrow">→</span>353</td><td class="rate">seen on Latin cards</td><td><span class="pill bad">tagged</span></td></tr>
+    <tr><td>Vertical headings stored rotated 90°</td><td class="ex">20% of Gazette heading rows</td><td class="rate">20 / 100 rows</td><td><span class="pill warn">screened</span> <span class="dir">rotated_crop</span> exclusion</td></tr>
+    <tr><td>Whole stratum never checked</td><td class="ex">—</td><td class="rate">—</td><td><span class="pill none">unmeasured</span> Sol card check running now</td></tr>
+  </table></div>
+</section>
+
+<section class="cls">
+  <header><h2>Numerics and tables</h2>
+    <div class="stats"><span>model CER <b>2.71%</b></span><span>digits right <b>98 / 100</b></span><span>coverage vs plan <b>on track</b> via ELSTAT</span></div></header>
+  <p class="model">Model: digits are clean; the errors are separators and layout, which the label teaches wrongly.</p>
+  <div class="wrap"><table>
+    <tr><th>Fault</th><th>Example (print → label)</th><th>Rate</th><th>Status</th></tr>
+    <tr><td>Raised thousands dot written as a hyphen</td><td class="ex">4·547·331<span class="arrow">→</span>4-547-331</td><td class="rate">2 / 100</td><td><span class="pill warn">screened</span> <span class="dir">separator_ambiguous</span> rows held; text rule rejected (ranges like 0-499)</td></tr>
+    <tr><td>Decimal comma written as a dot, changing the number</td><td class="ex">555,6<span class="arrow">→</span>555.6</td><td class="rate">1 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+    <tr><td>Vertical table numbers stored rotated</td><td class="ex">19.150.446 on its side</td><td class="rate">14 / 100 Gazette cards</td><td><span class="pill warn">screened</span> rotation rule widened to non-space characters</td></tr>
+    <tr><td>Crop spanning two table cells across a column rule</td><td class="ex">—</td><td class="rate">1–2 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+    <tr><td>Superscript footnote numbers dropped or garbled</td><td class="ex">²⁸<span class="arrow">→</span>8 &nbsp; ²⁷<span class="arrow">→</span>**</td><td class="rate">7 cards in 1,400</td><td><span class="pill bad">tagged</span> Google cannot write superscripts</td></tr>
+  </table></div>
+</section>
+
+<section class="cls">
+  <header><h2>Punctuation-heavy lines and dialogue</h2>
+    <div class="stats"><span>model CER <b>3.25%</b></span><span>dotted leaders <b>2.97%</b>, no true leader lines in the test</span><span>coverage vs plan <b>none admitted</b></span></div></header>
+  <p class="model">Model: punctuation errors do not count against letters on the cards, so this class looks better than it trains. The leader tag fires on ellipses, so leaders have no truth stratum at all.</p>
+  <div class="wrap"><table>
+    <tr><th>Fault</th><th>Example (print → label)</th><th>Rate</th><th>Status</th></tr>
+    <tr><td>Em dash dropped, or written as a hyphen or en dash</td><td class="ex">— λέγει<span class="arrow">→</span>λέγει &nbsp; —<span class="arrow">→</span>-</td><td class="rate">20 cards in 1,400, up to 6 / 100 in Serbian and Latin</td><td><span class="pill bad">tagged</span> one-directional, Sol glyph check would settle it</td></tr>
+    <tr><td>Ellipsis shrunk or dropped; ano teleia lost</td><td class="ex">…<span class="arrow">→</span>. &nbsp; ·<span class="arrow">→</span>(nothing)</td><td class="rate">6 / 100 on 1900s print</td><td><span class="pill bad">tagged</span></td></tr>
+    <tr><td>Opening low quotation mark read as a comma</td><td class="ex">„<span class="arrow">→</span>,</td><td class="rate">1 / 100</td><td><span class="pill bad">tagged</span> codec v2 has „</td></tr>
+    <tr><td>Line-end hyphen dropped</td><td class="ex">κα-<span class="arrow">→</span>και &nbsp; Υποσταθ-<span class="arrow">→</span>Υποσταθώ</td><td class="rate">3 / 30 on the Gazette probe</td><td><span class="pill warn">screened</span> the <span class="dir">dropped_line_end_hyphen</span> rule misses some</td></tr>
+    <tr><td>Ink speck read as a full stop or colon</td><td class="ex">(speck)<span class="arrow">→</span>:</td><td class="rate">1–2 / 100</td><td><span class="pill ok">corrected</span> punctuation needs detector and recogniser absence to be deleted; otherwise HOLD</td></tr>
+  </table></div>
+</section>
+
+<section class="cls">
+  <header><h2>Greek with Latin inside (mixed script)</h2>
+    <div class="stats"><span>model CER <b>1.64%</b></span><span>recogniser letter error on disputed words <b>26–39%</b>, its weakest population</span><span>coverage vs plan <b>16%</b></span></div></header>
+  <p class="model">Model: script substitution inside words is its characteristic failure; cross-script swaps are rare in volume (about 120 in 62,000 atoms) but concentrated in this class.</p>
+  <div class="wrap"><table>
+    <tr><th>Fault</th><th>Example (print → label)</th><th>Rate</th><th>Status</th></tr>
+    <tr><td>Latin sigla and page letters labelled with Greek lookalikes</td><td class="ex">H. Merc.<span class="arrow">→</span>Η. Merc. &nbsp; 691 B<span class="arrow">→</span>691 Β</td><td class="rate">5 / 100</td><td><span class="pill warn">screened</span> lookalike admission rule, one source; extension pending</td></tr>
+    <tr><td>Latin words misread</td><td class="ex">eodem<span class="arrow">→</span>codem &nbsp; artieulirten<span class="arrow">→</span>artioulirten</td><td class="rate">2 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+    <tr><td>Margin-column text pulled into the line</td><td class="ex">—</td><td class="rate">1 / 100</td><td><span class="pill warn">screened</span> crop gate</td></tr>
+    <tr><td>Handwritten marginalia transcribed as text</td><td class="ex">(scrawl)<span class="arrow">→</span>cose</td><td class="rate">1 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+  </table></div>
+</section>
+
+<section class="cls">
+  <header><h2>Latin</h2>
+    <div class="stats"><span>model CER <b>1.55%</b></span><span>IA stratum <b>failed</b> at 89 letters / 100</span><span>10,800 rows excluded</span></div></header>
+  <p class="model">Model: adequate on clean roman type. The failed stratum is damaged heavy type, so the fault is the source as much as the label.</p>
+  <div class="wrap"><table>
+    <tr><th>Fault</th><th>Example (print → label)</th><th>Rate</th><th>Status</th></tr>
+    <tr><td>Damaged heavy type misread</td><td class="ex">tunc<span class="arrow">→</span>tune &nbsp; cum<span class="arrow">→</span>cuin</td><td class="rate">5 / 100</td><td><span class="pill warn">screened</span> stratum failed; a cleaner Latin source is the open question</td></tr>
+    <tr><td>Ligatures dropped</td><td class="ex">vitæ<span class="arrow">→</span>vite &nbsp; Phædo<span class="arrow">→</span>Phedo</td><td class="rate">2 / 100</td><td><span class="pill bad">tagged</span> codec has no æ convention yet</td></tr>
+    <tr><td>Small-capital roman numerals as digits</td><td class="ex">II<span class="arrow">→</span>11</td><td class="rate">1 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+  </table></div>
+</section>
+
+<section class="cls">
+  <header><h2>Cyrillic</h2>
+    <div class="stats"><span>model CER <b>1.87%</b></span><span>full-coverage Cyrillic <b>3.19% → 1.63%</b> with codec v2 and the recovered rows</span><span>coverage vs plan <b>30%</b>, Russian out</span></div></header>
+  <p class="model">Model: the recovered rows with pre-reform letters helped most. Serbian passes; Russian pre-1918 print is blocked by one glyph.</p>
+  <div class="wrap"><table>
+    <tr><th>Fault</th><th>Example (print → label)</th><th>Rate</th><th>Status</th></tr>
+    <tr><td>Word-final hard sign flattened to a soft sign</td><td class="ex">Камзолъ<span class="arrow">→</span>Камзоль &nbsp; потужитъ<span class="arrow">→</span>потужить</td><td class="rate">26 of 49 positions; 19 / 100 cards; Google's ъ never wrong</td><td><span class="pill warn">screened</span> stratum excluded; ink-decides repair designed (prior right 96%, ink settles)</td></tr>
+    <tr><td>Hard sign dropped or garbled outright</td><td class="ex">шарфъ<span class="arrow">→</span>шарфы &nbsp; знакъ<span class="arrow">→</span>знако</td><td class="rate">2 cards</td><td><span class="pill bad">tagged</span></td></tr>
+    <tr><td>Italic т (shaped like ш) read as ш or п</td><td class="ex">терялъ<span class="arrow">→</span>шерялъ</td><td class="rate">2 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+    <tr><td>Serbian prosodic accents dropped or substituted</td><td class="ex">inverted breve, macron lost</td><td class="rate">4 of 4 marked lines</td><td><span class="pill bad">tagged</span> rare</td></tr>
+    <tr><td>Letter confusions on damaged type</td><td class="ex">Ђор-<span class="arrow">→</span>Бор- &nbsp; частио<span class="arrow">→</span>частно</td><td class="rate">3 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+  </table></div>
+</section>
+
+<section class="cls">
+  <header><h2>Modern monotonic, scanned (Gazette 1982–1990)</h2>
+    <div class="stats"><span>model CER <b>0.72%</b> on monotonic</span><span>letters on clean crops <b>93–98 / 100</b></span><span>coverage vs plan <b>58%</b>, parliament-heavy</span></div></header>
+  <p class="model">Model: the strongest class, but the training share is dominated by parliament print. The Gazette adds typewriter and running text once masked.</p>
+  <div class="wrap"><table>
+    <tr><th>Fault</th><th>Example (print → label)</th><th>Rate</th><th>Status</th></tr>
+    <tr><td>Neighbouring-line ink inside the crop</td><td class="ex">half-lines above or below</td><td class="rate">27–46 / 100 before masking; 2–4 after</td><td><span class="pill ok">corrected</span> foreign-ink masking qualified on three sources</td></tr>
+    <tr><td>Two or three lines in one crop, label covers one</td><td class="ex">—</td><td class="rate">7 / 100</td><td><span class="pill warn">screened</span> <span class="dir">screen_merged</span> catches 4 of 7</td></tr>
+    <tr><td>Faded typewriter line with invented accents</td><td class="ex">γενν.<span class="arrow">→</span>γεύν.</td><td class="rate">1 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+    <tr><td>Short words misread</td><td class="ex">Ταμείο<span class="arrow">→</span>Ταμεία &nbsp; 7ο<span class="arrow">→</span>Το</td><td class="rate">2–3 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+  </table></div>
+</section>
+
+<section class="cls xcut">
+  <header><h2>Cross-cutting: characters Google cannot write</h2>
+    <div class="stats"><span>cannot be recovered from the label at all</span></div></header>
+  <div class="wrap"><table>
+    <tr><th>Fault</th><th>Example (print → label)</th><th>Rate</th><th>Status</th></tr>
+    <tr><td>Lunate sigma written as σ</td><td class="ex">Πελαϲγίαν<span class="arrow">→</span>Πελασγίαν</td><td class="rate">3 cards in 1,400</td><td><span class="pill bad">tagged</span> codec v2.1 question: convention or own atom</td></tr>
+    <tr><td>Stigma and kai ligatures replaced by letters</td><td class="ex">ϛ<span class="arrow">→</span>ς &nbsp; ϗ, ȣ never emitted</td><td class="rate">1–2 / 100 on 1850s print</td><td><span class="pill bad">tagged</span> measured 11 Oct; synthetic coverage is the only route</td></tr>
+    <tr><td>Decorative glyph variants</td><td class="ex">italic ϖ<span class="arrow">→</span>ω</td><td class="rate">1 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+    <tr><td>Superscripts of any kind</td><td class="ex">ⁿ<span class="arrow">→</span>" &nbsp; 285a<span class="arrow">→</span>2852</td><td class="rate">7 cards in 1,400</td><td><span class="pill bad">tagged</span> label rule needed, then a detector class</td></tr>
+  </table></div>
+</section>
+
+<section class="cls xcut">
+  <header><h2>Cross-cutting: crop and label geometry</h2>
+    <div class="stats"><span>lines with a length mismatch of 3+ atoms: <b>2.8%</b> of the test, <b>44%</b> of all edits</span></div></header>
+  <div class="wrap"><table>
+    <tr><th>Fault</th><th>Where</th><th>Rate</th><th>Status</th></tr>
+    <tr><td>Box fragments and merged lines from Document AI</td><td>Vouli and dictionary waves worst, 10% of their lines</td><td class="rate">2.8% of lines</td><td><span class="pill warn">screened</span> merged-line and rotation screens; fragments inside a line still open</td></tr>
+    <tr><td>Printed rows with no Google box at all</td><td>all scanned sources</td><td class="rate">19% of rows</td><td><span class="pill none">unmeasured</span> as training loss; detector-based cutting was the planned repair</td></tr>
+    <tr><td>Clipped edges: final ν, line-end comma or hyphen cut</td><td>tight page crops</td><td class="rate">1–4 / 100</td><td><span class="pill warn">screened</span> crop gate; padding at cut time would release ~10% of held lines</td></tr>
+    <tr><td>Show-through read as text</td><td>thin paper</td><td class="rate">1 / 100</td><td><span class="pill bad">tagged</span></td></tr>
+  </table></div>
+</section>
+
+<p class="foot">Sources: E3 results (16 Oct), the 17 October C1 quality cards (14 strata, 100 cards each) and masked-card checks, the Russian hard-sign adjudication, the sf6 release audit, the R0 recogniser audit, the Sol grave pass on NLG 1900s print, and the Document AI rare-glyph measurement of 11 October. Rates are per 100 cards unless stated; an example shows the printed form on the left and Google's label on the right.</p>
+</main>
+
+</body></html>

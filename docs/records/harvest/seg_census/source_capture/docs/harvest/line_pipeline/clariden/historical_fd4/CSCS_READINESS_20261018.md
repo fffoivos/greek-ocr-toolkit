@@ -1,0 +1,30 @@
+# CSCS filtering readiness — 2026-10-18
+
+**Performance requalification in progress; full diagnostic launch temporarily held for CS8. The full census and training have not been launched.** The larger 768-row probe exposed one empty-support oblique-rule refit. Its narrow adapter fix and queue tuning are under native requalification; the previous 192-row results below remain historical evidence. See [the current Astra review](ASTRA_CSCS_REVIEW_20261018.md). Astra has reviewed the source repairs; its final verdict is in [the independent review](ASTRA_CSCS_REVIEW_20261018.md).
+
+The five frozen parents contain **592,466 rows**: original-v2 train 214,436; dev 13,522; test 44,029; W1 101,098; W2 219,381. Worker preparation verified all five exact parent hashes, all **271,987 original crop bindings**, and all **4,130 new-data source pages**, with zero missing assets. Original crops are used; source pages reconstruct frozen new-data crops in memory with strict byte hashes. [Full input receipt](full-input-binding-01.json)
+
+These are **raw input records for filtering**, not the final training population. Removing the 57,551 original dev/test records leaves 535,915 raw non-evaluation candidates; new-data split assignment, filtering and deduplication are still required. The E3 model used 207,851 real training rows after codec processing, and the data plan specifies a scaling point of approximately 420,000 unique usable real rows. Thus the roughly 400k training scale and this 592,466-record diagnostic inventory are different denominators. [E3 counts](/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/docs/ocr_program_2026-10-06/E3_RESULTS.md:6) · [Scaling plan](/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/docs/ocr_program_2026-10-06/DATA_PLAN_v2_20261016.md:74)
+
+Pipeline/census version **0.3** uses segmentation **0.5 unchanged**. All original filtering findings and the deployment repairs are recorded by Astra. Repairs include bounded deterministic concurrency, complete cleanup, validation before cache persistence, loaded runtime and executable bindings, exact original crop mapping/PNG codec, reuse of the existing inverted-envelope quarantine, and exclusion of one elapsed-time diagnostic from scientific comparisons. Local regression verification: **221 tests**, including the pipeline and existing CP2/CP3/CP4c geometry tests. The worker passed its 96 pipeline tests, exact replay of 888 saved verdict/reason pairs and 184 context reconciliations. Frozen Rust predictions matched 888 rows with maximum absolute error `1.4210854715202004e-13`.
+
+The fresh benchmark selects 64 rows by deterministic SHA priority from each of original-v2 train, W1 and W2, rather than taking their prefixes. Each worker count measured all 192 rows without cache reuse, unavailable measurements, infrastructure errors or cleanup errors: **768 fresh native attempts** in total. Ordered scientific results match: 145 KEEP, 9 DROP, 38 UNCERTAIN. These are segmentation results on this sample, not training admissions or corpus rejection estimates. Equality excludes only the run fingerprint and `segmentation.result.frame.orientation.evidence.seconds`; full original records retain both. [Qualification receipt](qualification-08.json)
+
+| Native workers | Filtering/export invocation | Gain versus serial |
+|---:|---:|---:|
+| 1 | 44.36 s | 1.00x |
+| 4 | 22.08 s | 2.01x |
+| 8 | 18.21 s | 2.44x |
+| 16 | 13.21 s | 3.36x |
+
+Select **16 workers**, measured **3.36x** faster than serial on CSCS. The timing boundary includes the census invocation, validation and exports; shared sample selection, Slurm queue/startup and initial preparation are outside it. This is not a full-population runtime forecast or a comparison with Mac execution.
+
+The formerly failing native witness now measures KEEP. All 191 previously measurable verdict/reason pairs remain unchanged; unrelated invalid context envelopes retain their IDs/counts, while affected target/neighbour geometry remains unavailable under the existing rule. No detector, font fit or threshold was retuned. [Repair witness](geometry-repair-witness.json)
+
+The full configuration includes the existing RU1 and N1 released overlays and SF7 candidate-pre-audit proposals. Sparse omissions remain unresolved, and candidates cannot silently qualify training rows. **Canonical editions, new-data split assignments, book/page orthography where source policy is insufficient, complete applicable corrective coverage and the SF7 release audit remain training-admission evidence tasks.** The diagnostic census records those holds and produces pending queues; asset/runtime readiness does not certify a corrected training release.
+
+The prepared full-run source manifest is `fd4d5e20283b4f1b55910872a17e36dd2f601d99b13111d92305ddc141d7d04a`. The selected configuration SHA is `f74c13faad74c1ce829e0e1515de711e6d60dbf9469b773265b83d56ef1f2e5b`. Parent identities and the original crop metadata are preserved when rebinding to this final source bundle; its qualified and prepared native runtime manifests are identical. [Configuration](full-run-config.json) · [Bindings](full-run-config-binding.json)
+
+The exact **one-node, account a0140, normal partition, 16 requested task CPUs, 12-hour** command passed `sbatch --test-only`; live partition limits are 12 hours for normal and 90 minutes for debug. The scheduler grants the whole node (288 CPUs/four GPUs); only the stated native CPU workers are used. Short preparation/qualification jobs ran in debug. [Submission plan](full-run-plan.json) · [Slurm terminal receipts](final-slurm-accounting.txt)
+
+[Prepared launch script](launch_full_census.sh) is written but **not executed**. Repeating the same bound census invocation resumes its ledger; explicit retry flags are available for known infrastructure/availability repairs. A changed source, runtime, parent, correction or metadata binding refuses stale resume and requires a new ledger. All old attempts and their failure receipts are retained.

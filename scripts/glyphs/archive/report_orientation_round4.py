@@ -105,7 +105,7 @@ def main():
         shutil.copyfile(OUT/f'{key}.orientation.jpg',OUT/'cases'/f'orientation-{key}.jpg')
     table_rows=[]
     old_accept=read(OLD/'acceptance/summary.json')
-    for path in sorted((ROOT/'docs/tables/annotations').glob('*.json')):
+    for path in sorted((ROOT/'docs/records/tables/annotations').glob('*.json')):
         ann=read(path);key=path.stem
         image=Image.open(ROOT/'.astra/pages'/f'{key}.png')
         records=read(OUT/f'{key}.words.json')['words']
@@ -140,9 +140,9 @@ def main():
         artifact_audit='../../.astra/out/orientation-artifact-audit.json',preserved_part2_acceptance_receipts=preserved_receipts,
         rotated_outputs=len(rotated),pipeline=pipeline,compatibility_preserved=all(r['lines_exact'] and r['checks_exact'] and r['compatibility_cells_exact'] for r in rows),
         input_scope='54 supplied development PNGs and fixed research fixtures; no held-out pages',
-        research_source='.astra/orientation_research/REPORT.md (requested docs/research/ORIENTATION_20261009.md absent)',
+        research_source='.astra/orientation_research/REPORT.md (requested docs/records/research/ORIENTATION_20261009.md absent)',
         implementation={str(p.relative_to(ROOT)):sha(p) for p in [ROOT/'greekocr/glyphs/orientation.py',ROOT/'greekocr/glyphs/oriented_page.py',ROOT/'greekocr/deploy/docling_plugin/orientation.py',ROOT/'greekocr/deploy/docling_plugin/model.py']})
-    target=ROOT/'docs/reviews/PAGE_LINES_ROUND4_ORIENTATION_20261009.json'
+    target=ROOT/'docs/records/reviews/PAGE_LINES_ROUND4_ORIENTATION_20261009.json'
     target.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
     lines=['# Page lines round 4, part 3: orientation — 9 October 2026','',
       '## Case 35: the real sideways table','',
@@ -155,7 +155,7 @@ def main():
       '| Table | Actual Heron → oriented OCR → adapted Accurate V1 → reading order: SUCCESS, 8×15, `rot_90`. Image and tokens rotate together. | Adapter works; real structure not certified |','',
       f'[Current case image](../../.astra/out/cases/{casepath.name}) · [actual pipeline receipt](../../.astra/out/orientation-acceptance/{realkey}.pipeline.json) · [document](../../.astra/out/orientation-acceptance/{realkey}.document.json)','',
       '## Research acceptance gate','',
-      'The specification was read in full from `.astra/orientation_research/REPORT.md`; the requested `docs/research/ORIENTATION_20261009.md` was not present. Fixtures were SHA-256 verified against the supplied manifest. No fixture was regenerated or altered. `evaluate_orientation_round4.py --require-gate` enforces the gate independently of unit-test success.','',
+      'The specification was read in full from `.astra/orientation_research/REPORT.md`; the requested `docs/records/research/ORIENTATION_20261009.md` was not present. Fixtures were SHA-256 verified against the supplied manifest. No fixture was regenerated or altered. `evaluate_orientation_round4.py --require-gate` enforces the gate independently of unit-test success.','',
       '| Gate | This implementation | Result |','|---|---|---|']
     for g in gates['gates']:
         numbers=g['numbers']
@@ -224,7 +224,7 @@ def main():
       ('**No commit was created.** The authorized commit script reached `git add`, which failed with exit 128: the sandbox could not create the worktree’s `index.lock` (`Operation not permitted`). HEAD remains `f611ee2` on `astra/page-lines-4`. '
        'The 18-file patch was replayed byte-for-byte against that base, then checked in reverse. [Commit script](../../.astra/commit-page-lines-round4-orientation.sh), [patch](../../.astra/page-lines-round4-orientation.patch), and [validation receipt](../../.astra/round4-orientation-patch-validation.json) provide the requested fallback. The script verifies the branch, base revision, empty index and file hashes before committing with both requested trailers. It does not push.'
        if attempt.exists() and not commit['committed'] else 'See the final delivery message for the actual commit outcome.')]
-    (ROOT/'docs/reviews/PAGE_LINES_ROUND4_ORIENTATION_20261009.md').write_text('\n'.join(lines)+'\n')
+    (ROOT/'docs/records/reviews/PAGE_LINES_ROUND4_ORIENTATION_20261009.md').write_text('\n'.join(lines)+'\n')
     print(json.dumps(dict(pages=len(rows),rotated=len(rotated),compatibility_preserved=report['compatibility_preserved'],tables_without_regression=sum(r['passed'] for r in table_rows),tests=test_counts)))
 
 

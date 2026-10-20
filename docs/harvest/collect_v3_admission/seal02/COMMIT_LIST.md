@@ -1,0 +1,41 @@
+# SEAL02D guarded commit list — 20 October 2026
+
+Only these 37 paths belong to this cumulative seal02 handoff. Run `python3 -B docs/harvest/collect_v3_admission/seal02/guard_commit.py` before staging; it checks hashes without git writes. Local package `fdaf8ca2` is NOT deployed; deploy pending ASTRA-CP3. DEPLOYMENT_RECEIPT.json is unchanged historical deployment evidence, not proof of deployment of this package. The two SEAL02D logs are local evidence and are excluded from the deployment payload. No git add or git commit was run. Every unrelated change, supplied brief, scaling_w3/, generated suite and temporary fixture is excluded.
+
+- `docs/harvest/collect_v3_admission/seal02/COMMIT_LIST.json`
+- `docs/harvest/collect_v3_admission/seal02/COMMIT_LIST.md`
+- `docs/harvest/collect_v3_admission/seal02/DEPLOYMENT_RECEIPT.json`
+- `docs/harvest/collect_v3_admission/seal02/DEPLOY_PATHS.txt`
+- `docs/harvest/collect_v3_admission/seal02/DEPLOY_SHA256SUMS`
+- `docs/harvest/collect_v3_admission/seal02/FINAL_LIST.schema.json`
+- `docs/harvest/collect_v3_admission/seal02/INPUT_BINDINGS.template.json`
+- `docs/harvest/collect_v3_admission/seal02/MOCK_INPUT_BINDINGS.json`
+- `docs/harvest/collect_v3_admission/seal02/SEAL02.md`
+- `docs/harvest/collect_v3_admission/seal02/SEAL02D_BASELINE.log`
+- `docs/harvest/collect_v3_admission/seal02/SEAL02D_REPLAY.log`
+- `docs/harvest/collect_v3_admission/seal02/TESTS.log`
+- `docs/harvest/collect_v3_admission/seal02/V01_BINDING.json`
+- `docs/harvest/collect_v3_admission/seal02/VERIFY.sh`
+- `docs/harvest/collect_v3_admission/seal02/build_suite02.py`
+- `docs/harvest/collect_v3_admission/seal02/guard_commit.py`
+- `docs/harvest/collect_v3_admission/seal02/inputs/CURRENT.json`
+- `docs/harvest/collect_v3_admission/seal02/inputs/candidates_readout.jsonl`
+- `docs/harvest/collect_v3_admission/seal02/inputs/candidates_v3.jsonl`
+- `docs/harvest/collect_v3_admission/seal02/inputs/counts.json`
+- `docs/harvest/collect_v3_admission/seal02/inputs/draw_plan.json`
+- `docs/harvest/collect_v3_admission/seal02/inputs/summary.json`
+- `docs/harvest/collect_v3_admission/seal02/inputs/tags.jsonl.receipt.json`
+- `docs/harvest/collect_v3_admission/seal02/make_mock.py`
+- `docs/harvest/collect_v3_admission/seal02/mock/final_list.MOCK.jsonl`
+- `docs/harvest/collect_v3_admission/seal02/mock/final_receipt.MOCK.json`
+- `docs/harvest/collect_v3_admission/seal02/mock/verdicts.MOCK.jsonl`
+- `docs/harvest/collect_v3_admission/seal02/seal02.sbatch`
+- `docs/harvest/collect_v3_admission/seal02/submit_seal.sh`
+- `docs/harvest/collect_v3_admission/seal02/test_seal02.py`
+- `docs/harvest/collect_v3_admission/seal02/v01/bench/__init__.py`
+- `docs/harvest/collect_v3_admission/seal02/v01/bench/benchmark_build.py`
+- `docs/harvest/collect_v3_admission/seal02/v01/bench/benchmark_suite.py`
+- `docs/harvest/collect_v3_admission/seal02/v01/bench/common.py`
+- `docs/harvest/collect_v3_admission/seal02/v01/bench/score.py`
+- `docs/harvest/collect_v3_admission/seal02/v01/scripts/clariden/benchmark_candidates.sbatch`
+- `docs/harvest/collect_v3_admission/seal02/v01/train/cer.py`

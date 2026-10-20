@@ -1,0 +1,95 @@
+--- a/greekocr/harvest/filtering_assets/segmentation-policy.js
++++ b/greekocr/harvest/filtering_assets/segmentation-policy.js
+@@ -1,4 +1,8 @@
+-// Segmentation 0.7: crop line/cut gate, then the unchanged OCR-length screen.
++// Segmentation 0.8: exactly the owner's three rules, in this order:
++// 1. Other lines: additional complete line or >2 whole words; cut-off words do not count.
++// 2. De-skewed main-row box length, height-normalised through the frozen predictor.
++// 3. Crop height <= upright box height + 1.5 * de-skewed line height.
++// Cut evidence and optional source context are diagnostics only.
+ // KEEP here passes this screen only; it is not a training-admission certificate.
+ function boxLengthJudgement(row,lower=.5,upper=1.5,mode=2){
+  const e=row.box_evidence,chars=row.characters;
+@@ -16,7 +20,6 @@
+  const result={verdict:'PASS',reason:'gate: pass',whole_words:neighbours.reduce((n,l)=>n+l.whole_words,0),cutoff_words:neighbours.reduce((n,l)=>n+l.cutoff_words,0),complete_rows:neighbours.filter(l=>l.complete).map(l=>l.index),main_cut};
+  if(!lines.some(l=>l.side==='main'&&l.votes>0))return {...result,verdict:'UNCERTAIN',reason:'gate: no main row found'};
+  if(row.orientation_resolved===false)return {...result,verdict:'UNCERTAIN',reason:'gate: reading direction unresolved'};
+- if(main_cut.cut)return {...result,verdict:'DROP',reason:'gate: target line cut'};
+  if(result.complete_rows.length)return {...result,verdict:'DROP',reason:'gate: second complete line'};
+  if(result.whole_words>maxWholeWords)return {...result,verdict:'DROP',reason:'gate: too many whole neighbour words'};
+  return result;
+--- a/greekocr/harvest/filtering_assets/crop-tools.py
++++ b/greekocr/harvest/filtering_assets/crop-tools.py
+@@ -74,8 +74,9 @@
+             cutoff_words=sum(not w['whole'] for w in words), word_groups=words,
+             context_whole_words=None, context_cutoff_words=None, context_count_resolved=None))
+     main = next((l for l in lines if l.side == 'main' and l.votes > 0), None)
++    # skew_line and the measured heights are diagnostics only, never gate inputs.
+     cut = dict(angle_deg=None, crossings=[], cut_spans=[], cut_letters=[], baseline_exit=False,
+-        low_visibility_span=False, upright_box_height=None, row_frame_height=None, row_frame_taller=False)
++        low_visibility_span=False, upright_box_height=None, row_frame_height=None)
+     if main is not None:
+         skew = skew_line(glyphs)
+         cut.update(angle_deg=skew.angle_deg, crossings=[asdict(c) for c in skew.crossings],
+@@ -87,8 +88,7 @@
+         row = tight_box(text, labels=glyphs.labels, angle_deg=angle_deg, centre=(glyphs.width/2, glyphs.height/2))
+         if upright is not None:
+             cut.update(upright_box_height=upright[3]-upright[1], row_frame_height=row[3]-row[1])
+-            cut['row_frame_taller'] = cut['row_frame_height'] > cut['upright_box_height']
+-    cut['cut'] = cut['baseline_exit'] or cut['low_visibility_span'] or cut['row_frame_taller']
++    cut['cut'] = cut['baseline_exit'] or cut['low_visibility_span']
+     return inventory, cut
+ 
+ 
+--- a/scripts/harvest/build_filter_versions.py
++++ b/scripts/harvest/build_filter_versions.py
+@@ -16,9 +16,9 @@
+       "numerics":("0.2",["N1 automatic ink candidate (rejected 0/5)","N1 assisted two-reader and lead-pixel release"],
+           [PROJECTS/"greek-ocr-toolkit-secondary/artifacts/n1/n1_v1_w1.jsonl"],"assisted separator corrections; failed automatic candidate is disabled"),
+       "dashes":("0.1",["dash tags; no general repair release"],[ROOT/"greekocr/harvest/line_pipeline.py"],"tag only"),
+-      "segmentation":("0.7",["29fa466 crop guides","5d664bf font normalized","cad8709 target-box normalization","b2f8d95 whole-word tolerance","405d4f1 padding 1.5 heights","0.5 + row-frame text box","crop-only line inventory and cut-off gate before length"],
++      "segmentation":("0.8",["29fa466 crop guides","5d664bf font normalized","cad8709 target-box normalization","b2f8d95 whole-word tolerance","405d4f1 padding 1.5 heights","0.5 + row-frame text box","crop-only line inventory and cut-off gate before length","owner's three rules; remove target-cut veto and taller-than-upright guard"],
+           [ROOT/"greekocr/harvest/filtering_assets/segmentation-policy.js",ROOT/"greekocr/harvest/filtering_assets/crop-tools.py",ROOT/"greekocr/harvest/filtering_assets/font-models.json",ROOT/"greekocr/harvest/filtering_assets/service.mjs",
+-           ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py",ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py"],"0.7 crop-only line inventory and cut-off gate before unchanged 0.6 length/padding; owner design 2026-10-19"),
++           ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py",ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py"],"0.8 exactly the owner's three rules: crop-only other-lines gate, unchanged 0.6 length and padding; cut evidence is diagnostics only; owner policy 2026-10-19"),
+     }
+     for tool in ("content_gate","content_repair","composer","final_eligibility","census"):
+         definitions[tool]=("0.2",["first integrated graph implementation","Astra review: composed coverage, producer binding and atomic exports"],
+--- a/docs/harvest/line_pipeline/tool_versions.json
++++ b/docs/harvest/line_pipeline/tool_versions.json
+@@ -64,7 +64,7 @@
+       "digest": "50b06dd57cb18e0fb9b6e4e7ea64bc850057228f86085446565ce15809327749"
+     },
+     "segmentation": {
+-      "version": "0.7",
++      "version": "0.8",
+       "documented_iterations": [
+         "29fa466 crop guides",
+         "5d664bf font normalized",
+@@ -72,19 +72,20 @@
+         "b2f8d95 whole-word tolerance",
+         "405d4f1 padding 1.5 heights",
+         "0.5 + row-frame text box",
+-        "crop-only line inventory and cut-off gate before length"
++        "crop-only line inventory and cut-off gate before length",
++        "owner's three rules; remove target-cut veto and taller-than-upright guard"
+       ],
+-      "iteration_count": 7,
+-      "scope": "0.7 crop-only line inventory and cut-off gate before unchanged 0.6 length/padding; owner design 2026-10-19",
++      "iteration_count": 8,
++      "scope": "0.8 exactly the owner's three rules: crop-only other-lines gate, unchanged 0.6 length and padding; cut evidence is diagnostics only; owner policy 2026-10-19",
+       "components": {
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/segmentation-policy.js": "05133c6a15e907661b3aae144dea31ac0bf7a461e7bc61abae97f776aae6837e",
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/crop-tools.py": "c486fa8716dbd12c7f998c892f638c9d653c17ea8db8f646cb97cfa090ecd48f",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/segmentation-policy.js": "e5b635ff9a04cc66f454a68e01ce9773229672e655b3ee08296ee5c0d149ee15",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/crop-tools.py": "921b79ad1450e1023518e4aa36280a0efea2fe83ae1739ca0166e98c14ede1af",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/font-models.json": "fb3f28f7d90c2b638bfe9c72ab42dcf060d59939a7ab410fc2e1cf6d898965de",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/service.mjs": "df1781fb469c92dfe3b7fe886b4297a7ca20878bb82006cf6825536ce537c911",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py": "1dd618bc2d884cf2490498456653f49b0276944f3bde83d38e26e633031eb641",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py": "038bd46af4535e6de6af58e11c4b7496e03e0434094cc8cd6b48668e2199ad77"
+       },
+-      "digest": "734b56ca41c92488d435dd5e0b32ddb3c41e91b8ebfd0ac0397c1f5b81b2536d"
++      "digest": "512e362a691c6f2f425acc41e587b4b751dedbaadd10077d42309ed3f1f7bebd"
+     },
+     "content_gate": {
+       "version": "0.2",

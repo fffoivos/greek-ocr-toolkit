@@ -1,0 +1,111 @@
+diff --git a/greekocr/labelfix/case.py b/greekocr/labelfix/case.py
+index 7c867f42..fa273b21 100644
+--- a/greekocr/labelfix/case.py
++++ b/greekocr/labelfix/case.py
+@@ -101,24 +101,32 @@ def estimate_font(ink):
+     raw={c.index:classify(ink,c) for c in ink.components if c.role in ('letter','large')}
+     ink.frozen_case={c.index:dict(raw[c.index],bbox=[c.x0,c.y0,c.x1,c.y1]) for c in ink.components if c.index in raw}
+     bodies=[c for c in ink.components if raw.get(c.index,{}).get('raw_pixel_class')=='lowercase_body'
+-            and .65*ink.xh<=c.h<=1.15*ink.xh and .35*ink.xh<=c.w<=1.4*ink.xh]
++            and .6*ink.xh<=c.h<=1.15*ink.xh and .35*ink.xh<=c.w<=1.4*ink.xh
++            and (c.area if hasattr(c,'area') else int(component_mask(ink,c).sum()))>=.20*ink.xh*ink.xh]
+     ink.font_width=float(np.median([c.w for c in bodies])) if bodies else .85*ink.xh
+     if len(bodies)<4:
+         ink.font_fit=dict(source='frozen_line_fallback',n=len(bodies),xh=ink.xh)
+         return
+     xs=np.array([c.cx for c in bodies]);ys=np.array([c.y1 for c in bodies],float)
++    # Body contacts qualify the toolkit curve's vertical gauge. A new straight
++    # line through a curved row can cross the body and turn its top into ink
++    # evidence. Retain the toolkit's per-column baseline throughout.
++    curve=np.asarray(ink.glyphs.band.bottom)
++    offsets=ys-curve[np.clip(np.rint(xs).astype(int),0,ink.width-1)]
+     keep=np.ones(len(xs),bool)
+     for _ in range(3):
+-        fit=np.polyfit(xs[keep],ys[keep],1) if np.ptp(xs[keep]) else np.array([0.,np.median(ys[keep])])
+-        residual=ys-np.polyval(fit,xs)
++        shift=float(np.median(offsets[keep]))
++        residual=offsets-shift
+         med=np.median(residual[keep]);mad=np.median(abs(residual[keep]-med))
+         new=abs(residual-med)<=max(2.,3*mad)
+         if new.sum()<4:break
+         keep=new
+     height=float(np.median([c.h for c,k in zip(bodies,keep) if k]))
+-    ink.bottom=np.polyval(fit,np.arange(ink.width))
++    shift=float(np.median(offsets[keep]))
++    ink.bottom=curve+shift
+     ink.xh=height;ink.top=ink.bottom-height
+-    ink.font_fit=dict(source='pixel_lowercase_bodies',n=int(keep.sum()),xh=height,baseline_fit=fit.tolist())
++    ink.font_fit=dict(source='pixel_lowercase_bodies',n=int(keep.sum()),xh=height,
++                      baseline_shift=shift,baseline_geometry='toolkit_curve')
+ 
+ 
+ def prepare(ink,slots):
+diff --git a/greekocr/labelfix/ink.py b/greekocr/labelfix/ink.py
+index e4330518..1c35355b 100644
+--- a/greekocr/labelfix/ink.py
++++ b/greekocr/labelfix/ink.py
+@@ -35,7 +35,7 @@ import numpy as np
+ from PIL import Image
+ from scipy import ndimage as ndi
+ 
+-from ..glyphs.components import line_glyphs
++from ..glyphs.components import line_glyphs, _xheight
+ 
+ EIGHT = np.ones((3, 3), bool)
+ GRID = 8
+@@ -165,18 +165,21 @@ class CropInk:
+ 
+ def analyse(image: Image.Image, *, valid_mask=None, cut_masks=None) -> CropInk:
+     g = line_glyphs(image)
++    # Broken strokes can outvote complete bodies in the component-count mode.
++    # Reuse the toolkit height estimator on substantial native components,
++    # then rerun its band/role fit at that scale. No pixels or labels are added.
++    free = [c for c in g.components if not {'top', 'bottom'} & set(c.touches)
++            and c.role != 'rule' and c.darkness <= g.paper-.45*(g.paper-g.ink_level)]
++    if free:
++        area = float(np.percentile([c.area for c in free], 90))
++        substantial = [c for c in free if c.area >= .5*area
++                       and .25*c.h <= c.w <= 2*c.h and c.h >= .6*g.band.xh]
++        height = _xheight(np.array([c.h for c in substantial], float))
++        if len(substantial) >= 8 and height > 1.5*g.band.xh:
++            g = line_glyphs(image, xh_prior=height)
+     xh=float(g.band.xh)
+     top=np.asarray(g.band.top)
+     bottom=np.asarray(g.band.bottom)
+-    # Heavy joined accents can dominate the glyph pass's height estimate.
+-    # Complete short bodies provide an independent, pixel-only lower mode.
+-    bodies=[c.h for c in g.components if c.role=='letter' and .45*xh <= c.h <= 1.15*xh
+-            and abs(c.y1-float(bottom[min(int(c.cx),g.width-1)])) <= .25*xh]
+-    if len(bodies)>=5:
+-        body_h=float(np.quantile(bodies,.30))
+-        if body_h < .8*xh:
+-            xh=body_h
+-            top=bottom-xh
+     result = CropInk(g.gray, g.ink, g.labels, xh, top, bottom,
+                      list(g.components), float(g.paper), g.width, g.height, float(g.ink_level))
+     result.glyphs = g
+@@ -394,7 +397,9 @@ def mark_evidence(ink: CropInk, x0: float, x1: float, *, core_x0: float | None =
+             if c.h <= MAX_MARK_HEIGHT_XH * xh and c.w <= MAX_MARK_WIDTH_XH * xh:
+                 sub = component_mask(ink,c)
+                 b = _blob(sub, c.y0, c.x0, 'detached', ink)
+-                if not faint_letter(c, ink) and not punctuation_dot(c, ink, excluded_stems=region_ids if mark_bearer else ()) and not _reserved_for_capital(ink, c, b1):
++                if (not b.faint and b.area >= max(MIN_BLOB_AREA, .008*xh*xh)
++                        and not faint_letter(c, ink) and not punctuation_dot(c, ink, excluded_stems=region_ids if mark_bearer else ())
++                        and not _reserved_for_capital(ink, c, b1)):
+                     ev.above.append(b)
+         elif c.role in ('mark', 'punct', 'fragment') and c.y0 >= base - 0.2 * xh and inside:
+             sub = component_mask(ink,c)
+@@ -486,11 +491,11 @@ def capital_left_marks(ink, body):
+     naming the breathing/accent remains the mark classifier's responsibility.
+     """
+     xh = ink.xh
+-    left = max((c.x1 for c in ink.components if c.role == 'letter'
++    left = max((c.x1 for c in ink.components if c.role == 'letter' and c.y1 >= body.y0+.6*body.h
+                 and c.x1 <= body.x0 and c.index != body.index), default=0)
+     out = []
+     for c in ink.components:
+-        if c.role not in ('mark','punct','fragment') or not (left <= c.x0 and c.x1 <= body.x0):
++        if c.role not in ('mark','punct','fragment','letter') or not (left <= c.x0 and c.x1 <= body.x0):
+             continue
+         if not (body.y0-.35*xh <= c.y0 and c.y1 <= body.y0+.6*body.h
+                 and .1*xh <= c.h <= .9*xh and c.w <= 1.2*xh):

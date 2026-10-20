@@ -53,7 +53,7 @@ def crossing_panels(page, lines, structure, key, destination):
                 sheet.paste(im,(8+480*col,j*250+25))
         path = destination/f'{key}-{start//12+1:02d}.jpg'
         sheet.save(path,quality=90)
-        paths.append(str(path.relative_to(ROOT/'docs/reviews')))
+        paths.append(str(path.relative_to(ROOT/'docs/records/reviews')))
     return paths
 
 
@@ -158,7 +158,7 @@ def review_page(path, baseline, out):
         newly_joinable_lines=sorted({i for r in s['rows'] if r.get('joinable') for i in r['line_indices']} -
             {i for r in previous['rows'] if r.get('joinable') for i in r['line_indices']}),
         provenance=s['provenance'])
-    rec['crossing_panels'] = crossing_panels(page,lines,s,key,ROOT/'docs/reviews/q1b-evidence')
+    rec['crossing_panels'] = crossing_panels(page,lines,s,key,ROOT/'docs/records/reviews/q1b-evidence')
     write(out/f'{key}.structure.json',s)
     (out/f'{key}.lines.json').write_text(json.dumps(lines))
     write(out/f'{key}.cells.json',cells_file)
@@ -309,7 +309,7 @@ def main():
     parser.add_argument('--baseline',type=Path,default=ROOT/'.astra/q1b-baseline')
     parser.add_argument('--pages',type=Path,default=ROOT/'.astra/pages')
     parser.add_argument('--out',type=Path,default=ROOT/'.astra/out')
-    parser.add_argument('--report',type=Path,default=ROOT/'docs/reviews/PAGE_LINES_Q1B_BOUNDARIES.md')
+    parser.add_argument('--report',type=Path,default=ROOT/'docs/records/reviews/PAGE_LINES_Q1B_BOUNDARIES.md')
     parser.add_argument('--report-only',action='store_true')
     args = parser.parse_args()
     args.out.mkdir(parents=True,exist_ok=True)

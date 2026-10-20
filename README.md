@@ -1,203 +1,91 @@
 # Greek OCR toolkit
 
-Tools for reading printed Greek with OCR, especially polytonic Greek in 19th- and 20th-century books.
+## 1. What this repository is
 
-The toolkit covers the whole process, from finding scanned books to running a recognizer inside a document pipeline.
-Everything sits behind one typed Python package, `greekocr`, with a command-line tool of the same name and an offline
-test suite.
+This is the private toolkit for the Greek OCR programme, especially printed polytonic Greek. The owner's standard (8 October 2026) is that every tool sits behind a typed API with tests. The Python package is `greekocr`; the command-line tool has the same name. Source identities, inputs and outputs are bound by hashes and receipts.
 
-> **Status: in active development.** APIs, file formats and results still change between commits. Experimental work
-> lives on branches and in `prototypes/` before it reaches the package.
+The repository has two separate aspects: **A — development of OCR and our segmenters**, and **B — creation of training data for OCR**. B uses frozen tool versions from A; developing a segmenter and admitting training rows are separate work. A PDF text layer is another OCR observation, and agreement between readers is not human ground truth.
 
-## Principles
+## 2. Map by the owner's taxonomy
 
-- **A PDF text layer is another OCR, not ground truth.** It is never a reference, a judge input or a calibration target.
-- **Machine agreement is not human gold.** Lines on which readers agree are kept as "silver" labels and marked as such.
-- **Provenance is recorded.** Data, recipes, models and results carry the hashes and receipts needed to reproduce them.
-- **Fast methods are checked against slow, explicit ones.** A heuristic stays only if it tracks a real feature of the
-  page and agrees with the explicit method.
-- **Offline by default.** Network calls (source discovery, cloud OCR services, pod operations) happen only when the
-  matching function is called explicitly. The tests use recorded responses and mocks.
+All paths below are relative to the repository root. Code keeps its existing import paths.
 
-## The process
+| Part | What it contains and where the code lives | Documentation |
+|---|---|---|
+| A | OCR model and segmenter development; the three segmenters and recognition surfaces below. | [A overview](docs/A_ocr_development/README.md) |
+| A.i | Slow pixel-first page segmenter: `greekocr/pages/`; crop primitives in `greekocr/glyphs/`. | [Slow pixel segmenter](docs/A_ocr_development/segmenters/SLOW_PIXEL.md) |
+| A.ii | Current next-generation prototype, R8: `prototypes/fast_lines/stack/`; physical completion and speed qualification remain partial. | [Next-generation R8](docs/A_ocr_development/segmenters/NEXT_GEN_R8.md) |
+| A.iii | Small Paddle detector plus heuristics, R7: the historical predecessor of the same `prototypes/fast_lines/stack/`, rather than a separate current copy. | [Small-detector R7](docs/A_ocr_development/segmenters/SMALL_DETECTOR_R7.md), [generations](docs/A_ocr_development/MODEL_GENERATIONS.md) |
+| A — recognition, synthetic data and scoring | `greekocr/recogniser/`, `greekocr/warmstart/`, `greekocr/synth/`, `greekocr/real/`, `greekocr/score/`; synthetic shards come from the separate Rust line factory. | [Recogniser and training](docs/A_ocr_development/RECOGNISER_AND_TRAINING.md) |
+| B | Creation of OCR training data: page reads, tools, the organising pipeline and human revision. | [B overview](docs/B_training_data/README.md) |
+| B.a | Google OCR on pages: `greekocr/readers/`, `greekocr/harvest/`, `scripts/harvest/`, and source collectors in `collect_v3/`. | [Google page reads](docs/B_training_data/a_google_ocr/README.md) |
+| B.b | SF7 polytonic, RU1 Cyrillic, N1 numerics, dash tags, segmentation filter and content gate: `greekocr/labelfix/`, `greekocr/numerics/`, `greekocr/harvest/`, `scripts/labelfix/`, `scripts/secondary/`, `scripts/numerics/`, `scripts/harvest/filter_runtime/`. | [Correction and filtering tools](docs/B_training_data/b_tools/README.md) |
+| B.c | The process organising all of B: `greekocr/harvest/line_pipeline.py` and `greekocr/harvest/line_pipeline_census.py`; raw rows through corrections, eligibility, deduplication and immutable export. | [Pipeline](docs/B_training_data/c_pipeline/README.md), [graph](docs/B_training_data/c_pipeline/pipeline.mmd) |
+| B.d | Revision of B.b, evidence, owner sheets, publication and returned marks: `greekocr/adjudicate/`; historical label sheets in `greekocr/labelfix/sheet.py`. | [Revision pipeline](docs/B_training_data/d_review/README.md), [sheet contract](docs/B_training_data/d_review/HUMAN_REVIEW_SHEETS.md) |
+| Shared | Deployment, operations, verification, types, CLI and vendor custody: `greekocr/deploy/`, `greekocr/ops/`, `greekocr/verify/`, `greekocr/types.py`, `greekocr/cli.py`, `greekocr/_vendor/`; Clariden scripts in `scripts/harvest/clariden/` and `scripts/labelfix/clariden/`. | [Shared infrastructure](docs/shared/README.md) |
+| Records | Dated reports, briefs, handoffs and evidence by track in `docs/records/`. | [Records index](docs/records/INDEX.md) |
 
-| # | Dimension | Question it answers | Code |
-| --- | --- | --- | --- |
-| 1 | [Sources](#1-sources) | Which scanned books and pages can we use, under what rights? | `greekocr.real.sources` |
-| 2 | [Page analysis](#2-page-analysis) | Where are the text lines on a page, and in what order? | `greekocr.pages`, `greekocr.glyphs` |
-| 3 | [Line geometry](#3-line-geometry) | Is each line crop tight, straight and complete? | `greekocr.real.geometry` |
-| 4 | [Readability and line metadata](#4-readability-and-line-metadata) | Is a crop readable, and what kind of line is it? | `greekocr.verify`, `greekocr.annotate`, `greekocr.glyphs` |
-| 5 | [Labels for real lines](#5-labels-for-real-lines) | What text does a real line contain, and how sure are we? | `greekocr.real`, `greekocr.harvest`, `greekocr.readers.services` |
-| 6 | [Synthetic lines](#6-synthetic-lines) | How do we make unlimited correctly labelled training lines? | `greekocr.synth` |
-| 7 | [Training-data custody](#7-training-data-custody) | Which lines may be trained on, and which must stay held out? | `greekocr.real`, `greekocr.synth` |
-| 8 | [Recognition models](#8-recognition-models) | Which line readers exist, and how are they loaded and converted? | `greekocr.readers`, `greekocr.warmstart` |
-| 9 | [Evaluation](#9-evaluation) | How good is a reading, including accents and breathings? | `greekocr.score` |
-| 10 | [Deployment](#10-deployment) | How does the recognizer run inside a real document pipeline? | `greekocr.deploy` |
-| 11 | [Speed](#11-speed) | How do we find lines fast enough for whole collections? | `prototypes/`, branches |
-| 12 | [Provenance and operations](#12-provenance-and-operations) | How is every step reproducible and every long job watched? | `greekocr.ops` |
+## 3. Current versions
 
-### 1. Sources
+The [tool manifest](docs/harvest/line_pipeline/tool_versions.json) records named method generations, component hashes and release status. The pipeline identifier comes from `greekocr/harvest/line_pipeline.py`; the codec is `greekocr/_vendor/codec/v2.json`. Versions do not measure accuracy or establish adoption.
 
-Discovery crawls digital libraries for Greek books: the Hellenic Parliament library, the Internet Archive, Anemi (the
-University of Crete digital library), Wikimedia and others. Crawls respect robots rules and rate limits, and record
-what was fetched. Rights are taken from the source's own metadata and never assumed; unknown rights stay unverified.
-Other inputs are existing datasets (Polyton-DB, GRPOLY), born-digital PDFs, and web pages rendered with a browser so
-that their text is known exactly.
-Docs: [rendered web pages as label data](docs/WEB_RENDER.md).
+| Component | Version | Meaning |
+|---|---|---|
+| Line pipeline | 0.3.2 | Current orchestration identifier. |
+| Segmentation filter | 0.13 (label 0.9-s5) | S4 measurement with one inclusive length band, 0.30–2.00, for all rows; accepted segmentation remains frozen. Band adoption is a recorded coordinator decision. |
+| Content gate | 0.3 | Scripts and raw-text length checks before segmentation. |
+| Final eligibility | 0.3 | Content, confidence, codec, CTC and split checks; aligned cell exemption. |
+| Polytonic | 0.7 / SF7 A | `candidate_pre_audit`; proposal evidence cannot qualify admission. |
+| Cyrillic | 0.3 / RU1 | Historical Russian word-final ь→ъ only. |
+| Numerics | N1 0.2 assisted release; 0.3 pipeline binding | The assisted separator release is unchanged; the manifest's third generation adds the census03 digit/separator/digit candidate-negative rule. The rejected automatic ink candidate stays disabled. |
+| Dashes | 0.1 | Tags only. |
+| Inventory | 0.1 | Raw-row script and content inventory. |
+| Content repair / composer | 0.2 / 0.3 | Bound repair evidence and compatible raw-parent edit spans. |
+| Census orchestration | 0.7 | Durable processing, runtime binding and protected crop deduplication. |
+| Codec | v2 | Frozen NFD atoms. |
+| Label Quality Benchmark | truth_v1_1; scorer schema v1.2 | Frozen per-class print truth; no 0.n tool version is assigned in the manifest. |
 
-### 2. Page analysis
+Some A/B overview pages, the graph and the Clariden runbook retain earlier version labels. Use the current manifest and [pipeline stage description](docs/B_training_data/c_pipeline/README.md) for the current source. Historical deployed bundles and results retain their own versions; these identifiers do not establish a new production census result.
 
-`greekocr.pages` turns a page image into text lines and recognition pieces. The steps:
+## 4. How to run
 
-1. Layout regions come from Docling. Our own code then prepares the pixels: local thresholds, connected ink, rules and
-   gutters.
-2. Text bands are fitted, and ink is assigned to its line.
-3. Font guides (baseline, x-height and so on) are fitted along each line.
-4. Tables are handled separately, so that recognition pieces never cross cell borders.
-5. The page structure is recovered: leaves, columns, blocks, rows and reading order.
-
-Lines judged not to be text (ornaments, rules, noise) are kept in the data as diagnostics. They are never drawn or sent
-to recognition. Rotated-text handling exists but is parked.
-Docs: [working with page images](docs/PAGES_GUIDE.md), [pipeline](docs/PAGES_PIPELINE.md),
-[output format](docs/PAGES_OUTPUT_FORMAT.md), [line-finding algorithm](docs/PAGE_LINES_ALGORITHM.md),
-[line segments](docs/PAGE_LINE_SEGMENTS.md), [Docling tables study](docs/research/DOCLING_TABLES_20261009.md),
-[orientation study](docs/research/ORIENTATION_20261009.md).
-
-### 3. Line geometry
-
-A recognizer reads a line only as well as the crop it gets. Geometry refinement straightens and tightens existing
-line crops from their pixels, so that accents above and descenders below are not cut off. It is measured both with
-pixel-only checks and with an independent reader. CLI: `greekocr geometry refine | measure | evaluate`.
-Docs: [line geometry](docs/O4D_GEOMETRY.md).
-
-### 4. Readability and line metadata
-
-These checks need no reference text:
-- **Glyph measurements:** letters, accents and ink per line (`greekocr.glyphs`).
-- **Readability:** image checks use only the pixels, and text checks use only the reading (`greekocr.verify`).
-- **Line metadata:** script, font size and style, and word types (`greekocr.annotate`).
-
-All of these are used to select and stratify lines, not to grade a recognizer.
-Docs: [readability checks](docs/VERIFY.md), [line metadata](docs/LINE_METADATA.md),
-[glyph plan](docs/GLYPHS_PLAN.md), [glyph calibration](docs/GLYPHS_CALIBRATION.md).
-
-### 5. Labels for real lines
-
-Real lines have no ground truth, so labels come from independent readers:
-- our own recognizer;
-- other Greek models;
-- cloud services, used only when called explicitly: Google Document AI, Google Cloud Vision and Transkribus.
-
-Their agreement gives each line a tier. Two-reader adjudication and geometric gates decide what is kept, and a line
-with bad geometry is rejected even when the readers agree. The pilot harvest records every line's source, page,
-model and code version.
-Docs: [Document AI reader](docs/READERS_DOCAI.md), [Cloud Vision reader](docs/READERS_VISION.md),
-[Transkribus reader](docs/READERS_TRANSKRIBUS.md), [pilot harvest](docs/harvest/PILOT_v1.md),
-[three engines compared](docs/harvest/THREE_ENGINES_v1.md),
-[commercial OCR survey](docs/research/COMMERCIAL_OCR_20261008.md).
-
-### 6. Synthetic lines
-
-Synthetic lines are rendered with known text by a separate Rust line factory. Each recipe (fonts, text sources,
-noise, layout) is identified by the SHA-256 of its bytes; v5, v7 and v8 are recorded here. `greekocr.synth` runs the
-factory and builds reproducible mixes of synthetic and real lines. Before using a font, check that it covers every
-needed character and accent.
-
-### 7. Training-data custody
-
-Lines are split by canonical work (the same text in different editions counts as one work), never by line. This keeps
-held-out works out of training. Real shards are imported only through the line factory's `import-real` command.
-A mix is valid only if its exact recipe bytes are committed in the custody repository. Every manifest lists its
-shards with hashes.
-Docs: [repository standard](docs/STANDARD.md), [API examples](docs/API.md).
-
-### 8. Recognition models
-
-Available readers: our own recognizer, Kalchas, a persistent CLLG worker, and native PaddleOCR references. They all
-load lazily, so heavy dependencies are needed only when used. `greekocr.warmstart` converts weights from donor models
-into our architecture and checks numerical parity against the native framework before a converted model is trusted.
-Training itself runs on separate GPU workers.
-
-### 9. Evaluation
-
-There are two named scoring paths:
-- **Strict:** character error rate on the model's raw output, never normalised to improve a score.
-- **Bake-off:** compares different readers after canonical Unicode decomposition. It reports accent and breathing
-  F1, and Greek/Latin look-alike confusions.
-
-Results are summarised by line category, and evaluation uses held-out works only.
-
-### 10. Deployment
-
-The recognizer ships as a [Docling](https://github.com/docling-project/docling) OCR plugin (entry point `glossapi`):
-1. Docling supplies layout regions.
-2. Our page analysis prepares table-aware pieces.
-3. Our recognizer reads each piece.
-4. The plugin installs the text cells back into the document.
-
-Deployment plans for GPU nodes are reviewable files, and pod operations run only when called.
-Docs: [pipeline § How Docling fits](docs/PAGES_PIPELINE.md#how-docling-fits), [GPU design](docs/research/GPU_DESIGN.md).
-
-### 11. Speed
-
-Page analysis is exact but slow. The fast-lines work starts from an off-the-shelf line detector (PaddleOCR) and adds
-corrections, each of which must track a real page feature and agree with the slow explicit model. A partial Rust port
-is being measured. This work lives on development branches and in `prototypes/` until it is checked.
-Docs: [fast lines charter](docs/research/FAST_LINES_CHARTER.md).
-
-### 12. Provenance and operations
-
-`greekocr.ops` provides:
-- receipts and hash verification;
-- secrets read from the environment, never stored;
-- rate-limited clients;
-- bounded watching of long remote jobs, which reports stalls but never kills a workload.
-
-`greekocr/_vendor` keeps the original source logic byte-for-byte, with its origin recorded in
-[docs/INVENTORY.md](docs/INVENTORY.md).
-Docs: [validation](docs/VALIDATION.md).
-
-## Install
-
-Python 3.11 or newer.
+<a id="toolkit-setup"></a>
+Python 3.11 or newer is required. From the repository root, create the local environment, install the package and test dependencies, run tests, and try the CLI:
 
 ```sh
-uv venv --python 3.11 .venv
-uv pip install --python .venv/bin/python -e '.[test]'
-.venv/bin/python -m pytest -q
-```
-
-The base install covers pages, manifests, tags, scoring and text-layer extraction. Heavier dependencies are extras:
-
-| Extra | Use |
-| --- | --- |
-| `readers` | local recognition models |
-| `warmstart` | converting and checking donor model weights |
-| `docling` | the Docling plugin and computed layout |
-| `docai` | Google Document AI crop reader |
-| `web` | rendering HTML pages as exact label data |
-| `test` | everything the test suite needs |
-
-## Quick start
-
-Find the lines on a page image:
-
-```python
-from PIL import Image
-from greekocr.pages import process_page
-
-result = process_page(Image.open("page.png"), page_key="page-1")
-print(len(result.lines), len(result.pieces))
-```
-
-Tag a string by script and word type, and list the synthetic-data recipes:
-
-```sh
-.venv/bin/greekocr annotate 'ἅλφα Latin'
+UV_CACHE_DIR=/tmp/greekocr-uv-cache uv venv --python 3.11 .venv
+UV_CACHE_DIR=/tmp/greekocr-uv-cache uv pip install --python .venv/bin/python -e '.[test]'
+# Requires cargo/rustc and the Cargo.lock dependencies already cached locally.
+# Resolves or builds debug AND release in scratch; never downloads dependencies.
+.venv/bin/python -B -c 'from greekocr.harvest.predictor_path import predictor_binary; print(predictor_binary())'
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -p no:cacheprovider
+.venv/bin/greekocr --help
 .venv/bin/greekocr recipes
+.venv/bin/greekocr annotate 'ἅλφα Latin'
 ```
 
-## Test material
+The install creates `.venv/` and its executables. Optional extras in `pyproject.toml` cover `readers`, `warmstart`, `docling`, `docai` and `web`; heavy runtimes load only when needed. The default pytest scope is `tests/`; fast-line prototype tests need an explicit `prototypes/fast_lines/` path. See the [API](docs/API.md) and [standard](docs/STANDARD.md) for contracts.
 
-The test fixtures include line and page crops from third-party digitised books and datasets. They are here only so
-the tests can run, and they keep their sources' rights. Do not reuse them as a dataset.
+The frozen font predictor resolver uses `GREEK_OCR_PREDICTOR` (an explicit executable path), then `GREEK_OCR_BUILD_DIR/<profile>/greekocr-frozen-font-predict`, then an existing in-repo `scripts/harvest/filter_runtime/target/<profile>/greekocr-frozen-font-predict`. The default build directory on macOS is `~/Library/Caches/greek-ocr-toolkit/filter_runtime/<Cargo.lock SHA256>/` (`~/.cache/greek-ocr-toolkit/filter_runtime/<Cargo.lock SHA256>/` elsewhere). Set `GREEK_OCR_BUILD_DIR` to a writable scratch target directory for a read-only checkout. If no binary exists, the helper runs `cargo build --offline --locked --target-dir <scratch>` from `scripts/harvest/filter_runtime/`, then the same command with `--release`. `BUILD_RECEIPT.json` in scratch records the Cargo.lock SHA256, rustc version and both binary SHA256 values. A missing toolchain or offline dependency is an error; tests do not silently skip it. The session fixture exports the resolved `GREEK_OCR_PREDICTOR` to tests and replay adapters. Set `GREEK_OCR_DATA_ROOT` to the external data root to include all saved-data test parameters.
+
+The pipeline CLI defaults to reporting-only preflight. This example reads the existing historical census03 configuration and prints its declared parents and correction artifacts:
+
+```sh
+.venv/bin/python -B -m greekocr.harvest.line_pipeline_census \
+  docs/records/harvest/seg_census/remote_evidence/census03_config.json \
+  --out /tmp/greekocr-pipeline-preflight
+```
+
+Without `--execute`, this does not validate input files or process rows. A real run needs an exact configuration, external inputs and a verified worker runtime. Read the [pipeline guide](docs/B_training_data/c_pipeline/README.md), [Clariden runbook](docs/B_training_data/c_pipeline/RUNBOOK_CLARIDEN.md) and [job kinds](docs/records/harvest/seg_census/JOB_KINDS.md) before operations. Clariden distinguishes regression, parity and census jobs; deployment verification precedes smoke, and smoke precedes a full run. The archived deployment package has its own versions and resource settings.
+
+## 5. Data policy
+
+No tracked file may exceed **5 MB (5,000,000 bytes)**. Bulk data lives outside the repository under `GREEK_OCR_DATA_ROOT`; custody receipts live in [docs/cleanup_20261019/data_out/RECEIPTS/](docs/cleanup_20261019/data_out/RECEIPTS/). Each receipt records the artifact path, byte count, SHA256 and producing commit. New bulk crops and review sheets stay outside Git; small historical evidence and required test/demo fixtures already retained in Git are explicit exceptions, subject to the same 5 MB limit. Pools, census exports, bundles and other bulk outputs also stay outside git with receipts.
+
+Use the [move manifest](docs/cleanup_20261019/data_out/MOVE_MANIFEST.tsv) to retrieve moved artifacts and the [layout report](docs/cleanup_20261019/LAYOUT_REPORT.md) to translate historical documentation paths. Historical receipts preserve their original hashes and path identities. Source rights and held-out work boundaries remain attached to the data; Anemi material is internal only and must never be redistributed. Credentials belong in the macOS Keychain and are injected at launch.
+
+## 6. Where the history is
+
+The [records index](docs/records/INDEX.md) leads to completed reports, briefs, handoffs and receipts by track. The [12 October public README](docs/records/README_public_20261012.md) preserves the former public description. Old branches remain history; this cleanup does not rewrite git history. The [cleanup record](docs/cleanup_20261019/) contains the owner's brief, plan, inventories, layout report and data custody records. Read [AGENTS.md](AGENTS.md) for working roles and review rules.
+
+Sources: `docs/cleanup_20261019/OWNER_BRIEF.md`; `docs/cleanup_20261019/AGENTS_README_OUTLINE.md`; `docs/cleanup_20261019/PLAN.md`; `docs/cleanup_20261019/LAYOUT_REPORT.md`; `docs/A_ocr_development/README.md`; `docs/B_training_data/README.md`; `docs/B_training_data/a_google_ocr/README.md`; `docs/B_training_data/b_tools/README.md`; `docs/B_training_data/c_pipeline/README.md`; `docs/B_training_data/d_review/README.md`; `docs/shared/README.md`; `docs/records/INDEX.md`; `docs/harvest/line_pipeline/tool_versions.json`; `README.md` (previous contents); `AGENTS.md` (previous contents); `docs/records/README_public_20261012.md`; `docs/B_training_data/c_pipeline/pipeline.mmd`; `docs/B_training_data/c_pipeline/RUNBOOK_CLARIDEN.md`; `docs/B_training_data/d_review/HUMAN_REVIEW_SHEETS.md`; `docs/B_training_data/d_review/OWNER_SHEETS.md`; `docs/B_training_data/b_tools/LABEL_QUALITY_BENCHMARK.md`; `docs/ocr_program_2026-10-06/briefs/CLEAN5E_readme_agents.md`; `pyproject.toml`; `greekocr/harvest/line_pipeline.py`; `greekocr/harvest/line_pipeline_census.py`; `tests/test_size_guard.py`; `.gitignore`.

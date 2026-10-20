@@ -1,6 +1,6 @@
 """Build review-page data. Usage: build_review_data.py MODE OUT.json [PREVIOUS.json ...]
 
-MODE fixes : every line shown in earlier batches (docs/glyphs_shown_batches.json), re-run with the current tools, with
+MODE fixes : every line shown in earlier batches (docs/records/glyphs/glyphs_shown_batches.json), re-run with the current tools, with
              a before → now summary taken from the previous batches' data files (PREVIOUS.json, newest first)
 MODE new   : 40 lines never shown before, selected per issue after running every check on the whole pool
              (400 parliament sample crops + 44 fixture lines + regression pairs)

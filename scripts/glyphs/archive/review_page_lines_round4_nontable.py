@@ -21,7 +21,7 @@ from scripts.glyphs.archive.review_page_lines_round3 import CASES, in_place, act
 
 OUT = ROOT/'.astra/out'
 OLD = ROOT/'.astra/previous_round4_part1'
-REPORT = ROOT/'docs/reviews/PAGE_LINES_ROUND4_NONTABLE_20261009.md'
+REPORT = ROOT/'docs/records/reviews/PAGE_LINES_ROUND4_NONTABLE_20261009.md'
 Image.MAX_IMAGE_PIXELS = 500_000_000
 
 
@@ -80,7 +80,7 @@ def case_image(round_, number, key, rois):
 def audit():
     pages=sorted((ROOT/'.astra/pages').glob('*.png'))
     assert len(pages)==54
-    tables={p.stem for p in (ROOT/'docs/tables/annotations').glob('*.json')}
+    tables={p.stem for p in (ROOT/'docs/records/tables/annotations').glob('*.json')}
     rows=[];records={}
     for p in pages:
         key=p.stem;lines=read(OUT/f'{key}.lines.json');oldlines=read(OLD/f'{key}.lines.json')

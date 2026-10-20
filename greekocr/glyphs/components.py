@@ -185,6 +185,10 @@ class Band:
     degree: int = 1                                      # 1 straight, 2 curved
     xh_source: str = 'free_letters'                      # free_letters | substantial_letters | letter_width | prior
 
+    # Construction provenance only: degree=1 may also describe a mildly bent
+    # tracked polyline. Consumers must not flatten that geometry.
+    curve_is_straight: bool | None = None
+
     def at(self, x: float) -> tuple[float, float]:
         i = min(max(round(x), 0), len(self.top) - 1)
         return float(self.top[i]), float(self.bottom[i])
@@ -502,6 +506,7 @@ def _line_glyphs(crop, *, seed=0, xh_prior=None, focus=None,
     else:
         inl = _ransac_line(bx, by, .15 * xh + 1, rng) if len(bx) else np.zeros(0, bool)
     bottom, deg = _fit_curve(bx[inl], by[inl], w) if inl.any() else (np.full(w, min(h - 1.0, h * .7)), 0)
+    curve_is_straight = deg != 2
     # grow: evidence close to the current curve joins it, so the fit can follow a gradual trail or end curl
     for _ in range(4):
         if not len(bx):
@@ -512,6 +517,7 @@ def _line_glyphs(crop, *, seed=0, xh_prior=None, focus=None,
             break
         inl = grown
         bottom, deg = _fit_curve(bx[inl], by[inl], w)
+        curve_is_straight = deg != 2
     if inl.sum() >= 3:
         # Tall letters may continue a core established by the short body letters.
         tall = [r for r in raw if not ({'top', 'bottom'} & set(r['touches'])) and 1.4 * xh < r['y1'] - r['y0'] <= 1.9 * xh
@@ -532,8 +538,10 @@ def _line_glyphs(crop, *, seed=0, xh_prior=None, focus=None,
             if (np.percentile(r_cur, 90) < SEL_RATIO * np.percentile(r_lin, 90) and np.percentile(r_lin, 90) > SEL_FLOOR * xh) \
                     or end_bend:
                 inl, bottom, deg = tracked, curve, cdeg
+                curve_is_straight = False
             elif (r_lin <= .22 * xh + 1).all():
                 inl, bottom, deg = tracked, np.polyval(lin, np.arange(w, dtype=np.float64)), 1
+                curve_is_straight = True
     support = tuple((float(x), float(y), k) for x, y, k, i in zip(bx, by, pk, inl) if i)
     top = bottom - xh
 
@@ -603,5 +611,5 @@ def _line_glyphs(crop, *, seed=0, xh_prior=None, focus=None,
     stroke = float(np.median([c.stroke for c in lets])) if lets else 1.0
     ink_level = float(np.median(gray[ink])) if ink.any() else paper
     letter_w = _xheight(np.array([c.w for c in lets], float)) if lets else xh
-    return LineGlyphs(gray=gray, ink=ink, labels=labels, components=comps, band=Band(top, bottom, xh, len(support), support, deg, xh_source),
+    return LineGlyphs(gray=gray, ink=ink, labels=labels, components=comps, band=Band(top, bottom, xh, len(support), support, deg, xh_source, curve_is_straight),
                       paper=paper, ink_level=ink_level, stroke=stroke, letter_w=letter_w, dt=dt)

@@ -7,6 +7,7 @@ from time import perf_counter
 import cv2,numpy as np
 from .geometry import height_proxy,roi,line_axis
 from .contracts import bbox
+from .type_dot_runs import chains
 
 
 def analyze(gray,items,*,route='slow',version=1):
@@ -39,18 +40,8 @@ def analyze(gray,items,*,route='slow',version=1):
         pts=c[good]*[sx,sy]+[a,t]
         if len(pts)<3:continue
         axis=line_axis(q);pts=pts[np.argsort(pts[:,0])];best=[]
-        for u in range(len(pts)-2):
-            for v in range(u+1,min(len(pts),u+5)):
-                pitch=pts[v,0]-pts[u,0]
-                if not .35*h<pitch<3*h:continue
-                if abs(pts[v,1]-pts[u,1]-axis[1]*pitch)>.22*h:continue
-                chain=[u,v];last=v
-                while last<len(pts)-1:
-                    dx=pts[last+1:,0]-pts[last,0];dy=pts[last+1:,1]-pts[last,1]-axis[1]*dx
-                    n=np.rint(dx/pitch);near=np.flatnonzero((n>=1)&(n<=(2 if version>=2 else 1))&(abs(dx-n*pitch)<.25*pitch)&(abs(dy)<.22*h))
-                    if not len(near):break
-                    last+=1+int(near[0]);chain.append(last)
-                if len(chain)>len(best) and (version<2 or purity(chain)>.7):best=chain
+        for u,v,chain,pitch in chains(pts,axis[1],h,pitch_max=3,vertical=.22,horizontal=.25,lookahead=4,min_remaining=3,missing=version>=2):
+            if len(chain)>len(best) and (version<2 or purity(chain)>.7):best=chain
         if len(best)<3:continue
         cc=pts[best]
         if np.ptp(cc[:,0])<2*h:continue

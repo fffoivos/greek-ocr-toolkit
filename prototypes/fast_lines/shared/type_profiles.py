@@ -11,6 +11,8 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 from .geometry import line_axis, height_proxy
 from .contracts import bbox
+from . import observations as obs
+from .local_scale import contact_band
 
 
 def strip(gray,item,samples=None):
@@ -41,10 +43,8 @@ def measure_line(gray,item,detail=False,samples=12,version=2):
     h=prior/step
     # Local white reference is deliberately simple and shown by threshold masks.
     k=max(1,int(round(3*h)))|1
-    paper=cv2.morphologyEx(patch,cv2.MORPH_CLOSE,np.ones((k,k),np.uint8))
-    contrast=(paper.astype(np.float32)-patch)/np.maximum(paper,1)
-    ink=(contrast>.18).astype(np.uint8)
-    n,labels,allstats,centres=cv2.connectedComponentsWithStats(ink,8)
+    ink=obs.ink(patch,k,method="closing",threshold=.18,arithmetic="relative")
+    n,labels,allstats,centres=obs.components(ink)
     s=allstats[1:]; c=centres[1:]; n-=1
     valid=(s[:,3]>.4*h)&(s[:,3]<2.5*h)&(s[:,2]>.1*h)&(s[:,2]<4*h)&(s[:,4]>.055*h*h)
     # v1 included neighbouring ink. v2 isolates bottom-contact population first.
@@ -98,7 +98,8 @@ def measure_line(gray,item,detail=False,samples=12,version=2):
     dist=cv2.distanceTransform(ink,cv2.DIST_L2,3)
     ridge=(dist>0)&(dist>=cv2.dilate(dist,np.ones((3,3),np.uint8)))
     widths=2*dist[ridge]/measured
-    record=dict(xheight=float(measured*step),prior=prior,axis=axis.tolist(),xrange=[float(x[0]),float(x[-1])],
+    scale_evidence=contact_band(top,baseline,step,top_support=top_support,bottom_support=base_support,engineering_prior=prior)
+    record=dict(scale_evidence=scale_evidence,xheight=float(measured*step),prior=prior,axis=axis.tolist(),xrange=[float(x[0]),float(x[-1])],
         guides=guide,supports={k:int(v) for k,v in supports.items()},body_count=len(bodies),mark_count=len(marks),
         component_width_xh=float(np.median(s[bodies,2])/measured) if len(bodies) else None,
         gap_xh=np.quantile(gaps,[.25,.5,.75]).tolist() if gaps else None,

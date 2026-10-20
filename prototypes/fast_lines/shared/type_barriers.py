@@ -23,8 +23,35 @@ def protect(gray,item,height):
         candidate=dict(bbox=[x+a,y+b,x+w+a,y+h+b])
         rule,reason=verify_rule(gray,candidate,height)
         if rule is None:
-            decisions.append(dict(bbox=candidate['bbox'],decision='abstain',reason=reason))
-            return [],decisions
+            # A nomination is not a separator certificate. Retain only the
+            # independently witnessed side; the nominated corridor stays unknown.
+            # Use the recovery caller's body-chain contract, not a majority vote.
+            from .type_residual_recovery import piece_support,supported_extent
+            from .type_lattice import point_ownership
+            points=np.asarray(item.get('type_witness_points',[]),float).reshape(-1,2)
+            surviving=[];sides=[]
+            for poly in polys:
+                current=dict(item,polygon=poly)
+                here=points[np.asarray(point_ownership(points,[current]),bool)]
+                if not len(here):continue
+                left=clip_polygon(poly,0.,candidate['bbox'][0]-.12*height,1)
+                right=clip_polygon(poly,0.,candidate['bbox'][2]+.12*height,-1)
+                supported=[(side,p) for side,p in [('left',left),('right',right)]
+                           if len(p)>=3 and piece_support(dict(item,polygon=p),here,[],height)]
+                if len(supported)==1:
+                    side,p=supported[0]
+                    piece=dict(item,polygon=p)
+                    try:bounds=np.asarray(item.get('type_support_bounds',[]))
+                    except (TypeError,ValueError):bounds=np.array([])
+                    if bounds.shape==(2,) and bounds.dtype.kind in 'iuf' and np.isfinite(bounds).all() and bounds[0]<bounds[1]:
+                        piece=supported_extent(piece)
+                        if piece is None or not piece_support(piece,here,[],height):continue
+                    surviving.append(piece['polygon']);sides.append(side)
+            decisions.append(dict(bbox=candidate['bbox'],decision='local unknown' if surviving else 'abstain',
+                                  reason=reason,retained_sides=sides))
+            polys=surviving
+            if not polys:return [],decisions
+            continue
         ok,density=corridor_clear(gray,item,rule,height)
         if not ok:
             decisions.append(dict(bbox=candidate['bbox'],decision='abstain',reason='ink beside rule',density=density))

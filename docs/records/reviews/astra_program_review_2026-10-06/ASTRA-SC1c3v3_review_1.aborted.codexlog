@@ -1,0 +1,2518 @@
+OpenAI Codex v0.159.2
+--------
+workdir: /Users/foivoskarounos-zamparloukos/Projects/glossapi-ocr-local/experiments/ocr_program_review_20261006/review_scratch/ASTRA-SC1c3v3
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR] (network access enabled)
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 01a1470e-2aeb-7040-ad07-aea9b89e164c
+--------
+user
+Repository root (READ-ONLY, use absolute paths or `cd /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck` in each command; writes there are blocked): /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+Writable scratch for temporary outputs: /Users/foivoskarounos-zamparloukos/Projects/glossapi-ocr-local/experiments/ocr_program_review_20261006/review_scratch/ASTRA-SC1c3v3 (your cwd) and /tmp. Run pytest from the repo root with
+PYTHONDONTWRITEBYTECODE=1 and -p no:cacheprovider so it never writes into the repository.
+
+# ASTRA-SC1 cycle 3 — verification pass 3 (same reviewer session): SF6 only
+
+After your SF5 pass (CLOSED), the coordinator ruled that any deletion of a Google character on ONE absent source is the unobserved-as-absent
+pattern (your out-of-scope notes: keraia `Ι'.` → `Ι.`, leading opening quote). SF6 is committed on `opus/spellcheck` (see `git log -1`;
+`docs/labelfix/spellcheck/SF6_REPORT.md`, policy `sf6-release-v1`). The rule, exactly as ruled: a release may delete a character present in
+Google's label only with two positive absence signals — marks: reader (A∧B as one) AND detector, or reader AND recogniser text;
+apostrophes/quotes/keraia: detector absent AND recogniser text absent; all observed, scored, in-window; replacements count as deletions of the
+replaced character, elision aliases excepted; anything less is HOLD.
+
+## Verify SF6 only
+1. Is the rule implemented exactly, and only it? Diff 05f2dafb..HEAD (`release_gate.py`, `l1_common.py`). Probe: can any Google character
+   still be deleted on one signal (missing/unscored/clipped states, replacement paths, multi-character edits, alias paths, PRESENCE/FULL/AE)?
+   Is "positive absence" for the recogniser text sound (the report uses a saved `recognition_confidence` and a located span)?
+2. SF5 regression: SF6 edited `tests/labelfix/test_sf5.py` — confirm each edit only replaces a release expectation by an exact HOLD check
+   under sf6 and keeps the composer/slot assertions (no weakening).
+3. The cost and its cause: held-out AB corrected 45 → 11 (lines 35 → 6), wrong 2 → 0. The report says the local 666 artifact lacks full
+   extraction coverage, so reader absence is often unavailable locally. Is that held-out number a property of the rule or of the local
+   evidence? State what a full-runtime recomposition would need to answer it.
+4. Note, do not rule: SF5's spacing-breathing move (`-᾿Αλλά` → `-Ἀλλά`) now always HOLDs because consuming the spacing ᾿ counts as a deletion.
+
+Last line: `ASTRA-SC1c3v3 VERDICT: <CLOSED|NOT CLOSED>; SF6 rule exact <yes|no>; SF5 tests not weakened <yes|no>; recompose under sf6-release-v1 allowed: <yes|no>`.
+
+deprecated: `[features].collab` is deprecated. Use `[features].multi_agent` instead.
+Enable it with `--enable multi_agent` or `[features].multi_agent` in config.toml. See https://developers.openai.com/codex/config-basic#feature-flags for details.
+codex
+I’ll verify the SF6 deletion rule against the diff, probe what each path accepts as positive absence evidence, and check every SF5 test edit. I’ll also separate the rule’s effect from the limits of the local 666-line evidence.
+exec
+/bin/zsh -lc 'cat docs/labelfix/spellcheck/SF6_REPORT.md' in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ succeeded in 0ms:
+# SF6 — two positive absence signals for Google-character deletion
+
+Policy **`sf6-release-v1`**. The keraia witness is **HOLD**; **64/64 reviewer quote probes HOLD**. A release with an uncertified deletion becomes a whole-line HOLD. Insertions, SF5 text proposals, reader naming, agreement, observation predicates and K1 are unchanged.
+
+**All-green acceptance is not met:** 1100 labelfix tests pass, with 1 environment setup error(s). The unchanged capture test cannot bind its loopback socket in this sandbox (`PermissionError: [Errno 1] Operation not permitted`). The SF5 baseline has the same setup error with 847 passes. No test is skipped, deselected or weakened to hide it. **census witnesses pending**.
+
+Launch HEAD `f267dfaa` on `opus/spellcheck`; frozen production sources are read directly from `05f2dafb` and verified byte-identical to launch. Network OFF; Mac CPU; saved evidence only; detector/R1/CTC inference 0; no `.git` or other-worktree writes. The aborted first evidence directory was renamed to `SF6_evidence_aborted_run1/` and none of its files were reused.
+
+## The one rule and the evidence contract
+
+Every removed or replaced NFD character is checked at its original letter boundary. Canonical Unicode equivalence is unchanged. SF5 word-final elision aliases remain one atom, including next to real mark edits; other replacements count as deletions. Repeated signs keep their multiplicity. A spacing breathing attached as a combining mark still deletes the old spacing character, so SF6 can HOLD an otherwise valid SF5 atomic proposal.
+
+Combining/spacing marks require **reader AND detector**, or **reader AND recogniser text**. The coordinator’s **A∧B counts as one reader** in every mode, including PRESENCE/FULL; AE also retains its E check. Agreement is not independent print evidence. Apostrophes, quotes and numeral keraia require **detector AND recogniser text**; R1 supplies no punctuation absence signal. Other characters require a supported reader absence and a second source; no such reader head exists in the retained evidence, so these deletions HOLD.
+
+A reader absence needs a supported head, saved predictions from both A and B, scored coverage with a finite in-image span, a known evidence state, an empty uncertainty list, and no applicable slot/observation veto. Missing or conflicting B is not a reader absence, even if A and the detector agree. Detector absence needs an actually scored head, explicit `OBSERVED` coverage of the relevant region, a valid window, resolved localisation and segmentation, no unnamed or uncertain ink and no relevant clipping. Empty candidate lists without that evidence are UNKNOWN. The current apostrophe detector only scores word-final δ/τ/ρ/θ/π; an empty Ι, κ or μ slot is not a negative punctuation observation. Quote absence additionally needs the leading-left region observed. Keraia has no scored absence head in these saved records.
+
+Recogniser-text absence needs aligned letter context, a finite saved `recognition_confidence` in [0,1], a located in-image span, and no applicable uncertainty/clipping. An unscored string is not a positive absence. Its score is now included in the content-bound evidence envelope because SF6 consumes it. No missing confidence, coverage or observation state is filled in. This is evidence plumbing for the deletion rule, not a new source decision.
+
+Production changes: `release_gate.py` adds the deletion inventory/guard, policy id and score binding; `l1_common.overlay` records each decision and adds the whole-line HOLD before release. Existing composer functions and the SF5 text policy are byte/AST unchanged. All no-HOLD outputs retain their exact SF5 label and status. The verification checks this worktree and branch’s Git metadata separately from the shared common directory: concurrent other-worktree/branch changes and `info/refs` drift are recorded explicitly, not reported as globally unchanged. [Verification receipt](SF6_evidence/verification.json).
+
+## Held-out 666 — SF5 → SF6
+
+The original instrument has 80 Google combining-mark errors, 10,046 known and 300 unknown-truth mapped/scored slots per mode. Frozen slot decisions remain identical (81,700 records). The table applies only SF6’s additional whole-line veto to those original slot scores; a failing deletion can therefore HOLD other slots on that same line. These are scores with the new release veto applied, not newly inferred reader scores. The original SF5 slot rows are the left side of each arrow. Existing SF5 line vetoes are not retroactively added to that historical slot instrument.
+
+The local 666-line artifact lacks full extraction coverage. Its certified frozen decisions are retained, but unavailable raw coverage is never used as positive reader absence. This is a saved-decision replay, not full runtime recomposition. Before applying SF6, all 2,664 SF5 effective line labels and statuses reproduce exactly.
+
+| Mode | Row | Corrected /80, elision K/D/A or deleted characters | Wrong | Missed | HOLD errors | New | Instrument lines held /666 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| PRESENCE | mark | 42 → 10 | 1 → 0 | 2 → 2 | 35 → 68 | 5 → 0 | 348 → 383 |
+| PRESENCE | elision kept/deleted/added | 212/1/1 → 212/1/1 | — | — | — | — | — |
+| PRESENCE | deletion mark/apostrophe/quote/keraia/other | 22/0/1/0/0 → 0/0/0/0/0 | — | — | — | — | new HOLD 17/0/1/0/0 |
+| FULL | mark | 37 → 8 | 0 → 0 | 0 → 0 | 43 → 72 | 3 → 0 | 365 → 391 |
+| FULL | elision kept/deleted/added | 212/1/1 → 212/1/1 | — | — | — | — | — |
+| FULL | deletion mark/apostrophe/quote/keraia/other | 11/0/1/0/0 → 0/0/0/0/0 | — | — | — | — | new HOLD 9/0/1/0/0 |
+| ENSEMBLE_AB | mark | 45 → 11 | 2 → 0 | 6 → 6 | 27 → 63 | 6 → 1 | 274 → 325 |
+| ENSEMBLE_AB | elision kept/deleted/added | 212/1/1 → 212/1/1 | — | — | — | — | — |
+| ENSEMBLE_AB | deletion mark/apostrophe/quote/keraia/other | 34/0/2/0/0 → 0/0/0/0/0 | — | — | — | — | new HOLD 27/0/2/0/0 |
+| ENSEMBLE_AE | mark | 46 → 10 | 2 → 0 | 6 → 6 | 26 → 64 | 9 → 6 | 261 → 317 |
+| ENSEMBLE_AE | elision kept/deleted/added | 212/1/1 → 212/1/1 | — | — | — | — | — |
+| ENSEMBLE_AE | deletion mark/apostrophe/quote/keraia/other | 33/0/3/0/0 → 0/0/0/0/0 | — | — | — | — | new HOLD 26/0/3/0/0 |
+
+The deletion row counts Google NFD characters removed from **released** labels, by source character class; it is not print-truth scoring. New HOLD vectors count lines, and classes can overlap. The elision row scores effective labels, retaining original Google on HOLD. Print truth covers 213 printed elisions and 5 certified absent sites on 180/666 lines, with 0 complete lines certified: pixel-adjudicated Wikisource text when supported by R0, otherwise the R0 adjudication. Ten quote scopes and one unresolved scope are excluded. The exact coverage and source counts are preserved in [held-out metrics](SF6_evidence/heldout/metrics.json).
+
+Actual whole-line release statuses, including the original Google guards:
+
+| Mode | Corrected lines | Unchanged lines | Held lines |
+| --- | --- | --- | --- |
+| PRESENCE | 24 → 6 | 276 → 276 | 366 → 384 |
+| FULL | 15 → 5 | 269 → 269 | 382 → 392 |
+| ENSEMBLE_AB | 35 → 6 | 333 → 333 | 298 → 327 |
+| ENSEMBLE_AE | 38 → 9 | 338 → 338 | 290 → 319 |
+
+Every changed mark outcome is listed below. The source parts and physical records did not change; only the SF6 whole-line veto changed the score. [Full per-slot events, including reasons](SF6_evidence/heldout/per_slot_changes.jsonl), [original slot identity proof](SF6_evidence/heldout/per_slot_proof.jsonl.gz), [line proposals, labels and absence checks](SF6_evidence/heldout/release_labels.jsonl.gz).
+
+| Line ID | Mode | Physical slot / recogniser start | SF5 → SF6 |
+| --- | --- | --- | --- |
+| 9c1dca9b-p000015-l0062 | PRESENCE | 20 / 25 | corrected → HOLD |
+| 9c1dca9b-p000015-l0062 | FULL | 20 / 25 | corrected → HOLD |
+| 9c1dca9b-p000015-l0062 | ENSEMBLE_AB | 20 / 25 | corrected → HOLD |
+| 9c1dca9b-p000015-l0062 | ENSEMBLE_AE | 20 / 25 | corrected → HOLD |
+| 9c1dca9b-p000015-l0065 | PRESENCE | 8 / 10 | corrected → HOLD |
+| 9c1dca9b-p000015-l0065 | FULL | 8 / 10 | corrected → HOLD |
+| 9c1dca9b-p000015-l0065 | ENSEMBLE_AB | 8 / 10 | corrected → HOLD |
+| 9c1dca9b-p000015-l0065 | ENSEMBLE_AE | 8 / 10 | corrected → HOLD |
+| 602cc72e-p000353-l0006 | PRESENCE | 6 / 5 | corrected → HOLD |
+| 602cc72e-p000353-l0006 | FULL | 6 / 5 | corrected → HOLD |
+| 602cc72e-p000353-l0006 | ENSEMBLE_AB | 6 / 5 | corrected → HOLD |
+| 602cc72e-p000353-l0006 | ENSEMBLE_AE | 6 / 5 | corrected → HOLD |
+| 177b717d-p000097-l0007 | PRESENCE | 1 / 0 | corrected → HOLD |
+| 177b717d-p000097-l0007 | FULL | 1 / 0 | corrected → HOLD |
+| 177b717d-p000097-l0007 | ENSEMBLE_AB | 1 / 0 | corrected → HOLD |
+| 177b717d-p000097-l0007 | ENSEMBLE_AE | 1 / 0 | corrected → HOLD |
+| 602cc72e-p000167-l0027 | ENSEMBLE_AB | 14 / 18 | wrong → HOLD |
+| 602cc72e-p000167-l0027 | ENSEMBLE_AE | 14 / 18 | wrong → HOLD |
+| 177b717d-p000013-l0009 | PRESENCE | 1 / 0 | corrected → HOLD |
+| 177b717d-p000013-l0009 | FULL | 1 / 0 | corrected → HOLD |
+| 177b717d-p000013-l0009 | ENSEMBLE_AB | 1 / 0 | corrected → HOLD |
+| 177b717d-p000013-l0009 | ENSEMBLE_AE | 1 / 0 | corrected → HOLD |
+| 177b717d-p000067-l0009 | ENSEMBLE_AB | 27 / 34 | corrected → HOLD |
+| 177b717d-p000067-l0009 | ENSEMBLE_AE | 27 / 34 | corrected → HOLD |
+| 384c3f89-p000096-l0005 | PRESENCE | 4 / 4 | corrected → HOLD |
+| 384c3f89-p000096-l0005 | FULL | 4 / 4 | corrected → HOLD |
+| 384c3f89-p000096-l0005 | ENSEMBLE_AB | 4 / 4 | corrected → HOLD |
+| 384c3f89-p000096-l0005 | ENSEMBLE_AE | 4 / 4 | corrected → HOLD |
+| 177b717d-p000097-l0010 | PRESENCE | 2 / 1 | corrected → HOLD |
+| 177b717d-p000097-l0010 | FULL | 2 / 1 | corrected → HOLD |
+| 177b717d-p000097-l0010 | ENSEMBLE_AB | 2 / 1 | corrected → HOLD |
+| 177b717d-p000097-l0010 | ENSEMBLE_AE | 2 / 1 | corrected → HOLD |
+| 384c3f89-p000096-l0004 | ENSEMBLE_AB | 15 / 20 | wrong → HOLD |
+| 51fe7386-p000026-l0016 | ENSEMBLE_AB | 5 / 5 | corrected → HOLD |
+| 51fe7386-p000026-l0016 | ENSEMBLE_AE | 5 / 5 | corrected → HOLD |
+| 384c3f89-p000068-l0036 | PRESENCE | 2 / 1 | corrected → HOLD |
+| 384c3f89-p000068-l0036 | FULL | 2 / 1 | corrected → HOLD |
+| 384c3f89-p000068-l0036 | ENSEMBLE_AB | 2 / 1 | corrected → HOLD |
+| 384c3f89-p000068-l0036 | ENSEMBLE_AE | 2 / 1 | corrected → HOLD |
+| 384c3f89-p000096-l0010 | PRESENCE | 3 / 1 | corrected → HOLD |
+| 384c3f89-p000096-l0010 | FULL | 3 / 1 | corrected → HOLD |
+| 384c3f89-p000096-l0010 | ENSEMBLE_AB | 3 / 1 | corrected → HOLD |
+| 384c3f89-p000096-l0010 | ENSEMBLE_AE | 3 / 1 | corrected → HOLD |
+| 384c3f89-p000091-l0017 | PRESENCE | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000091-l0017 | FULL | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000091-l0017 | ENSEMBLE_AB | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000091-l0017 | ENSEMBLE_AE | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000068-l0033 | ENSEMBLE_AB | 2 / 1 | corrected → HOLD |
+| 384c3f89-p000068-l0033 | ENSEMBLE_AE | 2 / 1 | corrected → HOLD |
+| 384c3f89-p000050-l0041 | PRESENCE | 11 / 12 | corrected → HOLD |
+| 384c3f89-p000050-l0041 | FULL | 11 / 12 | corrected → HOLD |
+| 384c3f89-p000050-l0041 | ENSEMBLE_AB | 11 / 12 | corrected → HOLD |
+| 384c3f89-p000050-l0041 | ENSEMBLE_AE | 11 / 12 | corrected → HOLD |
+| 384c3f89-p000142-l0003 | PRESENCE | 12 / 11 | corrected → HOLD |
+| 384c3f89-p000142-l0003 | FULL | 12 / 11 | corrected → HOLD |
+| 384c3f89-p000142-l0003 | ENSEMBLE_AE | 12 / 11 | corrected → HOLD |
+| 384c3f89-p000091-l0039 | ENSEMBLE_AB | 29 / 44 | corrected → HOLD |
+| 384c3f89-p000091-l0039 | ENSEMBLE_AE | 29 / 44 | corrected → HOLD |
+| 384c3f89-p000053-l0004 | PRESENCE | 14 / 20 | corrected → HOLD |
+| 384c3f89-p000053-l0004 | FULL | 14 / 20 | corrected → HOLD |
+| 384c3f89-p000182-l0016 | PRESENCE | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000182-l0016 | FULL | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000182-l0016 | ENSEMBLE_AB | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000182-l0016 | ENSEMBLE_AE | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000183-l0029 | PRESENCE | 2 / 1 | corrected → HOLD |
+| 384c3f89-p000183-l0029 | FULL | 2 / 1 | corrected → HOLD |
+| 384c3f89-p000183-l0029 | ENSEMBLE_AB | 2 / 1 | corrected → HOLD |
+| 384c3f89-p000183-l0029 | ENSEMBLE_AE | 2 / 1 | corrected → HOLD |
+| 384c3f89-p000205-l0011 | PRESENCE | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000205-l0011 | FULL | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000205-l0011 | ENSEMBLE_AB | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000205-l0011 | ENSEMBLE_AE | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000050-l0027 | PRESENCE | 3 / 3 | corrected → HOLD |
+| 384c3f89-p000050-l0027 | FULL | 3 / 3 | corrected → HOLD |
+| 384c3f89-p000050-l0027 | ENSEMBLE_AB | 3 / 3 | corrected → HOLD |
+| 384c3f89-p000050-l0027 | ENSEMBLE_AE | 3 / 3 | corrected → HOLD |
+| 51fe7386-p000024-l0016 | PRESENCE | 31 / 40 | corrected → HOLD |
+| 51fe7386-p000024-l0016 | FULL | 31 / 40 | corrected → HOLD |
+| 51fe7386-p000024-l0016 | ENSEMBLE_AB | 31 / 40 | corrected → HOLD |
+| 51fe7386-p000024-l0016 | ENSEMBLE_AE | 31 / 40 | corrected → HOLD |
+| 384c3f89-p000096-l0031 | PRESENCE | 22 / 34 | corrected → HOLD |
+| 384c3f89-p000096-l0031 | FULL | 22 / 34 | corrected → HOLD |
+| 384c3f89-p000096-l0031 | ENSEMBLE_AB | 22 / 34 | corrected → HOLD |
+| 384c3f89-p000096-l0031 | ENSEMBLE_AE | 22 / 34 | corrected → HOLD |
+| 384c3f89-p000059-l0023 | PRESENCE | 15 / 24 | corrected → HOLD |
+| 384c3f89-p000059-l0023 | FULL | 15 / 24 | corrected → HOLD |
+| 384c3f89-p000059-l0023 | ENSEMBLE_AB | 15 / 24 | corrected → HOLD |
+| 384c3f89-p000059-l0023 | ENSEMBLE_AE | 15 / 24 | corrected → HOLD |
+| 384c3f89-p000053-l0028 | PRESENCE | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000053-l0028 | FULL | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000053-l0028 | ENSEMBLE_AB | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000053-l0028 | ENSEMBLE_AE | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000030-l0010 | PRESENCE | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000030-l0010 | FULL | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000030-l0010 | ENSEMBLE_AB | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000030-l0010 | ENSEMBLE_AE | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000205-l0005 | ENSEMBLE_AE | 1 / 0 | corrected → HOLD |
+| 384c3f89-p000182-l0027 | PRESENCE | 8 / 12 | corrected → HOLD |
+| 384c3f89-p000182-l0027 | PRESENCE | 28 / 42 | corrected → HOLD |
+| 384c3f89-p000182-l0027 | FULL | 8 / 12 | corrected → HOLD |
+| 384c3f89-p000182-l0027 | ENSEMBLE_AB | 8 / 12 | corrected → HOLD |
+| 384c3f89-p000182-l0027 | ENSEMBLE_AB | 28 / 42 | corrected → HOLD |
+| 384c3f89-p000182-l0027 | ENSEMBLE_AE | 28 / 42 | corrected → HOLD |
+| 384c3f89-p000182-l0031 | PRESENCE | 8 / 11 | corrected → HOLD |
+| 384c3f89-p000182-l0031 | ENSEMBLE_AB | 8 / 11 | corrected → HOLD |
+| 384c3f89-p000182-l0031 | ENSEMBLE_AE | 8 / 11 | corrected → HOLD |
+| 51fe7386-p000024-l0020 | PRESENCE | 39 / 51 | corrected → HOLD |
+| 51fe7386-p000024-l0020 | FULL | 39 / 51 | corrected → HOLD |
+| 51fe7386-p000024-l0020 | ENSEMBLE_AB | 39 / 51 | corrected → HOLD |
+| 51fe7386-p000024-l0020 | ENSEMBLE_AE | 39 / 51 | corrected → HOLD |
+| 177b717d-p000017-l0012 | PRESENCE | 34 / 49 | corrected → HOLD |
+| 177b717d-p000017-l0012 | FULL | 34 / 49 | corrected → HOLD |
+| 177b717d-p000017-l0012 | ENSEMBLE_AB | 34 / 49 | corrected → HOLD |
+| 177b717d-p000017-l0012 | ENSEMBLE_AE | 34 / 49 | corrected → HOLD |
+| 384c3f89-p000142-l0030 | PRESENCE | 30 / 35 | corrected → HOLD |
+| 384c3f89-p000142-l0030 | FULL | 30 / 35 | corrected → HOLD |
+| 384c3f89-p000142-l0030 | ENSEMBLE_AB | 30 / 35 | corrected → HOLD |
+| 384c3f89-p000142-l0030 | ENSEMBLE_AE | 30 / 35 | corrected → HOLD |
+| 384c3f89-p000059-l0027 | PRESENCE | 1 / 0 | wrong → HOLD |
+| 384c3f89-p000059-l0027 | ENSEMBLE_AE | 1 / 0 | wrong → HOLD |
+| 384c3f89-p000121-l0023 | PRESENCE | 28 / 36 | corrected → HOLD |
+| 384c3f89-p000121-l0023 | FULL | 28 / 36 | corrected → HOLD |
+| 384c3f89-p000121-l0023 | ENSEMBLE_AB | 28 / 36 | corrected → HOLD |
+| 384c3f89-p000121-l0023 | ENSEMBLE_AE | 28 / 36 | corrected → HOLD |
+| 384c3f89-p000030-l0021 | PRESENCE | 39 / 52 | corrected → HOLD |
+| 384c3f89-p000030-l0021 | ENSEMBLE_AB | 39 / 52 | corrected → HOLD |
+| 384c3f89-p000030-l0021 | ENSEMBLE_AE | 39 / 52 | corrected → HOLD |
+| 9c1dca9b-p000005-l0017 | PRESENCE | 23 / 28 | corrected → HOLD |
+| 9c1dca9b-p000005-l0017 | FULL | 23 / 28 | corrected → HOLD |
+| 9c1dca9b-p000005-l0017 | ENSEMBLE_AB | 10 / 12 | corrected → HOLD |
+| 9c1dca9b-p000005-l0017 | ENSEMBLE_AB | 23 / 28 | corrected → HOLD |
+| 9c1dca9b-p000005-l0017 | ENSEMBLE_AE | 10 / 12 | corrected → HOLD |
+| 9c1dca9b-p000005-l0017 | ENSEMBLE_AE | 23 / 28 | corrected → HOLD |
+| 384c3f89-p000091-l0014 | PRESENCE | 10 / 13 | corrected → HOLD |
+| 384c3f89-p000091-l0014 | FULL | 10 / 13 | corrected → HOLD |
+| 384c3f89-p000091-l0014 | ENSEMBLE_AE | 10 / 13 | corrected → HOLD |
+
+## M2 DEV — SF5 → SF6
+
+Only the 273-card DEV allowlist is decoded from the cache; 0 locked stratum (ii) records are decoded or composed. There are 43 enumerated Google mark-error pairs and 212 marks-correct reference cards. B/E are missing in this cache; ensemble HOLDs remain. Complete saved runtime is replayed. Original slot decisions remain identical; the table adds only SF6’s whole-line veto, even on lines that already had a different SF5 line HOLD. That explains why slot scores can decrease while the final release counts stay unchanged.
+
+| Mode | Row | Corrected /43, elision K/D/A or deleted characters | Missed | HOLD errors | Changed control slots | Instrument lines held /273 |
+| --- | --- | --- | --- | --- | --- | --- |
+| PRESENCE | mark | 7 → 2 | 6 → 6 | 30 → 35 | 16 → 0 | 257 → 260 |
+| PRESENCE | elision kept/deleted/added | UNKNOWN → UNKNOWN (0 certified scopes) | — | — | — | — |
+| PRESENCE | deletion mark/apostrophe/quote/keraia/other | 0/0/0/0/0 → 0/0/0/0/0 | — | — | — | new HOLD 0/0/0/0/0 |
+| FULL | mark | 7 → 2 | 6 → 6 | 30 → 35 | 9 → 0 | 258 → 261 |
+| FULL | elision kept/deleted/added | UNKNOWN → UNKNOWN (0 certified scopes) | — | — | — | — |
+| FULL | deletion mark/apostrophe/quote/keraia/other | 0/0/0/0/0 → 0/0/0/0/0 | — | — | — | new HOLD 0/0/0/0/0 |
+| ENSEMBLE_AB | mark | 0 → 0 | 6 → 6 | 37 → 37 | 0 → 0 | 273 → 273 |
+| ENSEMBLE_AB | elision kept/deleted/added | UNKNOWN → UNKNOWN (0 certified scopes) | — | — | — | — |
+| ENSEMBLE_AB | deletion mark/apostrophe/quote/keraia/other | 0/0/0/0/0 → 0/0/0/0/0 | — | — | — | new HOLD 0/0/0/0/0 |
+| ENSEMBLE_AE | mark | 0 → 0 | 6 → 6 | 37 → 37 | 0 → 0 | 273 → 273 |
+| ENSEMBLE_AE | elision kept/deleted/added | UNKNOWN → UNKNOWN (0 certified scopes) | — | — | — | — |
+| ENSEMBLE_AE | deletion mark/apostrophe/quote/keraia/other | 0/0/0/0/0 → 0/0/0/0/0 | — | — | — | new HOLD 0/0/0/0/0 |
+
+DEV elision truth is UNKNOWN: 0 certified positive or negative sites, 0/273 lines with punctuation truth, human fields all null. No elision-accuracy claim is made. [DEV metrics](SF6_evidence/m2_dev/metrics.json), [allowlist/input receipt](SF6_evidence/m2_dev/receipt.json).
+
+| Mode | Corrected lines | Unchanged lines | Held lines |
+| --- | --- | --- | --- |
+| PRESENCE | 0 → 0 | 13 → 13 | 260 → 260 |
+| FULL | 0 → 0 | 12 → 12 | 261 → 261 |
+| ENSEMBLE_AB | 0 → 0 | 0 → 0 | 273 → 273 |
+| ENSEMBLE_AE | 0 → 0 | 0 → 0 | 273 → 273 |
+
+Changed DEV mark-pair outcomes, by mapped slot group (all are the new whole-line veto):
+
+| Card | Mode | Google NFD letter offsets | SF5 → SF6 |
+| --- | --- | --- | --- |
+| t4c/bsb_poly1850/c013 | PRESENCE | [45, 46, 47, 48, 49, 50, 51, 52, 53, 54] | corrected → HOLD |
+| t4c/bsb_poly1850/c013 | FULL | [45, 46, 47, 48, 49, 50, 51, 52, 53, 54] | corrected → HOLD |
+| t4c/bsb_poly1850/c033 | PRESENCE | [74, 75, 76, 78, 79] | corrected → HOLD |
+| t4c/bsb_poly1850/c033 | FULL | [74, 75, 76, 78, 79] | corrected → HOLD |
+| t4c/oa_poly1900/c006 | PRESENCE | [32, 33, 34, 35, 36] | corrected → HOLD |
+| t4c/oa_poly1900/c006 | FULL | [32, 33, 34, 35, 36] | corrected → HOLD |
+| t4c/pleias_poly1850/c037 | PRESENCE | [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12] | corrected → HOLD |
+| t4c/pleias_poly1850/c037 | FULL | [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12] | corrected → HOLD |
+| c0/ia_greek_latin/c004 | PRESENCE | [57, 59, 60] | corrected → HOLD |
+| c0/ia_greek_latin/c004 | FULL | [57, 59, 60] | corrected → HOLD |
+
+The complete per-slot control changes are linked separately: [DEV per-slot changes](SF6_evidence/m2_dev/control_slot_changes.jsonl).
+
+## Punctuation-deletion HOLDs by class
+
+Each cell is **newly held / all held with an uncertified attempted deletion**. The latter includes lines already held under SF5. Counts are lines per mode/cohort; classes can overlap. Punctuation uses detector AND recogniser text throughout, never R1 A+B.
+
+| Cohort | Mode | Apostrophe | Quote | Keraia | Distinct punctuation lines |
+| --- | --- | --- | --- | --- | --- |
+| held-out | PRESENCE | 0 / 4 | 1 / 6 | 0 / 0 | 1 / 10 |
+| held-out | FULL | 0 / 4 | 1 / 6 | 0 / 0 | 1 / 10 |
+| held-out | ENSEMBLE_AB | 0 / 4 | 2 / 6 | 0 / 0 | 2 / 10 |
+| held-out | ENSEMBLE_AE | 0 / 4 | 3 / 6 | 0 / 0 | 3 / 10 |
+| M2 DEV | PRESENCE | 0 / 2 | 0 / 2 | 0 / 1 | 0 / 5 |
+| M2 DEV | FULL | 0 / 2 | 0 / 2 | 0 / 1 | 0 / 5 |
+| M2 DEV | ENSEMBLE_AB | 0 / 2 | 0 / 2 | 0 / 1 | 0 / 5 |
+| M2 DEV | ENSEMBLE_AE | 0 / 2 | 0 / 2 | 0 / 1 | 0 / 5 |
+| l1a | ENSEMBLE_AB | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| quote_probe | PRESENCE | 0 / 0 | 16 / 16 | 0 / 0 | 16 / 16 |
+| quote_probe | FULL | 0 / 0 | 16 / 16 | 0 / 0 | 16 / 16 |
+| quote_probe | ENSEMBLE_AB | 0 / 0 | 16 / 16 | 0 / 0 | 16 / 16 |
+| quote_probe | ENSEMBLE_AE | 0 / 0 | 16 / 16 | 0 / 0 | 16 / 16 |
+| sf5 | ENSEMBLE_AB | 2 / 2 | 0 / 0 | 1 / 1 | 3 / 3 |
+
+Across all measured released SF5 line/mode identities, deduplicating overlapping witness cohorts: **8 single-certified-source deletions released → 0**; **74 newly held punctuation line/mode identities** (apostrophe 2, quote 71, keraia 1). This includes all four held-out/DEV modes and all 64 synthetic reviewer probes; it is not a full-production prevalence estimate. Missing-evidence deletions are also held and are counted separately from single-certified-source cases in the machine-readable metrics.
+
+## SF5 and L1A regression witnesses
+
+All 56 SF5 witnesses and all 48 L1A audit lines are listed individually. Ten SF5 lines and seven L1A lines change from release to HOLD; every other label/status is exact SF5 parity. Cohorts overlap on the six original L1A defect witnesses. Both known reader naming errors now HOLD: their saved wrong mark predictions remain unchanged. The two spacing-breathing proposals also HOLD because attachment replaces Google’s spacing character and the reader does not say that breathing is absent. [Full original/recogniser/before/after labels and source checks](SF6_evidence/witness_results.jsonl.gz), [source custody and all 48 L1A slot-parity checks](SF6_evidence/witness_inputs_receipt.json).
+
+### 56 SF5 lines
+
+| Line ID | SF5 | SF6 | Deleted characters requiring HOLD |
+| --- | --- | --- | --- |
+| 32aae9fec147d3b483deb96e-p000076-l0012 | unchanged | unchanged | — |
+| 650670ab271096716888b108-p000033-l0054 | unchanged | unchanged | — |
+| 5a69150abb15eb1006f5a3ba-p000947-l0013 | unchanged | unchanged | — |
+| a300f5e1c3f6a38d97201791-p000054-l0115 | unchanged | unchanged | — |
+| 650670ab271096716888b108-p000006-l0047 | unchanged | unchanged | — |
+| fdbb6015b076a41fcf67486b-p000020-l0067 | unchanged | unchanged | — |
+| 32aae9fec147d3b483deb96e-p000035-l0070 | unchanged | unchanged | — |
+| 2c8742589d947f8d749c7ba2-p000040-l0014 | unchanged | unchanged | — |
+| 0bff55647d1c2acd1caa8bf3-p000231-l0006 | unchanged | unchanged | — |
+| 0b2cede5e125323a082f684b-p000015-l0028 | unchanged | unchanged | — |
+| d9d705c23499ff012aa70783-p000031-l0058 | unchanged | unchanged | — |
+| 2c8742589d947f8d749c7ba2-p000022-l0057 | unchanged | unchanged | — |
+| b5f8ce187b707837e5669281-p000038-l0033 | unchanged | unchanged | — |
+| 5be5bc5b3ea6-p000001-l0002 | unchanged | unchanged | — |
+| c57e3067ed37cedf17f285e6-p000049-l0021 | unchanged | unchanged | — |
+| dc390fceb64d9bb60a12d6b8-p000118-l0005 | unchanged | unchanged | — |
+| a300f5e1c3f6a38d97201791-p000442-l0085 | corrected | hold | U+0027 keraia |
+| bf2ce6d100950eec319cef00-p000010-l0059 | unchanged | unchanged | — |
+| e988c46677e75b38c15117fc-p000063-l0015 | unchanged | unchanged | — |
+| 92ab1a099d56dc9022fc4778-p000032-l0025 | unchanged | unchanged | — |
+| 39fbbdfd2c8030f211a318b7-p000063-l0005 | unchanged | unchanged | — |
+| bb8faba1e9b543fe5a1ce6dd-p000017-l0012 | unchanged | unchanged | — |
+| b5f8ce187b707837e5669281-p000038-l0060 | unchanged | unchanged | — |
+| d9d705c23499ff012aa70783-p000006-l0049 | unchanged | unchanged | — |
+| 1092c25534f45a95669f3d2b-p000041-l0003 | unchanged | unchanged | — |
+| 95a8decfdafb3b75d6549383-p000031-l0010 | unchanged | unchanged | — |
+| 5a69150abb15eb1006f5a3ba-p000947-l0007 | unchanged | unchanged | — |
+| 453f156dc6352286456a08cb-p000100-l0002 | corrected | hold | U+1FBF apostrophe |
+| 3ae256de8a055af974b9ec8f-p000144-l0026 | unchanged | unchanged | — |
+| d9d705c23499ff012aa70783-p000036-l0027 | unchanged | unchanged | — |
+| 143e78b5de2e6e784534ee0d-p000061-l0032 | corrected | hold | U+0301 mark |
+| 80f0c63471e19f7383fa6f66-p000057-l0016 | unchanged | unchanged | — |
+| bf2ce6d100950eec319cef00-p000028-l0081 | unchanged | unchanged | — |
+| b518f9f9b73fe9a3257fe2f0-p000041-l0022 | corrected | hold | U+1FBF apostrophe |
+| fdcac2103d02191960287381-p000010-l0019 | unchanged | unchanged | — |
+| cc0e056392dd2ef4916b3e7d-p000095-l0027 | unchanged | unchanged | — |
+| 4c949ab8ae19e68be5a06c43-p000047-l0010 | unchanged | unchanged | — |
+| 42c339ce492d83665f00774d-p000049-l0055 | unchanged | unchanged | — |
+| 043b454a8c255b6690fd3777-p000054-l0053 | unchanged | unchanged | — |
+| bf2ce6d100950eec319cef00-p000020-l0020 | unchanged | unchanged | — |
+| d9d705c23499ff012aa70783-p000041-l0008 | unchanged | unchanged | — |
+| 916a006055a9d43fdaa4c41b-p000067-l0016 | unchanged | unchanged | — |
+| 13dcc39a-p000003-l0088 | unchanged | unchanged | — |
+| c20219eff76f2fbc39f4c6fd-p000030-l0038 | unchanged | unchanged | — |
+| 137e9af6a0045d5746e26efa-p000008-l0008 | corrected | hold | U+0313 mark |
+| 60b9798cc3e6f9f631070765-p000017-l0001 | unchanged | unchanged | — |
+| b4bb45a610fbcbc974b0eb32-p000019-l0016 | unchanged | unchanged | — |
+| 8961f6bdd6daf004b4a84dfa-p000025-l0051 | corrected | hold | U+0300 mark |
+| bd99a3200cffaf6bf4d7c23a-p000040-l0009 | unchanged | unchanged | — |
+| 6c0a582885e55adc7c535c48-p000136-l0043 | unchanged | unchanged | — |
+| 00c322b3ee04b419d1979f22-p000115-l0022 | corrected | hold | U+0313 mark |
+| 399d224c580127635c47cd8d-p000019-l0010 | unchanged | unchanged | — |
+| 32aae9fec147d3b483deb96e-p000052-l0026 | unchanged | unchanged | — |
+| 827d2345ad77e5cdec320e80-p000028-l0019 | corrected | hold | U+0345 mark |
+| a963b33d02c23d4127f5ec26-p000012-l0029 | corrected | hold | U+1FBF mark |
+| 32aae9fec147d3b483deb96e-p000060-l0057 | corrected | hold | U+1FBF mark |
+
+### 48 L1A audit lines
+
+| Line ID | SF5 | SF6 | Deleted characters requiring HOLD |
+| --- | --- | --- | --- |
+| ef3cad078cfd452259f5b836-p000028-l0019 | unchanged | unchanged | — |
+| f77a8c0084022edb7981fb15-p000017-l0028 | unchanged | unchanged | — |
+| fdbb6015b076a41fcf67486b-p000031-l0024 | unchanged | unchanged | — |
+| 3cb3c1caf7324ded3b11c1e5-p000034-l0043 | corrected | hold | U+0301 mark |
+| fdbb6015b076a41fcf67486b-p000035-l0063 | unchanged | unchanged | — |
+| 3cb3c1caf7324ded3b11c1e5-p000034-l0022 | unchanged | unchanged | — |
+| 99c8dbb018ec2c87af3fdce9-p000025-l0024 | unchanged | unchanged | — |
+| 8961f6bdd6daf004b4a84dfa-p000092-l0012 | corrected | hold | U+0301 mark |
+| 60b9798cc3e6f9f631070765-p000027-l0033 | unchanged | unchanged | — |
+| 7cb612112b4f28a4f704a9cb-p000075-l0032 | unchanged | unchanged | — |
+| b08a5423fb059fbb291900aa-p000107-l0076 | corrected | corrected | — |
+| c20219eff76f2fbc39f4c6fd-p000016-l0049 | unchanged | unchanged | — |
+| 2d29e5e76d90adc4cc1b093a-p000023-l0035 | unchanged | unchanged | — |
+| 00c322b3ee04b419d1979f22-p000115-l0022 | corrected | hold | U+0313 mark |
+| 8b231047fdbd96ec30e1eded-p000038-l0018 | unchanged | unchanged | — |
+| 99c8dbb018ec2c87af3fdce9-p000054-l0028 | unchanged | unchanged | — |
+| 3cb3c1caf7324ded3b11c1e5-p000024-l0014 | unchanged | unchanged | — |
+| 290a133b0e55593eb4ecdcfd-p000098-l0050 | unchanged | unchanged | — |
+| 399d224c580127635c47cd8d-p000019-l0010 | unchanged | unchanged | — |
+| 32aae9fec147d3b483deb96e-p000052-l0026 | unchanged | unchanged | — |
+| c3468c02b6d929362f6e3fe7-p000082-l0019 | unchanged | unchanged | — |
+| 5a69150abb15eb1006f5a3ba-p000514-l0046 | unchanged | unchanged | — |
+| adc48c3e94eb469347d7cb4a-p000233-l0006 | unchanged | unchanged | — |
+| 32aae9fec147d3b483deb96e-p000011-l0018 | unchanged | unchanged | — |
+| 827d2345ad77e5cdec320e80-p000059-l0023 | unchanged | unchanged | — |
+| 39fbbdfd2c8030f211a318b7-p000053-l0015 | unchanged | unchanged | — |
+| 827d2345ad77e5cdec320e80-p000028-l0019 | corrected | hold | U+0345 mark |
+| 0efd675a10c9a91816c7a41a-p000186-l0025 | unchanged | unchanged | — |
+| b518f9f9b73fe9a3257fe2f0-p000171-l0026 | unchanged | unchanged | — |
+| 6c0a582885e55adc7c535c48-p000029-l0018 | unchanged | unchanged | — |
+| a963b33d02c23d4127f5ec26-p000012-l0029 | corrected | hold | U+1FBF mark |
+| 5a69150abb15eb1006f5a3ba-p000660-l0013 | corrected | hold | U+0300 mark |
+| 32aae9fec147d3b483deb96e-p000060-l0057 | corrected | hold | U+1FBF mark |
+| c8654864d161aa7fc41f65cb-p000226-l0020 | unchanged | unchanged | — |
+| 5165f9e7fe1f3d7053f5adcf-p000003-l0049 | unchanged | unchanged | — |
+| d0eda948e5b1f3632f8687fb-p000773-l0032 | unchanged | unchanged | — |
+| e32f8d6932bd505c2a0b1c8e-p000012-l0007 | unchanged | unchanged | — |
+| 8a482dd5cb341a70d157d5c4-p000364-l0021 | unchanged | unchanged | — |
+| d0eda948e5b1f3632f8687fb-p000927-l0052 | unchanged | unchanged | — |
+| 137e9af6a0045d5746e26efa-p000008-l0023 | unchanged | unchanged | — |
+| 6f9ad9bf99fd956607f4f9b3-p000020-l0016 | unchanged | unchanged | — |
+| 341f77df7fe3f09264ceee79-p000017-l0008 | unchanged | unchanged | — |
+| d7059ecf7417-p000013-l0002 | unchanged | unchanged | — |
+| 535ad352d7a7-p000015-l0014 | unchanged | unchanged | — |
+| 91252504a906-p000019-l0028 | unchanged | unchanged | — |
+| 91252504a906-p000016-l0013 | unchanged | unchanged | — |
+| 838d5080b03f-p000008-l0029 | unchanged | unchanged | — |
+| 91252504a906-p000014-l0051 | unchanged | unchanged | — |
+
+Reviewer probe coverage: 64/64 cases HOLD across PRESENCE/FULL/AB/AE, each reproduced from the reviewer’s saved original/recogniser/mode case before applying SF6. The probe runtimes are synthetic fixtures; no invented observation is treated as scored production evidence. Additional saved quote-deletion lines are listed below (including previously held lines).
+
+| Line ID | Mode | SF5 → SF6 |
+| --- | --- | --- |
+| 0b7bf21d-p000002-l0004 | ENSEMBLE_AB | hold → hold |
+| 177b717d-p000067-l0009 | ENSEMBLE_AB | hold → hold |
+| 177b717d-p000077-l0005 | ENSEMBLE_AB | hold → hold |
+| 177b717d-p000077-l0007 | ENSEMBLE_AB | corrected → hold |
+| 177b717d-p000097-l0010 | ENSEMBLE_AB | corrected → hold |
+| 384c3f89-p000030-l0010 | ENSEMBLE_AB | hold → hold |
+| c0/nlg_poly/c023 | ENSEMBLE_AB | hold → hold |
+| t4c/oa_poly1900/c009 | ENSEMBLE_AB | hold → hold |
+| 0b7bf21d-p000002-l0004 | ENSEMBLE_AE | hold → hold |
+| 177b717d-p000067-l0009 | ENSEMBLE_AE | corrected → hold |
+| 177b717d-p000077-l0005 | ENSEMBLE_AE | hold → hold |
+| 177b717d-p000077-l0007 | ENSEMBLE_AE | corrected → hold |
+| 177b717d-p000097-l0010 | ENSEMBLE_AE | corrected → hold |
+| 384c3f89-p000030-l0010 | ENSEMBLE_AE | hold → hold |
+| c0/nlg_poly/c023 | ENSEMBLE_AE | hold → hold |
+| t4c/oa_poly1900/c009 | ENSEMBLE_AE | hold → hold |
+| 0b7bf21d-p000002-l0004 | FULL | hold → hold |
+| 177b717d-p000067-l0009 | FULL | hold → hold |
+| 177b717d-p000077-l0005 | FULL | hold → hold |
+| 177b717d-p000077-l0007 | FULL | hold → hold |
+| 177b717d-p000097-l0010 | FULL | corrected → hold |
+| 384c3f89-p000030-l0010 | FULL | hold → hold |
+| c0/nlg_poly/c023 | FULL | hold → hold |
+| t4c/oa_poly1900/c009 | FULL | hold → hold |
+| 0b7bf21d-p000002-l0004 | PRESENCE | hold → hold |
+| 177b717d-p000067-l0009 | PRESENCE | hold → hold |
+| 177b717d-p000077-l0005 | PRESENCE | hold → hold |
+| 177b717d-p000077-l0007 | PRESENCE | hold → hold |
+| 177b717d-p000097-l0010 | PRESENCE | corrected → hold |
+| 384c3f89-p000030-l0010 | PRESENCE | hold → hold |
+| c0/nlg_poly/c023 | PRESENCE | hold → hold |
+| t4c/oa_poly1900/c009 | PRESENCE | hold → hold |
+
+## Tests and reproduction
+
+- New SF6 suite: **135 failures on the frozen 05f2dafb implementation**, with the same witnesses passing on SF6. [Failing-before log](SF6_evidence/witness_tests_before.log), [SF5 + SF6 witness suite](SF6_evidence/witness_tests_after.log).
+- SF5 tests retain their exact composer assertions and positive controls. Only explicit deletion-release expectations change to exact HOLD checks, including unchanged effective Google bytes, no changes, and the SF6 reason. No general “either release or HOLD” assertion was substituted.
+- Full labelfix suite: **1100 passed, 1 environment setup error(s), 0 assertion failures**. [Full result](SF6_evidence/tests_after.log), [SF5 baseline](SF6_evidence/tests_before.log). The capture test was not modified.
+- Coverage includes both valid two-source mark pairs, valid detector+recogniser punctuation, one-source and missing/unscored/clipped/uncertain controls, A/B-as-one, replacement deletions, multiplicity, explicit numeral signs, insertion parity, elision aliases, confidence binding and deterministic census selection.
+
+```sh
+export PYTHONPATH="$PWD" PYTHONDONTWRITEBYTECODE=1
+PY=/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.venv/bin/python
+$PY scripts/labelfix/sf6_measure.py all
+SF6_TEST_BASELINE=1 $PY -m pytest tests/labelfix/test_sf6.py -q -p no:cacheprovider
+$PY -m pytest tests/labelfix -q -p no:cacheprovider
+$PY scripts/labelfix/sf6_report.py
+$PY scripts/labelfix/sf6_verify.py
+# One-command census addition once the pulled evidence lands:
+$PY scripts/labelfix/sf6_measure.py --add-census /path/to/deletion_census.jsonl.gz
+```
+
+The census addition samples 30 distinct released-deletion lines with seed 6 from sorted IDs, writes source/hash custody, adds repository regression cases, replays both pools, runs all labelfix tests and refreshes this report and verification. It accepts JSON/JSONL runtime rows or L1R2’s aggregate `CHANGES.json`; the latter samples its AB deletion-example ID pool, not the full population. Aggregate IDs require a `deletion_witness_inputs.jsonl.gz` sidecar (record+runtime), or a full `overlay_ensemble_ab.jsonl.gz` with edit evidence and Google’s original labels available locally. Missing evidence writes a pending receipt and fails loudly; no source is reconstructed from guesses. The test harness validates both formats with independent 40-row fixtures. **census witnesses pending**. The read-only L1R2 report was checked at the end of this run: jobs prepared, no production job submitted and no pulled production census available; mock census counts are not substituted.
+
+SF6 RESULT: policy sf6-release-v1; keraia witness HOLD yes; quote witnesses HOLD 64/64; held-out AB corrected 11, wrong 0, new 1, lines held 327; single-source deletions released 8→0; punctuation-deletion HOLDs 74 (apostrophe/quote/keraia 2/71/1); tests 1100 passed
+
+exec
+/bin/zsh -lc "rg -n 'spellcheck|ASTRA-SC1|release_gate' /Users/foivoskarounos-zamparloukos/.codex/memories/MEMORY.md" in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+exec
+/bin/zsh -lc 'git diff 05f2dafb..HEAD -- greekocr/labelfix/release_gate.py scripts/labelfix/clariden/l1_common.py tests/labelfix/test_sf5.py' in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ exited 1 in 0ms:
+ succeeded in 0ms:
+diff --git a/greekocr/labelfix/release_gate.py b/greekocr/labelfix/release_gate.py
+index 6f9311c0..772ce4cb 100644
+--- a/greekocr/labelfix/release_gate.py
++++ b/greekocr/labelfix/release_gate.py
+@@ -10,14 +10,16 @@ ENSEMBLE_AB/AE compare A with B/E exactly and do not veto on detector names.
+ from collections import Counter
+ from copy import deepcopy
+ from dataclasses import asdict, fields, replace
++from difflib import SequenceMatcher
+ import hashlib
+ import json
++import math
+ import unicodedata as ud
+ from . import reading as R
+ from .text import (clusters, nfd, nfc, GREEK_LETTERS, ELISION, BREATHINGS,
+                    is_letter, word_final_elision, spacing_breathing, punctuation_sites)
+ 
+-POLICY = 'sf5-release-v1'
++POLICY = 'sf6-release-v1'
+ MODES = ('PRESENCE', 'FULL', 'ENSEMBLE_AB', 'ENSEMBLE_AE')
+ ENSEMBLE_CAVEAT = "A and B share training data (C1 agreement labels) and therefore share errors; agreement measures the reader's stability, not an independent pixel signal. Precision on the training waves is unmeasured until the training-wave DEV with print truth exists. Wave 1c on this release is a pseudo-label experiment."
+ R1_LETTERS = frozenset('αεηιουωρΑΕΗΙΟΥΩΡ')
+@@ -223,6 +225,143 @@ def edit_guard(original, proposal):
+     return reasons
+ 
+ 
++def deletion_atoms(text):
++    """NFD deletions at fixed letter boundaries; only SF5 elision aliases fold.
++
++    A replacement deletes its old atom, even when it adds another accent or
++    attaches a spacing breathing. Repeated signs retain their multiplicity.
++    Keraia classification is descriptive: explicit numeral signs or an alias
++    after a Greek/decimal/Unicode numeral token. All punctuation classes
++    use the same detector AND recogniser requirement.
++    """
++    cs=clusters(nfd(text));out=[];boundary=0
++    for i,c in enumerate(cs):
++        letter=is_letter(c.base) and c.base not in '\u02b9\u0374\u0375\u0384'
++        if letter:
++            out.append(dict(key=('letter',boundary,c.base),character=c.base,
++                start=c.start,letter=boundary,category='other'))
++            out.extend(dict(key=('mark',boundary,m),character=m,start=c.start+j+1,
++                letter=boundary,category='mark') for j,m in enumerate(c.marks))
++            boundary+=1
++            continue
++        spacing=spacing_breathing(cs,i)
++        alias=word_final_elision(cs,i)
++        token=''
++        if c.base in ELISION:
++            for prev in reversed(cs[:i]):
++                if is_letter(prev.base) or prev.base.isdecimal() or ud.category(prev.base)=='Nl':token=prev.base+token
++                else:break
++        keraia=(c.base in '\u02b9\u0374\u0375\u0384' or (c.base in ELISION and token and
++            (token.isdecimal() or all(ud.category(x)=='Nl' for x in token) or
++             len(token)<=3 and all(x in 'ΑΒΓΔΕϚϜΖΗΘΙΚΛΜΝΞΟΠϞΡΣΤΥΦΧΨΩϠ' for x in token))))
++        category=('mark' if spacing or ud.category(c.base).startswith('M') else 'keraia' if keraia else
++                  'apostrophe' if alias else 'quote' if c.base in LEADING_QUOTES+'‘‚‹›' else
++                  'apostrophe' if c.base in ELISION else 'other')
++        # Spacing breathings refer to the following letter, other punctuation
++        # to the preceding letter (a leading quote to the first letter).
++        owner=boundary if spacing else max(0,boundary-1)
++        key=('punct',boundary,'elision' if alias else c.base)
++        out.append(dict(key=key,character=c.base,start=c.start,letter=owner,category=category))
++        out.extend(dict(key=('punct_mark',boundary,m),character=m,start=c.start+j+1,
++            letter=owner,category='mark') for j,m in enumerate(c.marks))
++    return out
++
++
++def google_deletions(original, proposal):
++    """Include replaced characters; exclude canonical and pure elision aliases."""
++    a,b=deletion_atoms(original),deletion_atoms(proposal)
++    matcher=SequenceMatcher(None,[x['key'] for x in a],[x['key'] for x in b],autojunk=False)
++    return [dict(x) for tag,i,j,_,_ in matcher.get_opcodes() if tag!='equal' for x in a[i:j]]
++
++
++def _finite_span(value):
++    return (isinstance(value,(list,tuple)) and len(value)==2
++            and all(isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x) for x in value)
++            and 0<=value[0]<value[1])
++
++
++def deletion_guard(original, proposal, runtime, decision):
++    """SF6's sole new rule: two positive absence signals or whole-line HOLD.
++
++    A/B (or A/E) together are ONE reader. The R1 heads name combining
++    marks only. Punctuation therefore needs detector AND scored recogniser
++    text. Empty candidates outside a detector's head/window are unknown.
++    This checks saved evidence and never runs or alters a source decision.
++    """
++    deleted=google_deletions(original,proposal)
++    if not deleted:return []
++    text=runtime.get('recogniser_text','')
++    letters=[c for c in _letters(text) if c.base not in '\u02b9\u0374\u0375\u0384']
++    aligned=([c.base for c in _letters(original) if c.base not in '\u02b9\u0374\u0375\u0384']==[c.base for c in letters])
++    raw=runtime.get('detector',{});raw=serialize(raw) if not isinstance(raw,dict) else raw
++    slots={s['start']:s for s in raw.get('slots',())}
++    composed={s['start']:s for s in decision.get('slots',())}
++    coverage={s['start']:s for s in runtime.get('coverage',())}
++    predictions=prediction_index(runtime.get('r1_predictions',()))
++    rec_atoms=Counter(x['key'] for x in deletion_atoms(text))
++    events=[]
++    for atom in deleted:
++        index=atom['letter'];c=letters[index] if aligned and index<len(letters) else None
++        s=slots.get(c.start,{}) if c else {};d=composed.get(c.start,{}) if c else {}
++        ev=s.get('evidence',{});ev=ev.to_record() if hasattr(ev,'to_record') else ev
++        char=atom['character'];category=atom['category']
++        part=next((p for p,m in R.MARKS.items() if m==char),None)
++        if char in '᾿᾽':part='psili'
++        zone='below' if part=='subscript' else 'above'
++        edge='bottom' if zone=='below' else 'top'
++        clean=bool(c and s and s.get('base')==c.base
++            and s.get('localisation_unknown') is False and s.get('segmentation_uncertain') is False
++            and s.get('physical_resolved') is not False
++            and not any(s.get(k) for k in ('unnamed','ambiguity','hold','unseen_zones','constraint_flags'))
++            and s.get('evidence_state')!='UNKNOWN' and ev.get('evidence_state')!='UNKNOWN'
++            and not ev.get('uncertainty') and not d.get('hold_reasons')
++            and not any(_flag_targets(f,c.start) for f in raw.get('constraint_flags',()))
++            and not raw.get('geometry',{}).get('physical_mapping',{}).get('ambiguous')
++            and ev.get('clipped_'+edge) is False
++            and not any(ev.get('clipped_'+z) for z in ('left','right'))
++            and ev.get('observation',{}).get(zone) not in ('UNSEEN','UNKNOWN'))
++        cov=coverage.get(c.start) if c else None
++        pred=predictions.get(c.start) if c else None
++        scored=bool(clean and cov and not _reader_reasons(s,pred,cov,'r1')
++                    and _finite_span(cov.get('span')))
++        reader=bool(category=='mark' and part and c and c.base in R1_LETTERS and scored
++                    and part not in (pred.get('parts',pred.get('cls','none').split('+')) or []))
++        # The coordinator's A∧B is one reader absence in every release mode.
++        # AE additionally retains its selected E check; it supplies no extra
++        # independent signal. Missing/conflicting arms cannot certify absence.
++        for peer in (('B','E') if decision.get('mode')=='ENSEMBLE_AE' else ('B',)):
++            pp=prediction_index(runtime.get('peer_predictions',{}).get(peer,())).get(c.start) if c else None
++            pc={x['start']:x for x in runtime.get('peer_coverage',{}).get(peer,())}.get(c.start) if c else None
++            reader=bool(reader and pc and not _reader_reasons(s,pp,pc,'peer')
++                        and _finite_span(pc.get('span'))
++                        and part not in pp.get('parts',pp.get('cls','none').split('+')))
++        observed=ev.get('observation',{})
++        detector=bool(clean and _finite_span(ev.get('window')) and observed.get(zone)=='OBSERVED'
++                      and 'parts' in s and category=='mark' and part and part not in s['parts'])
++        if category in ('apostrophe','keraia'):
++            # ink.apostrophe_candidates scores only these word-final letters;
++            # in particular an empty Ι/kappa/mu slot is not a negative head.
++            detector=bool(clean and category=='apostrophe' and s.get('word_final') is True
++                and c.base.lower() in 'δτρθπ' and s.get('apostrophe') is False
++                and ev.get('apostrophes')==[] and observed.get('above')=='OBSERVED'
++                and observed.get('right')=='OBSERVED' and _finite_span(ev.get('window')))
++        elif category=='quote':
++            detector=bool(clean and atom['key'][1]==0 and raw.get('opening_quotes')==[]
++                and observed.get('above')=='OBSERVED' and observed.get('left')=='OBSERVED'
++                and _finite_span(ev.get('window')))
++        confidence=runtime.get('recognition_confidence')
++        recogniser=bool(clean and _finite_span(s.get('locator_span'))
++            and isinstance(confidence,(int,float)) and not isinstance(confidence,bool)
++            and math.isfinite(confidence) and 0<=confidence<=1 and rec_atoms[atom['key']]==0)
++        # Text presence is decisive against absence, even if it has a score.
++        allowed=(detector and recogniser if category in ('apostrophe','quote','keraia')
++                 else reader and (detector or recogniser))
++        events.append(dict(atom,recogniser_start=c.start if c else None,
++            signals=dict(reader=reader,detector=detector,recogniser=recogniser),allowed=bool(allowed),
++            reason=None if allowed else 'sf6:deletion_needs_two_positive_absences:'+category))
++    return events
++
++
+ def _reader_reasons(slot, prediction, coverage, prefix):
+     reasons=[]
+     if prediction is None:reasons.append(prefix+'_missing')
+@@ -428,6 +567,10 @@ def bind_runtime(runtime, k1_flags=()):
+     if 'recogniser_nfd' in runtime:
+         if nfd(runtime['recogniser_text'])!=nfd(runtime['recogniser_nfd']):raise ValueError('runtime recogniser text mismatch')
+         evidence['recogniser_nfd']=runtime['recogniser_nfd']
++    # SF6 uses this saved score to distinguish observed text absence from an
++    # unscored transcript. Bind its presence/value as well as all old inputs.
++    if 'recognition_confidence' in runtime:
++        evidence['recognition_confidence']=runtime['recognition_confidence']
+     if not isinstance(evidence['detector'],dict):evidence['detector']=serialize(evidence['detector'])
+     digest=hashlib.sha256(json.dumps(evidence,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+     if runtime.get('evidence_sha256',digest)!=digest:raise ValueError('runtime evidence binding mismatch')
+diff --git a/scripts/labelfix/clariden/l1_common.py b/scripts/labelfix/clariden/l1_common.py
+index 19f92b0a..9fb2371a 100644
+--- a/scripts/labelfix/clariden/l1_common.py
++++ b/scripts/labelfix/clariden/l1_common.py
+@@ -10,7 +10,7 @@ import unicodedata
+ 
+ from scripts.labelfix.clariden.r1_common import rows, write_rows, sha256, write_json
+ from greekocr.labelfix.text import nfd, elision_alias_key
+-from greekocr.labelfix.release_gate import compose_runtime, edit_guard, release_text, POLICY, ENSEMBLE_CAVEAT
++from greekocr.labelfix.release_gate import compose_runtime, edit_guard, release_text, deletion_guard, POLICY, ENSEMBLE_CAVEAT
+ 
+ STATUSES = ('corrected', 'unchanged', 'hold', 'out_of_scope')
+ 
+@@ -57,6 +57,12 @@ def overlay(record, runtime, variant, binding):
+     alias_only = (nfd(original)!=nfd(mode['text'])
+                   and elision_alias_key(original)==elision_alias_key(mode['text']))
+     result.update(alias_only=alias_only,elision_census=census)
++    deletions=deletion_guard(original,proposal,runtime,mode)
++    result['deletion_checks']=deletions
++    for deletion in deletions:
++        if not deletion['allowed']:
++            result['hold_slots'].append(dict(start=deletion['start'],letter=deletion['character'],
++                reason='deletion_uncertain',detail=deletion['reason']))
+     for detail in edit_guard(original, runtime['recogniser_text']) + edit_guard(original,proposal):
+         result['hold_slots'].append(dict(start=0,letter='',reason='edit_guard',detail=detail))
+     if result['hold_slots']:
+diff --git a/tests/labelfix/test_sf5.py b/tests/labelfix/test_sf5.py
+index 67f45ec4..e0b3caa5 100644
+--- a/tests/labelfix/test_sf5.py
++++ b/tests/labelfix/test_sf5.py
+@@ -40,11 +40,36 @@ def overlay(policy, original, runtime, mode='ensemble_ab'):
+ 
+ 
+ WITNESSES=list(rows(DOC/'SF5_evidence/witness_inputs.jsonl.gz'))
++SF6_HELD={
++    'a300f5e1c3f6a38d97201791-p000442-l0085',
++    '453f156dc6352286456a08cb-p000100-l0002',
++    '143e78b5de2e6e784534ee0d-p000061-l0032',
++    'b518f9f9b73fe9a3257fe2f0-p000041-l0022',
++    '137e9af6a0045d5746e26efa-p000008-l0008',
++    '8961f6bdd6daf004b4a84dfa-p000025-l0051',
++    '00c322b3ee04b419d1979f22-p000115-l0022',
++    '827d2345ad77e5cdec320e80-p000028-l0019',
++    'a963b33d02c23d4127f5ec26-p000012-l0029',
++    '32aae9fec147d3b483deb96e-p000060-l0057',
++}
++
++
++def assert_sf6_hold(result,original):
++    assert result['status']=='hold' and result.get('label',original)==original
++    assert result['changes']==[]
++    assert any(not c['allowed'] for c in result['deletion_checks'])
++    assert any(s['detail'].startswith('sf6:deletion_needs_two_positive_absences:') for s in result['hold_slots'])
+ 
+ 
+ @pytest.mark.parametrize('w',WITNESSES,ids=[r['id'] for r in WITNESSES])
+ def test_saved_56_release_witnesses(policy,w):
+     result=policy[1].overlay(w['record'],w['runtime'],'ensemble_ab',BINDING)
++    # SF6 changes only release acceptance. Preserve this exact assertion even
++    # for the ten newly held lines, including both known reader mistakes.
++    assert policy[0].compose_runtime(w['runtime'],'ENSEMBLE_AB')['slots']==w['sf4_decisions']['slots']
++    if policy[0].POLICY=='sf6-release-v1' and w['id'] in SF6_HELD:
++        assert_sf6_hold(result,w['record']['label'])
++        return
+     assert result['status'] in ('corrected','unchanged')
+     actual=result['label']
+     if w['kind'].startswith('known_reader_'):
+@@ -92,6 +117,13 @@ def test_spacing_breathing_consumed_in_same_edit(policy,mode,spacing,base):
+     breathing='\u0314' if base=='Ρ' else '\u0313'
+     runtime=synthetic("-'"+base+breathing+'λα')
+     result=overlay(policy,original,runtime,mode)
++    if policy[0].POLICY=='sf6-release-v1':
++        assert_sf6_hold(result,original)
++        assert any(c['character']==spacing and c['category']=='mark' for c in result['deletion_checks'])
++        # The SF5 proposal is still atomic; only release becomes HOLD.
++        proposal,_=policy[0].release_text(original,runtime['recogniser_text'],policy[0].compose_runtime(runtime,mode)['text'])
++        assert proposal==nfc('-'+base+breathing+'λα')
++        return
+     assert result['status']=='corrected' and result['label']==nfc('-'+base+breathing+'λα')
+     assert len(result['changes'])>=1 and not result['hold_slots']
+ 
+@@ -100,6 +132,11 @@ def test_spacing_breathing_consumed_in_same_edit(policy,mode,spacing,base):
+ def test_spacing_breathing_unattached_stays_verbatim(policy,spacing):
+     original='-'+spacing+'Αλλά'
+     result=overlay(policy,original,synthetic(original,named=False))
++    if policy[0].POLICY=='sf6-release-v1':
++        assert_sf6_hold(result,original)
++        assert spacing in result.get('label',original)
++        assert [c['character'] for c in result['deletion_checks']]==['\u0301']
++        return
+     assert result['label']==nfc(original.replace('ά','α'))  # real accent edit is still allowed
+     assert spacing in result['label'] and '’' not in result['label']
+ 
+@@ -133,7 +170,10 @@ def test_single_source_presence_behavior_unchanged_and_counted(policy,source,det
+     text='κ α' if source=='google' else "κ' α"
+     result=overlay(policy,original,synthetic(text,detector_apostrophe=detected))
+     expected=('κ᾿ α' if source=='google' else 'κ’ α') if detected else 'κ α'
+-    assert result['label']==expected
++    if policy[0].POLICY=='sf6-release-v1' and source=='google' and not detected:
++        assert_sf6_hold(result,original)
++        assert result['deletion_checks'][0]['category']=='apostrophe'
++    else:assert result['label']==expected
+     c=result['elision_census']
+     assert c['both']==0 and c[source+'_only']==1
+     assert c[source+'_only_kept' if detected else source+'_only_deleted']==1
+
+exec
+/bin/zsh -lc "git log -1 --format=fuller
+git status --short
+git diff --stat 05f2dafb..HEAD
+rg --files -g 'AGENTS.md' -g '*sf6*' -g '*SF6*'" in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ succeeded in 0ms:
+commit 12892f147012c60e7c31dba09422c45ca563115f
+Author:     fffoivos <foivos.karounos@gmail.com>
+AuthorDate: Sat Oct 17 05:39:20 2026 +0300
+Commit:     fffoivos <foivos.karounos@gmail.com>
+CommitDate: Sat Oct 17 05:39:20 2026 +0300
+
+    ASTRA-SC1c3v3 brief: verification pass on SF6 only
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+?? artifacts/labelfix_l1e/
+?? artifacts/labelfix_r1/output_3678928/
+?? artifacts/labelfix_sf3/
+?? artifacts/labelfix_sf4/
+?? artifacts/labelfix_sf5/
+?? artifacts/labelfix_sf6/
+?? docs/reviews/astra_program_review_2026-10-06/ASTRA-SC1c3v3_review_1.codexlog
+ docs/briefs/SF6_two_signal_deletions.md            |   42 +
+ docs/labelfix/spellcheck/SF6_REPORT.md             |  438 ++++
+ .../spellcheck/SF6_evidence/census_status.json     |    7 +
+ .../spellcheck/SF6_evidence/git_before.json        |  326 +++
+ .../spellcheck/SF6_evidence/heldout/metrics.json   |  393 ++++
+ .../SF6_evidence/heldout/per_slot_changes.jsonl    |  212 ++
+ .../SF6_evidence/heldout/per_slot_proof.jsonl.gz   |  Bin 0 -> 223026 bytes
+ .../spellcheck/SF6_evidence/heldout/receipt.json   |   37 +
+ .../SF6_evidence/heldout/release_labels.jsonl.gz   |  Bin 0 -> 132318 bytes
+ docs/labelfix/spellcheck/SF6_evidence/m2.log       |    1 +
+ .../SF6_evidence/m2_dev/control_slot_changes.jsonl |   41 +
+ .../spellcheck/SF6_evidence/m2_dev/metrics.json    |  849 +++++++
+ .../SF6_evidence/m2_dev/per_slot_changes.jsonl     |   29 +
+ .../SF6_evidence/m2_dev/per_slot_proof.jsonl.gz    |  Bin 0 -> 114596 bytes
+ .../spellcheck/SF6_evidence/m2_dev/receipt.json    |   33 +
+ .../SF6_evidence/m2_dev/release_labels.jsonl.gz    |  Bin 0 -> 132846 bytes
+ docs/labelfix/spellcheck/SF6_evidence/replay.log   |    4 +
+ .../spellcheck/SF6_evidence/sf6_tests_after.log    |    5 +
+ .../spellcheck/SF6_evidence/tests_after.log        |   60 +
+ .../spellcheck/SF6_evidence/tests_before.log       |   56 +
+ .../spellcheck/SF6_evidence/tests_first_after.log  | 1075 +++++++++
+ .../spellcheck/SF6_evidence/verification.json      |  144 ++
+ docs/labelfix/spellcheck/SF6_evidence/verify.log   |    1 +
+ .../SF6_evidence/witness_inputs.jsonl.gz           |  Bin 0 -> 771029 bytes
+ .../SF6_evidence/witness_inputs_receipt.json       |   23 +
+ .../spellcheck/SF6_evidence/witness_metrics.json   |  247 ++
+ .../SF6_evidence/witness_results.jsonl.gz          |  Bin 0 -> 10325 bytes
+ .../SF6_evidence/witness_tests_after.log           |    8 +
+ .../SF6_evidence/witness_tests_before.log          | 2483 ++++++++++++++++++++
+ .../SF6_evidence_aborted_run1/tests_before.log     |    4 +
+ docs/reviews/ASTRA-SC1c3v3_brief.md                |   21 +
+ greekocr/labelfix/release_gate.py                  |  145 +-
+ scripts/labelfix/clariden/l1_common.py             |    8 +-
+ scripts/labelfix/sf6_measure.py                    |  377 +++
+ scripts/labelfix/sf6_report.py                     |  142 ++
+ scripts/labelfix/sf6_verify.py                     |  139 ++
+ tests/labelfix/test_sf5.py                         |   42 +-
+ tests/labelfix/test_sf6.py                         |  245 ++
+ 38 files changed, 7634 insertions(+), 3 deletions(-)
+scripts/labelfix/sf6_measure.py
+scripts/labelfix/sf6_verify.py
+scripts/labelfix/sf6_report.py
+docs/briefs/SF6_two_signal_deletions.md
+tests/labelfix/test_sf6.py
+docs/labelfix/spellcheck/SF6_evidence/sf6_tests_after.log
+docs/labelfix/spellcheck/SF6_REPORT.md
+
+exec
+/bin/zsh -lc 'nl -ba tests/labelfix/test_sf6.py
+cat docs/briefs/SF6_two_signal_deletions.md' in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+exec
+/bin/zsh -lc "nl -ba scripts/labelfix/sf6_measure.py | sed -n '1,220p'" in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ succeeded in 0ms:
+     1	"""SF6 deletion gate witnesses, boundary counterexamples and saved regressions."""
+     2	from copy import deepcopy
+     3	import json
+     4	import os
+     5	
+     6	import pytest
+     7	
+     8	from greekocr.labelfix import release_gate as gate
+     9	from scripts.labelfix.clariden import l1_common
+    10	from scripts.labelfix.clariden.r1_common import rows,write_rows
+    11	from scripts.labelfix.sf6_measure import baseline,EV,BINDING,KERAIA,CLASSES,add_census
+    12	from tests.labelfix.test_sf5 import synthetic,SF6_HELD
+    13	
+    14	
+    15	@pytest.fixture(scope='module')
+    16	def policy():
+    17	    return baseline() if os.environ.get('SF6_TEST_BASELINE') else (gate,l1_common)
+    18	
+    19	
+    20	def rich(text):
+    21	    """Explicitly scored, fully observed fixture; never production evidence."""
+    22	    rt=synthetic(text)
+    23	    rt['recognition_confidence']=.9
+    24	    for i,s in enumerate(rt['detector']['slots']):
+    25	        s.update(locator_span=[10+i*10,18+i*10],word_final=True)
+    26	        s['evidence'].update(window=[8+i*10,20+i*10],above=[],below=[],apostrophes=[],
+    27	            clipped_left=False,clipped_right=False,
+    28	            observation={z:'OBSERVED' for z in ('above','below','left','right')})
+    29	    for cov in [rt['coverage'],*rt['peer_coverage'].values()]:
+    30	        for c in cov:c['span']=[10+c['start']*10,18+c['start']*10]
+    31	    return rt
+    32	
+    33	
+    34	def overlay(policy,original,rt,mode='ENSEMBLE_AB'):
+    35	    return policy[1].overlay(dict(id=rt['id'],label=original,script_class='greek_poly'),rt,mode,BINDING)
+    36	
+    37	
+    38	INPUTS=list(rows(EV/'witness_inputs.jsonl.gz'))
+    39	if (EV/'census_inputs.jsonl.gz').exists():INPUTS+=list(rows(EV/'census_inputs.jsonl.gz'))
+    40	EXPECTED={(r['cohort'],r['id']):r for r in rows(EV/'witness_results.jsonl.gz')}
+    41	
+    42	
+    43	@pytest.mark.parametrize('w',INPUTS,ids=[r['cohort']+':'+r['id'] for r in INPUTS])
+    44	def test_saved_release_regression(policy,w):
+    45	    mode=w.get('mode','ENSEMBLE_AB');o=overlay(policy,w['record']['label'],w['runtime'],mode)
+    46	    expected=EXPECTED[w['cohort'],w['id']]
+    47	    assert (o['status'],o.get('label',w['record']['label']))==(expected['after']['status'],expected['after']['label'])
+    48	    if w['cohort']=='quote_probe' or (w['cohort']=='sf5' and w['id'] in SF6_HELD):
+    49	        assert o['status']=='hold' and o['changes']==[]
+    50	    oldgate,oldcommon=baseline()
+    51	    old=oldcommon.overlay(w['record'],w['runtime'],mode,BINDING)
+    52	    assert (old['status'],old.get('label',w['record']['label']))==(expected['before']['status'],expected['before']['label'])
+    53	    assert policy[0].compose_runtime(w['runtime'],mode)['slots']==oldgate.compose_runtime(w['runtime'],mode)['slots']
+    54	    if o['status']!='hold':
+    55	        assert (o['status'],o['label'])==(old['status'],old['label'])
+    56	    elif old['status']!='hold':
+    57	        assert o['changes']==[] and any(not c['allowed'] for c in o['deletion_checks'])
+    58	
+    59	
+    60	def test_keraia_is_held_even_with_two_r1_arms(policy):
+    61	    w=next(w for w in INPUTS if w['id']==KERAIA)
+    62	    o=overlay(policy,w['record']['label'],w['runtime'])
+    63	    assert o['status']=='hold' and o['changes']==[]
+    64	    c=next(c for c in o['deletion_checks'] if c['category']=='keraia')
+    65	    assert not c['signals']['reader'] and not c['signals']['detector']
+    66	
+    67	
+    68	@pytest.mark.parametrize('mode',gate.MODES)
+    69	@pytest.mark.parametrize('pair',['reader_detector','reader_recogniser'])
+    70	def test_two_positive_mark_absences_release(policy,mode,pair):
+    71	    rt=rich('α' if pair=='reader_recogniser' else 'ά')
+    72	    for records in [rt['r1_predictions'],*rt['peer_predictions'].values()]:records[0]['parts']=[]
+    73	    rt['detector']['slots'][0]['parts']=[] if pair=='reader_detector' else ['acute']
+    74	    if pair=='reader_detector':rt.pop('recognition_confidence')
+    75	    # PRESENCE/FULL retain their previous detector-agreement veto.
+    76	    if mode in ('PRESENCE','FULL') and pair=='reader_recogniser':
+    77	        rt['detector']['slots'][0]['parts']=[]
+    78	    o=overlay(policy,'ά',rt,mode)
+    79	    assert o['status']=='corrected' and o['label']=='α'
+    80	
+    81	
+    82	@pytest.mark.parametrize('mode',gate.MODES)
+    83	def test_ab_is_one_signal_when_other_sources_keep_mark(policy,mode):
+    84	    rt=rich('ά');rt['detector']['slots'][0]['parts']=[]
+    85	    rt['detector']['slots'][0]['evidence'].pop('observation')
+    86	    for records in [rt['r1_predictions'],*rt['peer_predictions'].values()]:records[0]['parts']=[]
+    87	    o=overlay(policy,'ά',rt,mode)
+    88	    assert o['status']=='hold'
+    89	
+    90	
+    91	@pytest.mark.parametrize('mode',gate.MODES)
+    92	@pytest.mark.parametrize('defect',['missing','unscored','disagrees'])
+    93	def test_reader_absence_needs_a_and_b_even_in_presence_full(policy,mode,defect):
+    94	    rt=rich('α')
+    95	    if defect=='missing':rt['peer_predictions'].pop('B');rt['peer_coverage'].pop('B')
+    96	    elif defect=='unscored':rt['peer_coverage']['B'][0]['scored']=False
+    97	    else:rt['peer_predictions']['B'][0]['parts']=['acute']
+    98	    assert overlay(policy,'ά',rt,mode)['status']=='hold'
+    99	
+   100	
+   101	@pytest.mark.parametrize('defect',[
+   102	    'missing_prediction','missing_coverage','unscored','unknown','uncertain','out_of_window',
+   103	    'clipped_top','unseen','unnamed','unscored_recogniser','unknown_detector','peer_unscored',
+   104	])
+   105	def test_unobserved_sources_cannot_be_absence(policy,defect):
+   106	    rt=rich('α')
+   107	    # Reader + recogniser would otherwise release; detector stays unknown.
+   108	    s=rt['detector']['slots'][0];s['evidence'].pop('observation')
+   109	    if defect=='missing_prediction':rt['r1_predictions']=[]
+   110	    elif defect=='missing_coverage':rt['coverage']=[]
+   111	    elif defect=='unscored':rt['coverage'][0]['scored']=False
+   112	    elif defect=='unknown':rt['coverage'][0]['evidence_state']='UNKNOWN'
+   113	    elif defect=='uncertain':rt['coverage'][0]['uncertainty']=['crop_clipped']
+   114	    elif defect=='out_of_window':rt['coverage'][0]['span']=[-1,10]
+   115	    elif defect=='clipped_top':s['evidence']['clipped_top']=True
+   116	    elif defect=='unseen':s['evidence']['observation']={'above':'UNSEEN'}
+   117	    elif defect=='unnamed':s['unnamed']=[0]
+   118	    elif defect=='unscored_recogniser':rt.pop('recognition_confidence')
+   119	    elif defect=='unknown_detector':
+   120	        # Keep recognised mark; A/B absence is still just one signal.
+   121	        rt=rich('ά');rt.pop('recognition_confidence');s=rt['detector']['slots'][0]
+   122	        s['parts']=[];s['evidence'].pop('observation')
+   123	        for records in [rt['r1_predictions'],*rt['peer_predictions'].values()]:records[0]['parts']=[]
+   124	    elif defect=='peer_unscored':rt['peer_coverage']['B'][0]['scored']=False
+   125	    assert overlay(policy,'ά',rt)['status']=='hold'
+   126	
+   127	
+   128	@pytest.mark.parametrize('mark',['\u0301','\u0300','\u0313','\u0314','\u0345','\u0308','\u0342'])
+   129	def test_replacements_delete_the_old_mark(policy,mark):
+   130	    # Direct boundary test avoids unrelated supported-mark multiplicity vetoes.
+   131	    rt=rich('α'+mark);d=policy[0].compose_runtime(rt,'ENSEMBLE_AB')
+   132	    events=policy[0].deletion_guard('α'+mark,'α',rt,d)
+   133	    assert len(events)==1 and events[0]['character']==mark
+   134	    assert not events[0]['allowed']  # every source still says present
+   135	
+   136	
+   137	@pytest.mark.parametrize('old,new',[('ά','ὰ'),('ά','ἁ'),('ᾳ','ά')])
+   138	def test_combining_replacement_needs_two_absences(policy,old,new):
+   139	    rt=rich(old)
+   140	    from greekocr.labelfix.text import clusters,nfd
+   141	    from greekocr.labelfix.reading import MARKS
+   142	    parts=[p for p,m in MARKS.items() if m in clusters(nfd(new))[0].marks]
+   143	    for records in [rt['r1_predictions'],*rt['peer_predictions'].values()]:records[0]['parts']=parts
+   144	    rt['detector']['slots'][0]['parts']=parts
+   145	    rt['detector']['slots'][0]['evidence'].pop('observation')
+   146	    assert overlay(policy,old,rt)['status']=='hold'
+   147	
+   148	
+   149	@pytest.mark.parametrize('mode',gate.MODES)
+   150	def test_punctuation_two_positive_signals_release(policy,mode):
+   151	    o=overlay(policy,"δ' α",rich('δ α'),mode)
+   152	    assert o['status']=='corrected' and o['label']=='δ α'
+   153	    if policy[0].POLICY=='sf6-release-v1':
+   154	        c=o['deletion_checks'][0]
+   155	        assert c['signals']==dict(reader=False,detector=True,recogniser=True) and c['allowed']
+   156	
+   157	
+   158	@pytest.mark.parametrize('defect',['unscored_text','unseen_right','unscored_head','unlocated','clipped','missing_flag'])
+   159	def test_punctuation_one_or_no_positive_signal_holds(policy,defect):
+   160	    rt=rich('δ α');original="δ' α";s=rt['detector']['slots'][0]
+   161	    if defect=='unscored_text':rt.pop('recognition_confidence')
+   162	    elif defect=='unseen_right':s['evidence']['observation']['right']='UNSEEN'
+   163	    elif defect=='unscored_head':
+   164	        rt=rich('κ α');original="κ' α"
+   165	    elif defect=='unlocated':s['localisation_unknown']=True
+   166	    elif defect=='clipped':s['evidence']['clipped_top']=True
+   167	    elif defect=='missing_flag':s.pop('apostrophe')
+   168	    assert overlay(policy,original,rt)['status']=='hold'
+   169	
+   170	
+   171	@pytest.mark.parametrize('mode',gate.MODES)
+   172	def test_leading_quote_two_absences_release_and_present_text_vetoes(policy,mode):
+   173	    assert overlay(policy,'“α',rich('α'),mode)['status']=='corrected'
+   174	    assert overlay(policy,'“α',rich('“α'),mode)['status']=='hold'
+   175	
+   176	
+   177	@pytest.mark.parametrize('original,proposal,classes',[
+   178	    ('ά','α',['mark']),('ά','ὰ',['mark']),("Ι'.",'Ι.',['keraia']),
+   179	    ('Ι\u0374.','Ι.',['keraia']),('Ι\u02b9.','Ι.',['keraia']),
+   180	    ('Ι\u0384.','Ι.',['keraia']),("12'.",'12.',['keraia']),("Ⅻ'.",'Ⅻ.',['keraia']),
+   181	    ('“α','α',['quote']),('κ\u1fbf α','κ α',['apostrophe']),('α  β','α β',['other']),
+   182	    ('᾿ποὺ',"'ποὺ",['apostrophe']),
+   183	    ("κ' α",'κ’ α',[]),('α\u0301','ά',[]),('α','ά',[]),
+   184	    ("κ'' α","κ' α",['apostrophe']),('άα','αά',['mark']),('-᾿Α','-Ἀ',['mark']),
+   185	])
+   186	def test_deletion_inventory_counts_replacements_and_multiplicity(policy,original,proposal,classes):
+   187	    assert [r['category'] for r in policy[0].google_deletions(original,proposal)]==classes
+   188	
+   189	
+   190	def test_insertions_and_sf5_alias_atom_unchanged(policy):
+   191	    assert overlay(policy,'α',rich('ά'))['label']=='ά'
+   192	    assert overlay(policy,"κ' α",rich('κ’ α'))['label']=="κ' α"
+   193	
+   194	
+   195	def test_recogniser_score_is_bound_to_release_evidence(policy):
+   196	    rt=rich('α');bound=policy[0].bind_runtime(rt)
+   197	    rt['recognition_confidence']=.8
+   198	    assert policy[0].bind_runtime(rt)['evidence_sha256']!=bound['evidence_sha256']
+   199	    bound['recognition_confidence']=.8
+   200	    with pytest.raises(ValueError,match='binding mismatch'):policy[0].bind_runtime(bound)
+   201	
+   202	
+   203	def test_census_is_seeded_thirty_distinct_release_deletions(tmp_path,monkeypatch):
+   204	    from scripts.labelfix import sf6_measure as measure
+   205	    monkeypatch.setattr(measure,'EV',tmp_path)
+   206	    path=tmp_path/'census.jsonl.gz'
+   207	    records=[dict(id=f'census-{i:03}',record=dict(id=f'census-{i:03}',label='“α',script_class='greek_poly'),
+   208	                  runtime=rich('“α')) for i in range(40)]
+   209	    write_rows(path,records);add_census(path)
+   210	    first=list(rows(tmp_path/'census_inputs.jsonl.gz'))
+   211	    add_census(path);second=list(rows(tmp_path/'census_inputs.jsonl.gz'))
+   212	    assert first==second and len(first)==len({r['id'] for r in first})==30
+   213	
+   214	
+   215	def test_census_missing_evidence_fails_loudly(tmp_path,monkeypatch):
+   216	    from scripts.labelfix import sf6_measure as measure
+   217	    monkeypatch.setattr(measure,'EV',tmp_path);path=tmp_path/'census.jsonl'
+   218	    write_rows(path,[dict(id='missing',google='“α')])
+   219	    with pytest.raises(ValueError,match='saved runtime'):add_census(path)
+   220	
+   221	
+   222	def test_l1r2_aggregate_census_uses_saved_sidecar(tmp_path,monkeypatch):
+   223	    from scripts.labelfix import sf6_measure as measure
+   224	    monkeypatch.setattr(measure,'EV',tmp_path)
+   225	    records=[dict(id=f'census-{i:03}',record=dict(id=f'census-{i:03}',label='“α',script_class='greek_poly'),
+   226	                  runtime=rich('“α')) for i in range(40)]
+   227	    path=tmp_path/'CHANGES.json'
+   228	    path.write_text(json.dumps(dict(modes={'ENSEMBLE_AB':{'overall':{'deletions_by_class':{
+   229	        'quote':dict(example_ids=[r['id'] for r in records])}}}})))
+   230	    with pytest.raises(ValueError,match='census witnesses pending'):add_census(path)
+   231	    assert json.loads((tmp_path/'census_pending.json').read_text())['available_saved_inputs']==[]
+   232	    write_rows(tmp_path/'deletion_witness_inputs.jsonl.gz',records)
+   233	    add_census(path)
+   234	    assert len(list(rows(tmp_path/'census_inputs.jsonl.gz')))==30
+   235	
+   236	
+   237	def test_every_released_measured_deletion_has_two_certified_absences():
+   238	    for instrument in ('heldout','m2_dev'):
+   239	        for r in rows(EV/instrument/'release_labels.jsonl.gz'):
+   240	            if r['after']['status']=='hold':continue
+   241	            for c in r['checks']:
+   242	                assert c['allowed']
+   243	                s=c['signals']
+   244	                assert (s['detector'] and s['recogniser'] if c['category'] in ('apostrophe','quote','keraia')
+   245	                        else s['reader'] and (s['detector'] or s['recogniser']))
+# SF6 — Release gate: deleting any Google character needs two positive absence signals (gpt-6.1-sol, xhigh, network OFF)
+
+Workspace: `~/Projects/greek-ocr-toolkit-spellcheck` (branch `opus/spellcheck`, head = this brief's commit on 05f2dafb = SF5 + its CLOSED
+verification). No `.git` writes; do not touch other worktrees (`…-l1r2` is packaging the SF5 recompose — leave it alone; `…-s8` is being read
+by print readers — read-only). Python `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.venv/bin/python`, `PYTHONPATH=$PWD`.
+Mac CPU; no detector/R1/CTC inference — saved evidence only. All labelfix tests green, none weakened; the rule gets witness tests that fail on
+05f2dafb and pass after. **Change exactly one rule** (coordinator: reopens review; same reviewer thread verifies SF6 only). Policy id
+`sf6-release-v1`. A partial `docs/labelfix/spellcheck/SF6_evidence/` from an aborted first run (old rule reading) exists: move it to
+`SF6_evidence_aborted_run1/` and do not reuse anything from it.
+
+## Why
+SF5 fixed consensus elisions, but a deletion of a Google character on the strength of ONE absent source is still the unobserved-as-absent
+pattern (C2-B01): the residual `Ι'.` → `Ι.` (numeral keraia, `a300f5e1c3f6a38d97201791-p000442-l0085`, recogniser lacks the sign), and the
+leading opening quote removed when the detector sees none (ASTRA-SC1c3v2 out-of-scope note; probe cases in
+`docs/reviews/astra_program_review_2026-10-06/ASTRA-SC1c3v2_evidence/out_of_scope_quote_probe.json`). The coordinator's binding rule: any
+keraia deletion triggers SF6.
+
+## The rule (coordinator, exact)
+A release may delete a character present in Google's label (combining mark, elision/other apostrophe, quote, numeral keraia, any other
+character) only with **two positive signals that it is absent**: (reader AND detector) or (reader AND recogniser text). A single absent source
+is **HOLD** for that line (not "keep and release" — HOLD, like the other uncertainty states).
+- "Reader" = R1 (arms A and B together count as ONE signal: they share training data; the ensemble caveat). "Positive absence" means an
+  observed, scored, in-window state that the character is absent — never a missing, unscored, clipped or uncertain state.
+- **Apostrophes, quotes and numeral keraia** (coordinator ruling, 17 Oct — R1 has no head for them): the two positive signals are
+  **detector absent AND recogniser text absent**, both observed, scored and in-window; anything less is HOLD. **Marks**: reader (A∧B as one)
+  AND detector, or reader AND recogniser text, as above. Report the held-line count for punctuation deletions under this reading
+  (held-out, M2 dev, witnesses), by class.
+- Replacements count as deletions of the replaced character (e.g. acute → grave deletes the acute) unless the replacement is a pure elision
+  alias (SF5's alias atom). Insertions are unchanged by SF6.
+
+## Witnesses (repository tests)
+1. The keraia line above → HOLD (not `Ι.`).
+2. The leading-opening-quote class → HOLD where only the detector is absent (use the reviewer's probe cases + any saved lines you find).
+3. A seeded 30 from the L1R2 deletion census when it lands (`~/Projects/greek-ocr-toolkit-spellcheck-l1r2/…/L1R2_REPORT.md` and its pulled
+   census): make that a one-command addition (`--add-census <file>`); if it is absent at the end of your run, say "census witnesses pending".
+4. Regression: every SF5 witness (56 lines) and the L1A audit lines keep their SF5 outcome unless SF6 turns a release into HOLD — list each.
+
+## Report
+Held-out tables before (SF5) / after (SF6) for all modes with the mark rows, the elision row, and a new **deletion row** (Google characters
+deleted by class: mark / apostrophe / quote / keraia / other; and lines turned HOLD by SF6, by class). Same for the M2 dev pool. Any change in
+the mark rows explained per slot. `docs/labelfix/spellcheck/SF6_REPORT.md`, last line:
+`SF6 RESULT: policy sf6-release-v1; keraia witness HOLD <yes|no>; quote witnesses HOLD <k>/<n>; held-out AB corrected <..>, wrong <..>, new <..>, lines held <..>; single-source deletions released <a>→0; punctuation-deletion HOLDs <p> (apostrophe/quote/keraia …); tests <n> passed`.
+
+ succeeded in 0ms:
+     1	"""SF6 saved-evidence release replay. No network, pixels or inference.
+     2	
+     3	Held-out uses the hash-bound SF5 frozen slot decisions, without inventing the
+     4	missing extraction coverage. M2 is filtered to DEV before JSON decoding.
+     5	"""
+     6	from __future__ import annotations
+     7	
+     8	import argparse
+     9	from collections import Counter
+    10	from copy import deepcopy
+    11	import gzip
+    12	import json
+    13	from pathlib import Path
+    14	import random
+    15	
+    16	from greekocr.labelfix import release_gate as gate
+    17	from greekocr.labelfix.text import nfd
+    18	from scripts.labelfix.clariden import l1_common as common
+    19	from scripts.labelfix.clariden.r1_common import rows, write_rows, write_json, sha256
+    20	from scripts.labelfix import sf5_measure as sf5
+    21	
+    22	DOC=sf5.DOC
+    23	EV=DOC/'SF6_evidence'
+    24	FROZEN=Path('artifacts/labelfix_sf6/frozen_sf5_05f2dafb')
+    25	CLASSES=('mark','apostrophe','quote','keraia','other')
+    26	KERAIA='a300f5e1c3f6a38d97201791-p000442-l0085'
+    27	PROBE=Path('docs/reviews/astra_program_review_2026-10-06/ASTRA-SC1c3v2_evidence/out_of_scope_quote_probe.json')
+    28	BINDING=dict(sf5.BINDING,policy_sha256='source-bound-SF6')
+    29	
+    30	
+    31	def baseline():
+    32	    return sf5.baseline(FROZEN)
+    33	
+    34	
+    35	def checked(path,receipt=None):
+    36	    digest=sha256(path)
+    37	    if receipt:
+    38	        assert digest==json.loads(receipt.read_text())['outputs'][path.name],path
+    39	    return digest
+    40	
+    41	
+    42	def prepare():
+    43	    """Copy fresh SF5 witnesses, plus all 48 L1A lines from saved evidence."""
+    44	    dest=EV/'witness_inputs.jsonl.gz'
+    45	    inputs=list(rows(DOC/'SF5_evidence/witness_inputs.jsonl.gz'))
+    46	    for r in inputs:r['cohort']='sf5'
+    47	    s8=Path.home()/'Projects/greek-ocr-toolkit-spellcheck-s8/docs/labelfix/spellcheck'
+    48	    l1=Path.home()/'Projects/greek-ocr-toolkit-spellcheck-l1/docs/labelfix/spellcheck/L1M_evidence'
+    49	    audit=s8/'S8_DEV/private/audit/items_key.json'
+    50	    wanted={r['line_id'] for r in json.loads(audit.read_text()) if not r['control']}
+    51	    assert len(wanted)==48
+    52	    records={r['id']:r for r in rows('docs/harvest/collection/v2/import_real_v2_train.jsonl') if r['id'] in wanted}
+    53	    oldgate,oldcommon=baseline()
+    54	    for pool in ('200','vouli'):
+    55	        with gzip.open(l1/f'remote_{pool}.json.gz','rt') as f:remote=json.load(f)['runtime']
+    56	        for r in rows(l1/pool/'details.jsonl.gz'):
+    57	            lid=r['id']
+    58	            if lid not in wanted:continue
+    59	            saved=r['modes']['masked']['ENSEMBLE_AB'];rt=deepcopy(remote[lid])
+    60	            rt['detector']=r['detector']['masked']
+    61	            # L1M holds the reader fixed but remaps observation to the masked crop.
+    62	            rt['coverage']=[s['r1_coverage'] for s in saved['slots'] if s.get('r1_coverage') is not None]
+    63	            rt['peer_coverage']={'B':[s['peer_coverage'] for s in saved['slots'] if s.get('peer_coverage') is not None]}
+    64	            rt['peer_predictions']={'B':[s['peer_prediction'] for s in saved['slots'] if s.get('peer_prediction') is not None]}
+    65	            rt.pop('evidence_sha256',None)
+    66	            # The SF5 composer must reproduce all saved per-slot decisions exactly.
+    67	            actual=oldgate.compose_runtime(rt,'ENSEMBLE_AB')
+    68	            assert actual['slots']==saved['slots'],lid
+    69	            record=dict(records[lid],id=lid,script_class='greek_poly')
+    70	            inputs.append(dict(id=lid,cohort='l1a',kind='l1a_audit',record=record,runtime=rt))
+    71	    assert sum(r['cohort']=='l1a' for r in inputs)==48
+    72	    # Probe runtimes are fixtures of the reviewer's synthetic saved-text cases,
+    73	    # never claims of newly observed detector evidence.
+    74	    from tests.labelfix.test_sf5 import synthetic
+    75	    for i,case in enumerate(json.loads(PROBE.read_text())['cases']):
+    76	        record=dict(id=f'quote-probe-{i:02}',label=case['original'],script_class='greek_poly')
+    77	        rt=synthetic(case['recogniser'])
+    78	        rt['id']=record['id']
+    79	        prior=oldcommon.overlay(record,rt,case['mode'],BINDING)
+    80	        assert prior['label']==case['after'],(i,prior)
+    81	        inputs.append(dict(id=record['id'],cohort='quote_probe',kind='leading_quote',
+    82	                           mode=case['mode'],record=record,runtime=rt))
+    83	    write_rows(dest,inputs)
+    84	    paths=[DOC/'SF5_evidence/witness_inputs.jsonl.gz',audit,l1/'remote_200.json.gz',
+    85	           l1/'200/details.jsonl.gz',l1/'remote_vouli.json.gz',l1/'vouli/details.jsonl.gz',Path('docs/harvest/collection/v2/import_real_v2_train.jsonl'),PROBE]
+    86	    write_json(EV/'witness_inputs_receipt.json',dict(inputs={str(p):sha256(p) for p in paths},
+    87	        output_sha256=sha256(dest),cohorts=dict(Counter(r['cohort'] for r in inputs)),
+    88	        l1a_full_slot_parity=48,detector_runs=0,r1_runs=0,ctc_runs=0,network=False))
+    89	
+    90	
+    91	def effective(original,recogniser,decision,policy,runtime=None):
+    92	    label=sf5.effective_label(policy,original,recogniser,decision,sf5=True)
+    93	    checks=gate.deletion_guard(original,label['proposal'],runtime,decision) if runtime else []
+    94	    if any(not c['allowed'] for c in checks):label.update(status='hold',label=original,alias_only=False)
+    95	    label['deletion_checks']=checks
+    96	    return label
+    97	
+    98	
+    99	def census_summary(records):
+   100	    result={m:dict(before=Counter(),after=Counter(),held=Counter(),punctuation_held=Counter(),
+   101	                   all_held=Counter(),punctuation_all_held=Counter(),
+   102	                   single_source_before=0,single_source_after=0,uncertified_before=0,uncertified_after=0)
+   103	            for m in gate.MODES}
+   104	    for r in records:
+   105	        d=result[r['mode']];before=r['before'];after=r['after'];events=r['checks']
+   106	        if after['status']=='hold':
+   107	            cats={c['category'] for c in events if not c['allowed']}
+   108	            d['all_held'].update(cats)
+   109	            punct=cats&{'apostrophe','quote','keraia'}
+   110	            d['punctuation_all_held'].update(punct)
+   111	            d['punctuation_all_held']['union']+=bool(punct)
+   112	        for phase,label in [('before',before),('after',after)]:
+   113	            if label['status']=='hold':continue
+   114	            for event in events:
+   115	                d[phase][event['category']]+=1
+   116	                if not event['allowed']:d['uncertified_'+phase]+=1
+   117	                if sum(event['signals'].values())==1 and not event['allowed']:d['single_source_'+phase]+=1
+   118	        if before['status']!='hold' and after['status']=='hold':
+   119	            cats={c['category'] for c in events if not c['allowed']}
+   120	            d['held'].update(cats)
+   121	            # Counts by class can overlap; this is the distinct union.
+   122	            punct=cats&{'apostrophe','quote','keraia'}
+   123	            d['punctuation_held'].update(punct)
+   124	            d['punctuation_held']['union']+=bool(punct)
+   125	    return {m:{k:dict(v) if isinstance(v,Counter) else v for k,v in d.items()} for m,d in result.items()}
+   126	
+   127	
+   128	def witnesses():
+   129	    oldgate,oldcommon=baseline();result=[]
+   130	    inputs=list(rows(EV/'witness_inputs.jsonl.gz'))
+   131	    if (EV/'census_inputs.jsonl.gz').exists():inputs+=list(rows(EV/'census_inputs.jsonl.gz'))
+   132	    for w in inputs:
+   133	        mode=w.get('mode','ENSEMBLE_AB')
+   134	        before=oldcommon.overlay(w['record'],w['runtime'],mode,BINDING)
+   135	        after=common.overlay(w['record'],w['runtime'],mode,BINDING)
+   136	        assert oldgate.compose_runtime(w['runtime'],mode)['slots']==gate.compose_runtime(w['runtime'],mode)['slots']
+   137	        assert (before['status'],before.get('label'))==(after['status'],after.get('label')) or (
+   138	            before['status']!='hold' and after['status']=='hold'),w['id']
+   139	        checks=after['deletion_checks']
+   140	        result.append(dict(id=w['id'],cohort=w['cohort'],kind=w['kind'],mode=mode,
+   141	            google=w['record']['label'],recogniser=w['runtime']['recogniser_text'],
+   142	            before=dict(status=before['status'],label=before.get('label',w['record']['label'])),
+   143	            after=dict(status=after['status'],label=after.get('label',w['record']['label'])),checks=checks))
+   144	    write_rows(EV/'witness_results.jsonl.gz',result)
+   145	    summaries={c:census_summary([r for r in result if r['cohort']==c]) for c in {r['cohort'] for r in result}}
+   146	    write_json(EV/'witness_metrics.json',dict(cohorts=summaries,
+   147	        keraia_hold=next(r['after']['status']=='hold' for r in result if r['id']==KERAIA),
+   148	        quote_held=sum(r['after']['status']=='hold' for r in result if r['cohort']=='quote_probe'),
+   149	        quote_total=sum(r['cohort']=='quote_probe' for r in result)))
+   150	
+   151	
+   152	def heldout():
+   153	    from scripts.labelfix.clariden.l1e_measure import score_line
+   154	    decisions=DOC/'SF5_evidence/heldout/decisions.jsonl.gz'
+   155	    checked(decisions,DOC/'SF5_evidence/heldout/receipt.json')
+   156	    frozen=list(rows(decisions));det={r['line_id']:r for r in rows(DOC/'S6_lines.jsonl.gz') if not r['dev']}
+   157	    sources={r['line_id']:r for r in rows(DOC/'R0_evidence/continuity_666.jsonl')}
+   158	    truth={r['line_id']:r for r in rows(DOC/'S4_lines.jsonl.gz') if not r['dev']}
+   159	    assert len(frozen)==666 and {r['id'] for r in frozen}==set(det)==set(sources)==set(truth)
+   160	    oldgate,_=baseline();result=[];totals={p:{m:Counter() for m in gate.MODES} for p in ('before','after')}
+   161	    predictions={}
+   162	    for r in rows('artifacts/labelfix_r1/output_3678928/A/heldout_predictions.jsonl'):
+   163	        predictions.setdefault(r['line_id'],[]).append(r)
+   164	    slot_changes=[];proof=[]
+   165	    for line in frozen:
+   166	        lid=line['id'];s6=det[lid];rec=s6['recogniser_text'];google=sources[lid]['google']
+   167	        rt=dict(recogniser_text=rec,r1_predictions=predictions.get(lid,[]),coverage=[],
+   168	            detector=dict(text=s6['reading'],slots=s6['recogniser_slots'],
+   169	                opening_quotes=s6.get('opening_quotes',[]),constraint_flags=s6.get('reading_flags',[])))
+   170	        after_decisions=deepcopy(line['decisions'])
+   171	        for mode in gate.MODES:
+   172	            d=dict(line['decisions'][mode],mode=mode)
+   173	            before=effective(google,rec,d,oldgate)
+   174	            after=effective(google,rec,d,gate,rt)
+   175	            checks=after['deletion_checks']
+   176	            result.append(dict(id=lid,mode=mode,google=google,recogniser=rec,
+   177	                before=before,after=after,checks=checks))
+   178	            assert before['proposal']==after['proposal']
+   179	            # Keep the original slot instrument, then apply ONLY SF6's added
+   180	            # whole-line veto. Existing SF5 slot and line vetoes are unchanged.
+   181	            if any(not c['allowed'] for c in checks):
+   182	                d2=after_decisions[mode]
+   183	                for s in d2['slots']:s['hold_reasons']=[*s['hold_reasons'],'sf6:line_deletion_hold']
+   184	                d2['hold_slots']=[*d2['hold_slots'],dict(start=0,reasons=['sf6:line_deletion_hold'])]
+   185	            proof.extend(dict(id=lid,mode=mode,start=s['start'],slot_identical=True) for s in d['slots'])
+   186	        before_counts,before_events=score_line(truth[lid],google,rt,decisions=line['decisions'])
+   187	        after_counts,after_events=score_line(truth[lid],google,rt,decisions=after_decisions)
+   188	        for mode in gate.MODES:
+   189	            totals['before'][mode].update(before_counts[mode]);totals['after'][mode].update(after_counts[mode])
+   190	            for a,b in zip(before_events[mode],after_events[mode]):
+   191	                if a!=b:slot_changes.append(dict(id=lid,mode=mode,before=a,after=b))
+   192	    ref=json.loads((DOC/'SF5_evidence/heldout/metrics.json').read_text())
+   193	    assert {m:dict(c) for m,c in totals['before'].items()}==ref['mark_rows']['after']
+   194	    # Exact parity of SF5 effective labels/statuses, not just aggregate counts.
+   195	    ref_labels={(r['id'],r['mode']):r for r in rows(DOC/'SF5_evidence/heldout/release_labels.jsonl.gz') if r['phase']=='after'}
+   196	    for r in result:
+   197	        prior=ref_labels[r['id'],r['mode']]
+   198	        assert all(r['before'][k]==prior[k] for k in ('status','label','proposal')),r['id']
+   199	    models={lid:r['model'] for lid,r in sources.items()};sites=sf5.elision_truth(set(sources));elision={}
+   200	    for phase in totals:
+   201	        elision[phase]={m:sf5.score_elisions(sites,{r['id']:r[phase]['label'] for r in result if r['mode']==m},models)[0] for m in gate.MODES}
+   202	    dest=EV/'heldout';dest.mkdir(exist_ok=True)
+   203	    write_rows(dest/'release_labels.jsonl.gz',result);write_rows(dest/'per_slot_changes.jsonl',slot_changes)
+   204	    write_rows(dest/'per_slot_proof.jsonl.gz',proof)
+   205	    write_json(dest/'metrics.json',dict(marks={p:{m:dict(c) for m,c in q.items()} for p,q in totals.items()},
+   206	        elision=elision,deletions=census_summary(result),release_counts=release_counts(result),
+   207	        legacy_slot_rows_unchanged=True,full_runtime_recomposition=False,coverage_synthesized=False,
+   208	        truth=ref['truth']))
+   209	    receipt(dest,[decisions,DOC/'SF5_evidence/heldout/release_labels.jsonl.gz',DOC/'SF5_evidence/heldout/metrics.json',
+   210	        DOC/'S6_lines.jsonl.gz',DOC/'S4_lines.jsonl.gz',DOC/'R0_evidence/continuity_666.jsonl',
+   211	        DOC/'R0_evidence/scoring/punctuation_sites.jsonl',Path('artifacts/labelfix_r1/output_3678928/A/heldout_predictions.jsonl')])
+   212	
+   213	
+   214	def release_counts(result):
+   215	    return {p:{m:dict(Counter(r[p]['status'] for r in result if r['mode']==m)) for m in gate.MODES}
+   216	            for p in ('before','after')}
+   217	
+   218	
+   219	def m2():
+   220	    from scripts.labelfix.sf3_measure import dev_inventory,dev_runtime
+
+exec
+/bin/zsh -lc "nl -ba scripts/labelfix/sf6_measure.py | sed -n '221,410p'
+sed -n '385,448p' docs/labelfix/spellcheck/SF6_REPORT.md" in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ succeeded in 0ms:
+   221	    from scripts.labelfix import m2_score as score
+   222	    score.MODES=gate.MODES
+   223	    manifest=DOC/'SF3_evidence/m2_dev_manifest.jsonl';cache=Path('.cache/labelfix/m2/runtime.jsonl')
+   224	    inv=dev_inventory(manifest);runs=dev_runtime(cache,{r['id'] for r in inv});by={r['id']:r for r in inv}
+   225	    oldgate,_=baseline();result=[];before_rt={};after_rt={};proof=[]
+   226	    for rt in runs:
+   227	        lid=rt['id'];google=by[lid]['google_label'];decisions={m:oldgate.compose_runtime(rt,m) for m in gate.MODES}
+   228	        before_rt[lid]=dict(rt,modes=decisions);after_rt[lid]=deepcopy(before_rt[lid])
+   229	        for mode,d in decisions.items():
+   230	            assert d['slots']==gate.compose_runtime(rt,mode)['slots']
+   231	            proof.extend(dict(id=lid,mode=mode,start=s['start'],slot_identical=True) for s in d['slots'])
+   232	            before=effective(google,rt['recogniser_text'],d,oldgate)
+   233	            after=effective(google,rt['recogniser_text'],d,gate,rt)
+   234	            result.append(dict(id=lid,mode=mode,google=google,recogniser=rt['recogniser_text'],
+   235	                before=before,after=after,checks=after['deletion_checks']))
+   236	            if any(not c['allowed'] for c in after['deletion_checks']):
+   237	                for s in after_rt[lid]['modes'][mode]['slots']:
+   238	                    s['hold_reasons']=[*s['hold_reasons'],'sf6:line_deletion_hold'];s['hold']=True
+   239	                after_rt[lid]['modes'][mode]['hold_slots'].append(dict(start=0,reasons=['sf6:line_deletion_hold']))
+   240	    ledger=score.pair_ledger(inv);metrics={};pair_results={}
+   241	    for phase,runtime in [('before',before_rt),('after',after_rt)]:
+   242	        pairs=[score.score_case(c,by[c['id']],runtime[c['id']]) for c in ledger if c['included']]
+   243	        lines=[]
+   244	        for line in inv:
+   245	            r=runtime[line['id']];changes,cov=score.changes_for(line,r)
+   246	            lines.append(dict(**line,**{k:v for k,v in r.items() if k!='id'},changes=changes,
+   247	                              reference_change_alignment_coverage=cov))
+   248	        metrics[phase]=score.summarize(inv,runtime,pairs,lines)['POOLED'];pair_results[phase]=pairs
+   249	    assert metrics['before']==json.loads((DOC/'SF5_evidence/m2_dev/metrics.json').read_text())['after']['marks']
+   250	    changes=[dict(before=a,after=b) for a,b in zip(pair_results['before'],pair_results['after']) if a!=b]
+   251	    control_changes=[]
+   252	    for line in inv:
+   253	        lid=line['id'];a,_=score.changes_for(line,before_rt[lid]);b,_=score.changes_for(line,after_rt[lid])
+   254	        for mode in gate.MODES:
+   255	            prior={s['google_nfd_start']:s for s in a[mode]}
+   256	            for s in b[mode]:
+   257	                old=prior.get(s['google_nfd_start'])
+   258	                if old and old['status']!=s['status']:
+   259	                    control_changes.append(dict(id=lid,mode=mode,before=old,after=s))
+   260	    dest=EV/'m2_dev';dest.mkdir(exist_ok=True)
+   261	    write_rows(dest/'release_labels.jsonl.gz',result);write_rows(dest/'per_slot_proof.jsonl.gz',proof)
+   262	    write_rows(dest/'per_slot_changes.jsonl',changes)
+   263	    write_rows(dest/'control_slot_changes.jsonl',control_changes)
+   264	    write_json(dest/'metrics.json',dict(marks=metrics,deletions=census_summary(result),release_counts=release_counts(result),
+   265	        elision_truth='UNKNOWN: no certified DEV punctuation truth',dev_lines=len(inv),locked_ii_records_decoded=0))
+   266	    receipt(dest,[manifest,cache,DOC/'SF5_evidence/m2_dev/metrics.json'])
+   267	
+   268	
+   269	def receipt(dest,inputs):
+   270	    write_json(dest/'receipt.json',dict(policy=gate.policy_binding(),network=False,detector_runs=0,r1_runs=0,ctc_runs=0,
+   271	        inputs={str(p):sha256(p) for p in inputs},script_sha256=sha256(Path(__file__)),
+   272	        outputs={p.name:sha256(p) for p in dest.iterdir() if p.name!='receipt.json'}))
+   273	
+   274	
+   275	def add_census(path):
+   276	    """Accept a pulled JSON/JSONL(.gz) census with saved runtime or overlays.
+   277	
+   278	    Each deletion row needs record+runtime, or a full SF5 overlay (including
+   279	    edit evidence) plus google/original_label. Nothing missing is synthesized.
+   280	    """
+   281	    opener=gzip.open if path.suffix=='.gz' else open
+   282	    with opener(path,'rt') as f:data=f.read()
+   283	    try:
+   284	        decoded=json.loads(data)
+   285	        values=(decoded if isinstance(decoded,list) else
+   286	                next((decoded[k] for k in ('records','cases','lines') if k in decoded),[decoded]))
+   287	    except json.JSONDecodeError:values=[json.loads(line) for line in data.splitlines() if line.strip()]
+   288	    material_paths=[]
+   289	    if isinstance(values,list) and len(values)==1 and 'modes' in values[0]:
+   290	        # L1R2's pulled CHANGES.json is an aggregate with up to 20 examples per
+   291	        # class/wave, not a runtime export. Never turn those IDs into evidence.
+   292	        aggregate=values[0];ids=set()
+   293	        def collect(node):
+   294	            if not isinstance(node,dict):return
+   295	            for key,value in node.items():
+   296	                if key=='deletions_by_class':
+   297	                    for bucket in value.values():ids.update(bucket.get('example_ids',()))
+   298	                else:collect(value)
+   299	        collect(aggregate.get('modes',{}).get('ENSEMBLE_AB',{}))
+   300	        if len(ids)<30:raise ValueError(f'census witnesses pending: only {len(ids)} AB deletion example IDs; need 30')
+   301	        candidates_paths=[]
+   302	        for parent in [path.parent,*list(path.parents)[1:3]]:
+   303	            candidates_paths.extend(parent/name for name in ('witness_inputs.jsonl.gz','deletion_witness_inputs.jsonl.gz',
+   304	                'overlay_ensemble_ab.jsonl.gz','release/overlay_ensemble_ab.jsonl.gz'))
+   305	        if aggregate.get('witness_inputs_file'):
+   306	            candidates_paths.insert(0,path.parent/aggregate['witness_inputs_file'])
+   307	        candidates_paths.append(EV/'witness_inputs.jsonl.gz')
+   308	        supplied={};overlays={}
+   309	        for candidate in dict.fromkeys(candidates_paths):
+   310	            if not candidate.is_file():continue
+   311	            material_paths.append(candidate)
+   312	            for r in rows(candidate):
+   313	                lid=r.get('id',r.get('line_id'))
+   314	                if lid not in ids:continue
+   315	                if 'runtime' in r and 'record' in r:supplied[lid]=r
+   316	                elif r.get('status')=='corrected' and r.get('changes'):overlays[lid]=r
+   317	        needed=set(overlays)-supplied.keys()
+   318	        originals=({r['id']:r['label'] for r in rows('docs/harvest/collection/v2/import_real_v2_train.jsonl') if r['id'] in needed}
+   319	                   if needed else {})
+   320	        supplied.update({lid:dict(line_id=lid,original_label=originals[lid],overlay=o)
+   321	                         for lid,o in overlays.items() if lid in originals and lid not in supplied})
+   322	        if len(supplied)<30:
+   323	            write_json(EV/'census_pending.json',dict(census=str(path),sha256=sha256(path),seed=6,
+   324	                candidate_ids=sorted(ids),available_saved_inputs=sorted(supplied),
+   325	                missing_saved_inputs=sorted(ids-supplied.keys()),
+   326	                required='Place deletion_witness_inputs.jsonl.gz (record+runtime), or overlay_ensemble_ab.jsonl.gz, beside CHANGES.json; then rerun --add-census'))
+   327	            raise ValueError(f'census witnesses pending: {len(supplied)}/{len(ids)} AB example IDs have saved runtime/overlays; see census_pending.json')
+   328	        values=list(supplied.values())
+   329	    candidates={}
+   330	    oldgate,oldcommon=baseline()
+   331	    for r in values:
+   332	        lid=r.get('id',r.get('line_id'))
+   333	        if 'runtime' in r and 'record' in r:w=dict(r,id=lid)
+   334	        else:
+   335	            o=r.get('overlay',r.get('sf5_overlay'))
+   336	            if o is None and 'changes' in r:o=r
+   337	            original=r.get('google',r.get('original_label'))
+   338	            if o is None or original is None:
+   339	                raise ValueError('census needs saved runtime or full overlay and original_label: '+str(lid))
+   340	            assert common.label_sha(original)==o['original_label_sha256'],lid
+   341	            w=dict(id=lid,record=dict(id=lid,label=original,script_class='greek_poly'),runtime=sf5.runtime_from_overlay(o))
+   342	        prior=oldcommon.overlay(w['record'],w['runtime'],'ENSEMBLE_AB',BINDING)
+   343	        if 'runtime' not in r:
+   344	            assert (prior['status'],prior.get('label'))==(o['status'],o.get('label')),lid
+   345	        if prior['status']=='hold' or not gate.google_deletions(w['record']['label'],prior['label']):continue
+   346	        assert lid not in candidates,'duplicate census line: '+lid
+   347	        candidates[lid]=dict(w,cohort='census',kind='seeded_census',mode='ENSEMBLE_AB')
+   348	    if len(candidates)<30:raise ValueError(f'need 30 distinct released deletion lines; got {len(candidates)}')
+   349	    ids=random.Random(6).sample(sorted(candidates),30)
+   350	    write_rows(EV/'census_inputs.jsonl.gz',[candidates[lid] for lid in ids])
+   351	    write_json(EV/'census_receipt.json',dict(path=str(path),sha256=sha256(path),seed=6,
+   352	        eligible_lines=len(candidates),selected_ids=ids,output_sha256=sha256(EV/'census_inputs.jsonl.gz'),
+   353	        saved_materials={str(p):sha256(p) for p in material_paths}))
+   354	
+   355	
+   356	def main():
+   357	    p=argparse.ArgumentParser(description=__doc__)
+   358	    p.add_argument('instrument',choices=['prepare','witnesses','heldout','m2','all'],nargs='?',default='all')
+   359	    p.add_argument('--add-census',type=Path)
+   360	    a=p.parse_args();EV.mkdir(exist_ok=True)
+   361	    if a.add_census:add_census(a.add_census)
+   362	    for name,fn in [('prepare',prepare),('witnesses',witnesses),('heldout',heldout),('m2',m2)]:
+   363	        if a.instrument in (name,'all'):fn();print('complete:',name,flush=True)
+   364	    if a.add_census:
+   365	        # The one-command addition updates the regression tests and report too.
+   366	        import os,subprocess,sys
+   367	        with (EV/'tests_after.log').open('w') as f:
+   368	            completed=subprocess.run([sys.executable,'-m','pytest','tests/labelfix','-q','-p','no:cacheprovider'],
+   369	                stdout=f,stderr=subprocess.STDOUT,env=dict(os.environ,PYTHONPATH=str(Path.cwd())))
+   370	        from scripts.labelfix.sf6_report import main as report
+   371	        report()
+   372	        from scripts.labelfix.sf6_verify import main as verify
+   373	        verify()
+   374	        if completed.returncode:raise SystemExit(completed.returncode)
+   375	
+   376	
+   377	if __name__=='__main__':main()
+| 177b717d-p000067-l0009 | ENSEMBLE_AB | hold → hold |
+| 177b717d-p000077-l0005 | ENSEMBLE_AB | hold → hold |
+| 177b717d-p000077-l0007 | ENSEMBLE_AB | corrected → hold |
+| 177b717d-p000097-l0010 | ENSEMBLE_AB | corrected → hold |
+| 384c3f89-p000030-l0010 | ENSEMBLE_AB | hold → hold |
+| c0/nlg_poly/c023 | ENSEMBLE_AB | hold → hold |
+| t4c/oa_poly1900/c009 | ENSEMBLE_AB | hold → hold |
+| 0b7bf21d-p000002-l0004 | ENSEMBLE_AE | hold → hold |
+| 177b717d-p000067-l0009 | ENSEMBLE_AE | corrected → hold |
+| 177b717d-p000077-l0005 | ENSEMBLE_AE | hold → hold |
+| 177b717d-p000077-l0007 | ENSEMBLE_AE | corrected → hold |
+| 177b717d-p000097-l0010 | ENSEMBLE_AE | corrected → hold |
+| 384c3f89-p000030-l0010 | ENSEMBLE_AE | hold → hold |
+| c0/nlg_poly/c023 | ENSEMBLE_AE | hold → hold |
+| t4c/oa_poly1900/c009 | ENSEMBLE_AE | hold → hold |
+| 0b7bf21d-p000002-l0004 | FULL | hold → hold |
+| 177b717d-p000067-l0009 | FULL | hold → hold |
+| 177b717d-p000077-l0005 | FULL | hold → hold |
+| 177b717d-p000077-l0007 | FULL | hold → hold |
+| 177b717d-p000097-l0010 | FULL | corrected → hold |
+| 384c3f89-p000030-l0010 | FULL | hold → hold |
+| c0/nlg_poly/c023 | FULL | hold → hold |
+| t4c/oa_poly1900/c009 | FULL | hold → hold |
+| 0b7bf21d-p000002-l0004 | PRESENCE | hold → hold |
+| 177b717d-p000067-l0009 | PRESENCE | hold → hold |
+| 177b717d-p000077-l0005 | PRESENCE | hold → hold |
+| 177b717d-p000077-l0007 | PRESENCE | hold → hold |
+| 177b717d-p000097-l0010 | PRESENCE | corrected → hold |
+| 384c3f89-p000030-l0010 | PRESENCE | hold → hold |
+| c0/nlg_poly/c023 | PRESENCE | hold → hold |
+| t4c/oa_poly1900/c009 | PRESENCE | hold → hold |
+
+## Tests and reproduction
+
+- New SF6 suite: **135 failures on the frozen 05f2dafb implementation**, with the same witnesses passing on SF6. [Failing-before log](SF6_evidence/witness_tests_before.log), [SF5 + SF6 witness suite](SF6_evidence/witness_tests_after.log).
+- SF5 tests retain their exact composer assertions and positive controls. Only explicit deletion-release expectations change to exact HOLD checks, including unchanged effective Google bytes, no changes, and the SF6 reason. No general “either release or HOLD” assertion was substituted.
+- Full labelfix suite: **1100 passed, 1 environment setup error(s), 0 assertion failures**. [Full result](SF6_evidence/tests_after.log), [SF5 baseline](SF6_evidence/tests_before.log). The capture test was not modified.
+- Coverage includes both valid two-source mark pairs, valid detector+recogniser punctuation, one-source and missing/unscored/clipped/uncertain controls, A/B-as-one, replacement deletions, multiplicity, explicit numeral signs, insertion parity, elision aliases, confidence binding and deterministic census selection.
+
+```sh
+export PYTHONPATH="$PWD" PYTHONDONTWRITEBYTECODE=1
+PY=/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.venv/bin/python
+$PY scripts/labelfix/sf6_measure.py all
+SF6_TEST_BASELINE=1 $PY -m pytest tests/labelfix/test_sf6.py -q -p no:cacheprovider
+$PY -m pytest tests/labelfix -q -p no:cacheprovider
+$PY scripts/labelfix/sf6_report.py
+$PY scripts/labelfix/sf6_verify.py
+# One-command census addition once the pulled evidence lands:
+$PY scripts/labelfix/sf6_measure.py --add-census /path/to/deletion_census.jsonl.gz
+```
+
+The census addition samples 30 distinct released-deletion lines with seed 6 from sorted IDs, writes source/hash custody, adds repository regression cases, replays both pools, runs all labelfix tests and refreshes this report and verification. It accepts JSON/JSONL runtime rows or L1R2’s aggregate `CHANGES.json`; the latter samples its AB deletion-example ID pool, not the full population. Aggregate IDs require a `deletion_witness_inputs.jsonl.gz` sidecar (record+runtime), or a full `overlay_ensemble_ab.jsonl.gz` with edit evidence and Google’s original labels available locally. Missing evidence writes a pending receipt and fails loudly; no source is reconstructed from guesses. The test harness validates both formats with independent 40-row fixtures. **census witnesses pending**. The read-only L1R2 report was checked at the end of this run: jobs prepared, no production job submitted and no pulled production census available; mock census counts are not substituted.
+
+SF6 RESULT: policy sf6-release-v1; keraia witness HOLD yes; quote witnesses HOLD 64/64; held-out AB corrected 11, wrong 0, new 1, lines held 327; single-source deletions released 8→0; punctuation-deletion HOLDs 74 (apostrophe/quote/keraia 2/71/1); tests 1100 passed
+
+exec
+/bin/zsh -lc "rg -n 'recognition_confidence|locator_span|observation.*OBSERVED|window=' scripts/labelfix greekocr/labelfix -g '*.py' | head -n 130" in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ succeeded in 0ms:
+greekocr/labelfix/segmentation.py:52:        s = dict(base=cl.base, start=cl.start, end=cl.end, locator_span=[sp.x0, sp.x1],
+greekocr/labelfix/segmentation.py:71:                target = (a['locator_span'][1]+b['locator_span'][0])/2
+greekocr/labelfix/segmentation.py:87:            s = ss[0]; members=[k]; a,b=s['locator_span']
+greekocr/labelfix/segmentation.py:104:            a,b=s['locator_span']; mid=(a+b)/2; w=expected_width(ink,s['base'])
+greekocr/labelfix/release_gate.py:352:        confidence=runtime.get('recognition_confidence')
+greekocr/labelfix/release_gate.py:353:        recogniser=bool(clean and _finite_span(s.get('locator_span'))
+greekocr/labelfix/release_gate.py:572:    if 'recognition_confidence' in runtime:
+greekocr/labelfix/release_gate.py:573:        evidence['recognition_confidence']=runtime['recognition_confidence']
+greekocr/labelfix/release_gate.py:598:                         detector_parts=s['detector_parts'],r1_parts=s['r1_parts'],locator_span=s.get('locator_span'))
+greekocr/labelfix/candidates.py:182:                   ink=ev_rec, cluster_window=cl_window, word_window=word_window,
+greekocr/labelfix/toolkit_geometry.py:92:        s=dict(base=cl.base,start=cl.start,end=cl.end,locator_span=[sp.x0,sp.x1],
+greekocr/labelfix/toolkit_geometry.py:132:        a,b=s['locator_span']; left=max(0,min(ink.width-1,int(a)));right=min(ink.width,max(left+1,int(b)))
+scripts/labelfix/m2_score.py:290:                    span=[min(s['locator_span'][0] for s in wordslots),max(s['locator_span'][1] for s in wordslots)],
+greekocr/labelfix/spellink.py:401:                 model_agrees=False, ink=None, shape=None, cluster_window=None, word_window=None)
+greekocr/labelfix/spellink.py:441:                                   shape=cj.shape, cluster_window=list(evidence(i)[0][3:]) if evidence(i)[0] else None)
+greekocr/labelfix/spellink.py:479:                 cluster_window=[loc[3], loc[4]] if loc else None,
+greekocr/labelfix/spellink.py:480:                 word_window=list(al.window(m.start, m.end)) if al and m else None,
+scripts/labelfix/m2_review.py:31:            native_window=[lo,0,hi,original.height], native_png=f"word_{r['review_id']:02d}_native.png"))
+scripts/labelfix/sf5_measure.py:75:            z.update(parts=s['detector_parts'], locator_span=d['locator_span'])
+scripts/labelfix/r0_prepare.py:337:            centre=sum(s['locator_span'])/2
+scripts/labelfix/r0_prepare.py:341:                status=status,component_ids=ids,ctc_span=s['locator_span'],ctc_centre=centre,
+scripts/labelfix/r0_prepare.py:394:            span=r.get('locator_span') if r else c.get('locator_span')
+scripts/labelfix/sf6_report.py:52:       'A reader absence needs a supported head, saved predictions from both A and B, scored coverage with a finite in-image span, a known evidence state, an empty uncertainty list, and no applicable slot/observation veto. Missing or conflicting B is not a reader absence, even if A and the detector agree. Detector absence needs an actually scored head, explicit `OBSERVED` coverage of the relevant region, a valid window, resolved localisation and segmentation, no unnamed or uncertain ink and no relevant clipping. Empty candidate lists without that evidence are UNKNOWN. The current apostrophe detector only scores word-final δ/τ/ρ/θ/π; an empty Ι, κ or μ slot is not a negative punctuation observation. Quote absence additionally needs the leading-left region observed. Keraia has no scored absence head in these saved records.', '',
+scripts/labelfix/sf6_report.py:53:       'Recogniser-text absence needs aligned letter context, a finite saved `recognition_confidence` in [0,1], a located in-image span, and no applicable uncertainty/clipping. An unscored string is not a positive absence. Its score is now included in the content-bound evidence envelope because SF6 consumes it. No missing confidence, coverage or observation state is filled in. This is evidence plumbing for the deletion rule, not a new source decision.', '',
+greekocr/labelfix/linemetric.py:104:                                  word_final=j == len(gc)-1, locator_span=[b0,b1]))
+scripts/labelfix/owner_reading.py:82:            window=ev.get('window',[bbox[0],bbox[2]])
+scripts/labelfix/s3_validate.py:54:        if s.get('locator_span'):
+scripts/labelfix/s3_validate.py:55:            b0,b1=s['locator_span']
+greekocr/labelfix/ink.py:268:        return dict(window=[round(self.window[0], 1), round(self.window[1], 1)], xh=round(self.xh, 2),
+scripts/labelfix/clariden/r1_score.py:79:                span=r['locator_span'];hits=[s for s in l['slots'] if min(span[1],s['bbox'][2])>max(span[0],s['bbox'][0])]
+scripts/labelfix/clariden/r1_score.py:161:        recogniser_slots=[{k:r.get(k) for k in ('start','component_slot','component_slots','bbox','locator_span')} for r in l['recogniser_slots']]) for l in sorted(lines,key=lambda l:l['line_id'])]
+scripts/labelfix/owner_pages_build_combined.py:93:            ev2 = I.MarkEvidence(above=det_above, below=list(ev.below), window=ev.window, xh=ev.xh, meanline=ev.meanline, baseline=ev.baseline,
+scripts/labelfix/clariden/l1_common.py:82:                        peer_coverage=s.get('peer_coverage'),locator_span=s.get('locator_span'),
+scripts/labelfix/m2_run.py:128:        recognition_confidence=alignment.confidence, detector=serialize(raw),
+scripts/labelfix/clariden/r1_owner.py:72:        rs=[r for r in line['recogniser_slots'] if any(min(r['locator_span'][1],b[2])>max(r['locator_span'][0],b[0]) for b in boxes)]
+scripts/labelfix/owner_pages_build.py:93:            ev2 = I.MarkEvidence(above=det_above, below=list(ev.below), window=ev.window, xh=ev.xh, meanline=ev.meanline, baseline=ev.baseline,
+scripts/labelfix/sf4_measure.py:147:                r1_parts=s['parts'],locator_span=next(x.get('locator_span') for x in raw['recogniser_slots'] if x['start']==s['start']))),
+scripts/labelfix/sheet_build.py:61:            ev2 = I.MarkEvidence(above=det_above, below=list(ev.below), window=ev.window, xh=ev.xh, meanline=ev.meanline, baseline=ev.baseline,
+
+exec
+/bin/zsh -lc "sed -n '20,220p' scripts/labelfix/sf6_measure.py" in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+exec
+/bin/zsh -lc "sed -n '1,185p' scripts/labelfix/clariden/r1_data.py" in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ exited 1 in 0ms:
+sed: scripts/labelfix/clariden/r1_data.py: No such file or directory
+
+ succeeded in 0ms:
+from scripts.labelfix import sf5_measure as sf5
+
+DOC=sf5.DOC
+EV=DOC/'SF6_evidence'
+FROZEN=Path('artifacts/labelfix_sf6/frozen_sf5_05f2dafb')
+CLASSES=('mark','apostrophe','quote','keraia','other')
+KERAIA='a300f5e1c3f6a38d97201791-p000442-l0085'
+PROBE=Path('docs/reviews/astra_program_review_2026-10-06/ASTRA-SC1c3v2_evidence/out_of_scope_quote_probe.json')
+BINDING=dict(sf5.BINDING,policy_sha256='source-bound-SF6')
+
+
+def baseline():
+    return sf5.baseline(FROZEN)
+
+
+def checked(path,receipt=None):
+    digest=sha256(path)
+    if receipt:
+        assert digest==json.loads(receipt.read_text())['outputs'][path.name],path
+    return digest
+
+
+def prepare():
+    """Copy fresh SF5 witnesses, plus all 48 L1A lines from saved evidence."""
+    dest=EV/'witness_inputs.jsonl.gz'
+    inputs=list(rows(DOC/'SF5_evidence/witness_inputs.jsonl.gz'))
+    for r in inputs:r['cohort']='sf5'
+    s8=Path.home()/'Projects/greek-ocr-toolkit-spellcheck-s8/docs/labelfix/spellcheck'
+    l1=Path.home()/'Projects/greek-ocr-toolkit-spellcheck-l1/docs/labelfix/spellcheck/L1M_evidence'
+    audit=s8/'S8_DEV/private/audit/items_key.json'
+    wanted={r['line_id'] for r in json.loads(audit.read_text()) if not r['control']}
+    assert len(wanted)==48
+    records={r['id']:r for r in rows('docs/harvest/collection/v2/import_real_v2_train.jsonl') if r['id'] in wanted}
+    oldgate,oldcommon=baseline()
+    for pool in ('200','vouli'):
+        with gzip.open(l1/f'remote_{pool}.json.gz','rt') as f:remote=json.load(f)['runtime']
+        for r in rows(l1/pool/'details.jsonl.gz'):
+            lid=r['id']
+            if lid not in wanted:continue
+            saved=r['modes']['masked']['ENSEMBLE_AB'];rt=deepcopy(remote[lid])
+            rt['detector']=r['detector']['masked']
+            # L1M holds the reader fixed but remaps observation to the masked crop.
+            rt['coverage']=[s['r1_coverage'] for s in saved['slots'] if s.get('r1_coverage') is not None]
+            rt['peer_coverage']={'B':[s['peer_coverage'] for s in saved['slots'] if s.get('peer_coverage') is not None]}
+            rt['peer_predictions']={'B':[s['peer_prediction'] for s in saved['slots'] if s.get('peer_prediction') is not None]}
+            rt.pop('evidence_sha256',None)
+            # The SF5 composer must reproduce all saved per-slot decisions exactly.
+            actual=oldgate.compose_runtime(rt,'ENSEMBLE_AB')
+            assert actual['slots']==saved['slots'],lid
+            record=dict(records[lid],id=lid,script_class='greek_poly')
+            inputs.append(dict(id=lid,cohort='l1a',kind='l1a_audit',record=record,runtime=rt))
+    assert sum(r['cohort']=='l1a' for r in inputs)==48
+    # Probe runtimes are fixtures of the reviewer's synthetic saved-text cases,
+    # never claims of newly observed detector evidence.
+    from tests.labelfix.test_sf5 import synthetic
+    for i,case in enumerate(json.loads(PROBE.read_text())['cases']):
+        record=dict(id=f'quote-probe-{i:02}',label=case['original'],script_class='greek_poly')
+        rt=synthetic(case['recogniser'])
+        rt['id']=record['id']
+        prior=oldcommon.overlay(record,rt,case['mode'],BINDING)
+        assert prior['label']==case['after'],(i,prior)
+        inputs.append(dict(id=record['id'],cohort='quote_probe',kind='leading_quote',
+                           mode=case['mode'],record=record,runtime=rt))
+    write_rows(dest,inputs)
+    paths=[DOC/'SF5_evidence/witness_inputs.jsonl.gz',audit,l1/'remote_200.json.gz',
+           l1/'200/details.jsonl.gz',l1/'remote_vouli.json.gz',l1/'vouli/details.jsonl.gz',Path('docs/harvest/collection/v2/import_real_v2_train.jsonl'),PROBE]
+    write_json(EV/'witness_inputs_receipt.json',dict(inputs={str(p):sha256(p) for p in paths},
+        output_sha256=sha256(dest),cohorts=dict(Counter(r['cohort'] for r in inputs)),
+        l1a_full_slot_parity=48,detector_runs=0,r1_runs=0,ctc_runs=0,network=False))
+
+
+def effective(original,recogniser,decision,policy,runtime=None):
+    label=sf5.effective_label(policy,original,recogniser,decision,sf5=True)
+    checks=gate.deletion_guard(original,label['proposal'],runtime,decision) if runtime else []
+    if any(not c['allowed'] for c in checks):label.update(status='hold',label=original,alias_only=False)
+    label['deletion_checks']=checks
+    return label
+
+
+def census_summary(records):
+    result={m:dict(before=Counter(),after=Counter(),held=Counter(),punctuation_held=Counter(),
+                   all_held=Counter(),punctuation_all_held=Counter(),
+                   single_source_before=0,single_source_after=0,uncertified_before=0,uncertified_after=0)
+            for m in gate.MODES}
+    for r in records:
+        d=result[r['mode']];before=r['before'];after=r['after'];events=r['checks']
+        if after['status']=='hold':
+            cats={c['category'] for c in events if not c['allowed']}
+            d['all_held'].update(cats)
+            punct=cats&{'apostrophe','quote','keraia'}
+            d['punctuation_all_held'].update(punct)
+            d['punctuation_all_held']['union']+=bool(punct)
+        for phase,label in [('before',before),('after',after)]:
+            if label['status']=='hold':continue
+            for event in events:
+                d[phase][event['category']]+=1
+                if not event['allowed']:d['uncertified_'+phase]+=1
+                if sum(event['signals'].values())==1 and not event['allowed']:d['single_source_'+phase]+=1
+        if before['status']!='hold' and after['status']=='hold':
+            cats={c['category'] for c in events if not c['allowed']}
+            d['held'].update(cats)
+            # Counts by class can overlap; this is the distinct union.
+            punct=cats&{'apostrophe','quote','keraia'}
+            d['punctuation_held'].update(punct)
+            d['punctuation_held']['union']+=bool(punct)
+    return {m:{k:dict(v) if isinstance(v,Counter) else v for k,v in d.items()} for m,d in result.items()}
+
+
+def witnesses():
+    oldgate,oldcommon=baseline();result=[]
+    inputs=list(rows(EV/'witness_inputs.jsonl.gz'))
+    if (EV/'census_inputs.jsonl.gz').exists():inputs+=list(rows(EV/'census_inputs.jsonl.gz'))
+    for w in inputs:
+        mode=w.get('mode','ENSEMBLE_AB')
+        before=oldcommon.overlay(w['record'],w['runtime'],mode,BINDING)
+        after=common.overlay(w['record'],w['runtime'],mode,BINDING)
+        assert oldgate.compose_runtime(w['runtime'],mode)['slots']==gate.compose_runtime(w['runtime'],mode)['slots']
+        assert (before['status'],before.get('label'))==(after['status'],after.get('label')) or (
+            before['status']!='hold' and after['status']=='hold'),w['id']
+        checks=after['deletion_checks']
+        result.append(dict(id=w['id'],cohort=w['cohort'],kind=w['kind'],mode=mode,
+            google=w['record']['label'],recogniser=w['runtime']['recogniser_text'],
+            before=dict(status=before['status'],label=before.get('label',w['record']['label'])),
+            after=dict(status=after['status'],label=after.get('label',w['record']['label'])),checks=checks))
+    write_rows(EV/'witness_results.jsonl.gz',result)
+    summaries={c:census_summary([r for r in result if r['cohort']==c]) for c in {r['cohort'] for r in result}}
+    write_json(EV/'witness_metrics.json',dict(cohorts=summaries,
+        keraia_hold=next(r['after']['status']=='hold' for r in result if r['id']==KERAIA),
+        quote_held=sum(r['after']['status']=='hold' for r in result if r['cohort']=='quote_probe'),
+        quote_total=sum(r['cohort']=='quote_probe' for r in result)))
+
+
+def heldout():
+    from scripts.labelfix.clariden.l1e_measure import score_line
+    decisions=DOC/'SF5_evidence/heldout/decisions.jsonl.gz'
+    checked(decisions,DOC/'SF5_evidence/heldout/receipt.json')
+    frozen=list(rows(decisions));det={r['line_id']:r for r in rows(DOC/'S6_lines.jsonl.gz') if not r['dev']}
+    sources={r['line_id']:r for r in rows(DOC/'R0_evidence/continuity_666.jsonl')}
+    truth={r['line_id']:r for r in rows(DOC/'S4_lines.jsonl.gz') if not r['dev']}
+    assert len(frozen)==666 and {r['id'] for r in frozen}==set(det)==set(sources)==set(truth)
+    oldgate,_=baseline();result=[];totals={p:{m:Counter() for m in gate.MODES} for p in ('before','after')}
+    predictions={}
+    for r in rows('artifacts/labelfix_r1/output_3678928/A/heldout_predictions.jsonl'):
+        predictions.setdefault(r['line_id'],[]).append(r)
+    slot_changes=[];proof=[]
+    for line in frozen:
+        lid=line['id'];s6=det[lid];rec=s6['recogniser_text'];google=sources[lid]['google']
+        rt=dict(recogniser_text=rec,r1_predictions=predictions.get(lid,[]),coverage=[],
+            detector=dict(text=s6['reading'],slots=s6['recogniser_slots'],
+                opening_quotes=s6.get('opening_quotes',[]),constraint_flags=s6.get('reading_flags',[])))
+        after_decisions=deepcopy(line['decisions'])
+        for mode in gate.MODES:
+            d=dict(line['decisions'][mode],mode=mode)
+            before=effective(google,rec,d,oldgate)
+            after=effective(google,rec,d,gate,rt)
+            checks=after['deletion_checks']
+            result.append(dict(id=lid,mode=mode,google=google,recogniser=rec,
+                before=before,after=after,checks=checks))
+            assert before['proposal']==after['proposal']
+            # Keep the original slot instrument, then apply ONLY SF6's added
+            # whole-line veto. Existing SF5 slot and line vetoes are unchanged.
+            if any(not c['allowed'] for c in checks):
+                d2=after_decisions[mode]
+                for s in d2['slots']:s['hold_reasons']=[*s['hold_reasons'],'sf6:line_deletion_hold']
+                d2['hold_slots']=[*d2['hold_slots'],dict(start=0,reasons=['sf6:line_deletion_hold'])]
+            proof.extend(dict(id=lid,mode=mode,start=s['start'],slot_identical=True) for s in d['slots'])
+        before_counts,before_events=score_line(truth[lid],google,rt,decisions=line['decisions'])
+        after_counts,after_events=score_line(truth[lid],google,rt,decisions=after_decisions)
+        for mode in gate.MODES:
+            totals['before'][mode].update(before_counts[mode]);totals['after'][mode].update(after_counts[mode])
+            for a,b in zip(before_events[mode],after_events[mode]):
+                if a!=b:slot_changes.append(dict(id=lid,mode=mode,before=a,after=b))
+    ref=json.loads((DOC/'SF5_evidence/heldout/metrics.json').read_text())
+    assert {m:dict(c) for m,c in totals['before'].items()}==ref['mark_rows']['after']
+    # Exact parity of SF5 effective labels/statuses, not just aggregate counts.
+    ref_labels={(r['id'],r['mode']):r for r in rows(DOC/'SF5_evidence/heldout/release_labels.jsonl.gz') if r['phase']=='after'}
+    for r in result:
+        prior=ref_labels[r['id'],r['mode']]
+        assert all(r['before'][k]==prior[k] for k in ('status','label','proposal')),r['id']
+    models={lid:r['model'] for lid,r in sources.items()};sites=sf5.elision_truth(set(sources));elision={}
+    for phase in totals:
+        elision[phase]={m:sf5.score_elisions(sites,{r['id']:r[phase]['label'] for r in result if r['mode']==m},models)[0] for m in gate.MODES}
+    dest=EV/'heldout';dest.mkdir(exist_ok=True)
+    write_rows(dest/'release_labels.jsonl.gz',result);write_rows(dest/'per_slot_changes.jsonl',slot_changes)
+    write_rows(dest/'per_slot_proof.jsonl.gz',proof)
+    write_json(dest/'metrics.json',dict(marks={p:{m:dict(c) for m,c in q.items()} for p,q in totals.items()},
+        elision=elision,deletions=census_summary(result),release_counts=release_counts(result),
+        legacy_slot_rows_unchanged=True,full_runtime_recomposition=False,coverage_synthesized=False,
+        truth=ref['truth']))
+    receipt(dest,[decisions,DOC/'SF5_evidence/heldout/release_labels.jsonl.gz',DOC/'SF5_evidence/heldout/metrics.json',
+        DOC/'S6_lines.jsonl.gz',DOC/'S4_lines.jsonl.gz',DOC/'R0_evidence/continuity_666.jsonl',
+        DOC/'R0_evidence/scoring/punctuation_sites.jsonl',Path('artifacts/labelfix_r1/output_3678928/A/heldout_predictions.jsonl')])
+
+
+def release_counts(result):
+    return {p:{m:dict(Counter(r[p]['status'] for r in result if r['mode']==m)) for m in gate.MODES}
+            for p in ('before','after')}
+
+
+def m2():
+    from scripts.labelfix.sf3_measure import dev_inventory,dev_runtime
+
+exec
+/bin/zsh -lc "nl -ba greekocr/labelfix/release_gate.py | sed -n '225,401p'
+nl -ba greekocr/labelfix/ink.py | sed -n '247,287p'
+nl -ba scripts/labelfix/m2_run.py | sed -n '97,143p'" in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ succeeded in 0ms:
+   225	    return reasons
+   226	
+   227	
+   228	def deletion_atoms(text):
+   229	    """NFD deletions at fixed letter boundaries; only SF5 elision aliases fold.
+   230	
+   231	    A replacement deletes its old atom, even when it adds another accent or
+   232	    attaches a spacing breathing. Repeated signs retain their multiplicity.
+   233	    Keraia classification is descriptive: explicit numeral signs or an alias
+   234	    after a Greek/decimal/Unicode numeral token. All punctuation classes
+   235	    use the same detector AND recogniser requirement.
+   236	    """
+   237	    cs=clusters(nfd(text));out=[];boundary=0
+   238	    for i,c in enumerate(cs):
+   239	        letter=is_letter(c.base) and c.base not in '\u02b9\u0374\u0375\u0384'
+   240	        if letter:
+   241	            out.append(dict(key=('letter',boundary,c.base),character=c.base,
+   242	                start=c.start,letter=boundary,category='other'))
+   243	            out.extend(dict(key=('mark',boundary,m),character=m,start=c.start+j+1,
+   244	                letter=boundary,category='mark') for j,m in enumerate(c.marks))
+   245	            boundary+=1
+   246	            continue
+   247	        spacing=spacing_breathing(cs,i)
+   248	        alias=word_final_elision(cs,i)
+   249	        token=''
+   250	        if c.base in ELISION:
+   251	            for prev in reversed(cs[:i]):
+   252	                if is_letter(prev.base) or prev.base.isdecimal() or ud.category(prev.base)=='Nl':token=prev.base+token
+   253	                else:break
+   254	        keraia=(c.base in '\u02b9\u0374\u0375\u0384' or (c.base in ELISION and token and
+   255	            (token.isdecimal() or all(ud.category(x)=='Nl' for x in token) or
+   256	             len(token)<=3 and all(x in 'ΑΒΓΔΕϚϜΖΗΘΙΚΛΜΝΞΟΠϞΡΣΤΥΦΧΨΩϠ' for x in token))))
+   257	        category=('mark' if spacing or ud.category(c.base).startswith('M') else 'keraia' if keraia else
+   258	                  'apostrophe' if alias else 'quote' if c.base in LEADING_QUOTES+'‘‚‹›' else
+   259	                  'apostrophe' if c.base in ELISION else 'other')
+   260	        # Spacing breathings refer to the following letter, other punctuation
+   261	        # to the preceding letter (a leading quote to the first letter).
+   262	        owner=boundary if spacing else max(0,boundary-1)
+   263	        key=('punct',boundary,'elision' if alias else c.base)
+   264	        out.append(dict(key=key,character=c.base,start=c.start,letter=owner,category=category))
+   265	        out.extend(dict(key=('punct_mark',boundary,m),character=m,start=c.start+j+1,
+   266	            letter=owner,category='mark') for j,m in enumerate(c.marks))
+   267	    return out
+   268	
+   269	
+   270	def google_deletions(original, proposal):
+   271	    """Include replaced characters; exclude canonical and pure elision aliases."""
+   272	    a,b=deletion_atoms(original),deletion_atoms(proposal)
+   273	    matcher=SequenceMatcher(None,[x['key'] for x in a],[x['key'] for x in b],autojunk=False)
+   274	    return [dict(x) for tag,i,j,_,_ in matcher.get_opcodes() if tag!='equal' for x in a[i:j]]
+   275	
+   276	
+   277	def _finite_span(value):
+   278	    return (isinstance(value,(list,tuple)) and len(value)==2
+   279	            and all(isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x) for x in value)
+   280	            and 0<=value[0]<value[1])
+   281	
+   282	
+   283	def deletion_guard(original, proposal, runtime, decision):
+   284	    """SF6's sole new rule: two positive absence signals or whole-line HOLD.
+   285	
+   286	    A/B (or A/E) together are ONE reader. The R1 heads name combining
+   287	    marks only. Punctuation therefore needs detector AND scored recogniser
+   288	    text. Empty candidates outside a detector's head/window are unknown.
+   289	    This checks saved evidence and never runs or alters a source decision.
+   290	    """
+   291	    deleted=google_deletions(original,proposal)
+   292	    if not deleted:return []
+   293	    text=runtime.get('recogniser_text','')
+   294	    letters=[c for c in _letters(text) if c.base not in '\u02b9\u0374\u0375\u0384']
+   295	    aligned=([c.base for c in _letters(original) if c.base not in '\u02b9\u0374\u0375\u0384']==[c.base for c in letters])
+   296	    raw=runtime.get('detector',{});raw=serialize(raw) if not isinstance(raw,dict) else raw
+   297	    slots={s['start']:s for s in raw.get('slots',())}
+   298	    composed={s['start']:s for s in decision.get('slots',())}
+   299	    coverage={s['start']:s for s in runtime.get('coverage',())}
+   300	    predictions=prediction_index(runtime.get('r1_predictions',()))
+   301	    rec_atoms=Counter(x['key'] for x in deletion_atoms(text))
+   302	    events=[]
+   303	    for atom in deleted:
+   304	        index=atom['letter'];c=letters[index] if aligned and index<len(letters) else None
+   305	        s=slots.get(c.start,{}) if c else {};d=composed.get(c.start,{}) if c else {}
+   306	        ev=s.get('evidence',{});ev=ev.to_record() if hasattr(ev,'to_record') else ev
+   307	        char=atom['character'];category=atom['category']
+   308	        part=next((p for p,m in R.MARKS.items() if m==char),None)
+   309	        if char in '᾿᾽':part='psili'
+   310	        zone='below' if part=='subscript' else 'above'
+   311	        edge='bottom' if zone=='below' else 'top'
+   312	        clean=bool(c and s and s.get('base')==c.base
+   313	            and s.get('localisation_unknown') is False and s.get('segmentation_uncertain') is False
+   314	            and s.get('physical_resolved') is not False
+   315	            and not any(s.get(k) for k in ('unnamed','ambiguity','hold','unseen_zones','constraint_flags'))
+   316	            and s.get('evidence_state')!='UNKNOWN' and ev.get('evidence_state')!='UNKNOWN'
+   317	            and not ev.get('uncertainty') and not d.get('hold_reasons')
+   318	            and not any(_flag_targets(f,c.start) for f in raw.get('constraint_flags',()))
+   319	            and not raw.get('geometry',{}).get('physical_mapping',{}).get('ambiguous')
+   320	            and ev.get('clipped_'+edge) is False
+   321	            and not any(ev.get('clipped_'+z) for z in ('left','right'))
+   322	            and ev.get('observation',{}).get(zone) not in ('UNSEEN','UNKNOWN'))
+   323	        cov=coverage.get(c.start) if c else None
+   324	        pred=predictions.get(c.start) if c else None
+   325	        scored=bool(clean and cov and not _reader_reasons(s,pred,cov,'r1')
+   326	                    and _finite_span(cov.get('span')))
+   327	        reader=bool(category=='mark' and part and c and c.base in R1_LETTERS and scored
+   328	                    and part not in (pred.get('parts',pred.get('cls','none').split('+')) or []))
+   329	        # The coordinator's A∧B is one reader absence in every release mode.
+   330	        # AE additionally retains its selected E check; it supplies no extra
+   331	        # independent signal. Missing/conflicting arms cannot certify absence.
+   332	        for peer in (('B','E') if decision.get('mode')=='ENSEMBLE_AE' else ('B',)):
+   333	            pp=prediction_index(runtime.get('peer_predictions',{}).get(peer,())).get(c.start) if c else None
+   334	            pc={x['start']:x for x in runtime.get('peer_coverage',{}).get(peer,())}.get(c.start) if c else None
+   335	            reader=bool(reader and pc and not _reader_reasons(s,pp,pc,'peer')
+   336	                        and _finite_span(pc.get('span'))
+   337	                        and part not in pp.get('parts',pp.get('cls','none').split('+')))
+   338	        observed=ev.get('observation',{})
+   339	        detector=bool(clean and _finite_span(ev.get('window')) and observed.get(zone)=='OBSERVED'
+   340	                      and 'parts' in s and category=='mark' and part and part not in s['parts'])
+   341	        if category in ('apostrophe','keraia'):
+   342	            # ink.apostrophe_candidates scores only these word-final letters;
+   343	            # in particular an empty Ι/kappa/mu slot is not a negative head.
+   344	            detector=bool(clean and category=='apostrophe' and s.get('word_final') is True
+   345	                and c.base.lower() in 'δτρθπ' and s.get('apostrophe') is False
+   346	                and ev.get('apostrophes')==[] and observed.get('above')=='OBSERVED'
+   347	                and observed.get('right')=='OBSERVED' and _finite_span(ev.get('window')))
+   348	        elif category=='quote':
+   349	            detector=bool(clean and atom['key'][1]==0 and raw.get('opening_quotes')==[]
+   350	                and observed.get('above')=='OBSERVED' and observed.get('left')=='OBSERVED'
+   351	                and _finite_span(ev.get('window')))
+   352	        confidence=runtime.get('recognition_confidence')
+   353	        recogniser=bool(clean and _finite_span(s.get('locator_span'))
+   354	            and isinstance(confidence,(int,float)) and not isinstance(confidence,bool)
+   355	            and math.isfinite(confidence) and 0<=confidence<=1 and rec_atoms[atom['key']]==0)
+   356	        # Text presence is decisive against absence, even if it has a score.
+   357	        allowed=(detector and recogniser if category in ('apostrophe','quote','keraia')
+   358	                 else reader and (detector or recogniser))
+   359	        events.append(dict(atom,recogniser_start=c.start if c else None,
+   360	            signals=dict(reader=reader,detector=detector,recogniser=recogniser),allowed=bool(allowed),
+   361	            reason=None if allowed else 'sf6:deletion_needs_two_positive_absences:'+category))
+   362	    return events
+   363	
+   364	
+   365	def _reader_reasons(slot, prediction, coverage, prefix):
+   366	    reasons=[]
+   367	    if prediction is None:reasons.append(prefix+'_missing')
+   368	    elif not ('parts' in prediction or 'cls' in prediction):reasons.append(prefix+'_prediction_invalid')
+   369	    if prediction and prediction.get('base',slot['base'])!=slot['base']:reasons.append(prefix+'_base_mismatch')
+   370	    if coverage is None:reasons.append(prefix+'_missing_coverage')
+   371	    else:
+   372	        if coverage.get('base',slot['base'])!=slot['base']:reasons.append(prefix+'_coverage_base_mismatch')
+   373	        if coverage.get('scored') is not True:reasons.append(prefix+'_unscored:'+str(coverage.get('reason')))
+   374	        if coverage.get('evidence_state') in (None,'UNKNOWN'):reasons.append(prefix+'_evidence_UNKNOWN')
+   375	        if not isinstance(coverage.get('uncertainty'),(list,tuple)):
+   376	            reasons.append(prefix+'_uncertainty_not_recorded')
+   377	        else:reasons.extend(prefix+'_uncertainty:'+str(z) for z in coverage['uncertainty'])
+   378	    if prediction is not None:
+   379	        if prediction.get('evidence_state')=='UNKNOWN':reasons.append(prefix+'_evidence_UNKNOWN')
+   380	        reasons.extend(prefix+'_uncertainty:'+str(z) for z in (prediction.get('uncertainty') or ()))
+   381	        parts=prediction.get('parts',prediction.get('cls','none').split('+'))
+   382	        if any(p not in R.MARKS and p!='none' for p in parts):reasons.append(prefix+'_unsupported_mark')
+   383	    return reasons
+   384	
+   385	
+   386	def zone_relevance(slot, signal_parts=()):
+   387	    """Conservative saved-evidence contract; no capital side-zone exception.
+   388	
+   389	    Scalar meanline/xh do not certify the whole overhead AND preposed zone.
+   390	    Saved SF3 records lack that certificate, so top cuts remain decisive for
+   391	    mark bearers. Either recogniser case or physical capital case/band vetoes
+   392	    both clipping relaxations, including on otherwise unsupported capitals.
+   393	    """
+   394	    base=slot['base'].lower()
+   395	    ev=slot.get('evidence',{})
+   396	    ev=ev.to_record() if hasattr(ev,'to_record') else ev
+   397	    capital=(slot['base'].isupper() or slot.get('case_class')=='capital'
+   398	             or ev.get('case_class')=='capital'
+   399	             or any(record.get(key)=='capital' for record in (slot,ev)
+   400	                    for key in ('pixel_class','raw_pixel_class','frozen_pixel_class'))
+   401	             or slot.get('geometry_capital') is True or slot.get('all_caps') is True
+   247	    body: tuple = (0.0, 0.0)                    # the vowel body's x extent after snapping to ink
+   248	    body_source: str = ''                       # 'letter' (snapped) | 'merged' | 'ctc'
+   249	    n_letters_in_span: int = 0                  # letter components overlapping the CTC span
+   250	    neighbour_marks: int = 0                    # mark blobs in the search window but outside the body
+   251	    clipped_top: bool = False                   # ink touches the crop's top edge inside the window
+   252	    clipped_bottom: bool = False
+   253	    diagnostics: list = field(default_factory=list)  # rejected attached ascender ink
+   254	    apostrophes: list = field(default_factory=list)
+   255	    case_class: str = ''
+   256	    band_source: str = 'line'
+   257	    observation: dict = field(default_factory=dict)
+   258	
+   259	    @property
+   260	    def n_above(self) -> int:
+   261	        return len(self.above)
+   262	
+   263	    def obliques(self) -> list:
+   264	        return [b for b in self.above if b.elongation >= OBLIQUE_MIN_ELONGATION
+   265	                and OBLIQUE_MIN_DEG <= abs(b.angle_deg) <= OBLIQUE_MAX_DEG]
+   266	
+   267	    def to_record(self) -> dict:
+   268	        return dict(window=[round(self.window[0], 1), round(self.window[1], 1)], xh=round(self.xh, 2),
+   269	                    meanline=round(self.meanline, 1), baseline=round(self.baseline, 1),
+   270	                    body=[round(self.body[0], 1), round(self.body[1], 1)], body_source=self.body_source,
+   271	                    n_letters_in_span=self.n_letters_in_span, neighbour_marks=self.neighbour_marks,
+   272	                    clipped_top=self.clipped_top, clipped_bottom=self.clipped_bottom,
+   273	                    above=[b.to_record() for b in self.above], below=[b.to_record() for b in self.below],
+   274	                    diagnostics=[b.to_record() for b in self.diagnostics],
+   275	                    apostrophes=[b.to_record() for b in self.apostrophes],
+   276	                    case_class=self.case_class, band_source=self.band_source,
+   277	                    observation=self.observation)
+   278	
+   279	
+   280	def snap_body(ink: CropInk, bx0: float, bx1: float, *, vowel: bool = False) -> tuple[float, float, str, int]:
+   281	    """The vowel body's x extent: the letter component the CTC span overlaps most.
+   282	
+   283	    Returns (x0, x1, source, n_letters): `n_letters` counts letter components that overlap the
+   284	    CTC span by at least 30 % of its width AND at least two thirds of the best overlap; more
+   285	    than one means the frames straddle two letters and the localisation is uncertain.
+   286	    """
+   287	    xh = ink.xh
+    97	            masks = torch.tensor([s[7][0] for s in ss], dtype=torch.float32)
+    98	            xx = torch.arange(128, dtype=torch.float32)[None, :]+.5
+    99	            mask = ((xx >= masks[:, 0, None]) & (xx < masks[:, 1, None])).float()[:, None, :].expand(-1, 64, -1)
+   100	            x = torch.stack((grey, mask), dim=1).contiguous(memory_format=torch.channels_last)
+   101	            letters = torch.tensor([s[4] for s in ss], dtype=torch.long)
+   102	            prob = [z.float().softmax(1) for z in model(x, letters)]
+   103	            values = torch.stack([z.argmax(1) for z in prob], 1).tolist()
+   104	            for j, (s, v) in enumerate(zip(ss, values)):
+   105	                cls = compose(v)
+   106	                out[s[3]] = dict(start=s[3], base=LETTERS[s[4]], factors=v, cls=cls,
+   107	                    parts=cls.split('+') if cls != 'none' else [],
+   108	                    mark_probabilities={choices[q]: float(prob[h][j, q])
+   109	                        for h, (choices, q) in enumerate(zip(HEADS.values(), v)) if q})
+   110	    return out
+   111	
+   112	
+   113	# Compatibility entry point; the policy and serializer live in one module.
+   114	from greekocr.labelfix.release_gate import compose as combine, compose_runtime
+   115	
+   116	
+   117	def infer_line(identifier, image, alignment, detector_model, reader_model, *, script_class=None):
+   118	    """Reference-free boundary: no Google label, verdict or printed pair accepted."""
+   119	    from greekocr.labelfix.toolkit_geometry import polytonic_scope
+   120	    if not polytonic_scope(script_class):
+   121	        return dict(id=identifier,status='skipped',skip_reason='monotonic_scope')
+   122	    text = alignment.prediction
+   123	    record = dict(id=identifier, recogniser_text=text, _line=0)
+   124	    ss, wide, _, losses, coverage, size = extract_line(record, alignment.to_record(), image, evaluation=True)
+   125	    pred = reader_predictions(reader_model, ss, wide)
+   126	    raw = reading.read_ink(ink.analyse(image), text, alignment, detector_model, filtered=False)
+   127	    runtime = dict(id=identifier, status='ok', recogniser_text=nfc(text), recogniser_nfd=text,
+   128	        recognition_confidence=alignment.confidence, detector=serialize(raw),
+   129	        r1_predictions=list(pred.values()), coverage=coverage, font_size=size, extraction_counts=dict(losses))
+   130	    runtime['modes']={mode:compose_runtime(runtime,mode) for mode in ('PRESENCE','FULL')}
+   131	    return runtime
+   132	
+   133	
+   134	def main():
+   135	    ap = argparse.ArgumentParser(description=__doc__)
+   136	    ap.add_argument('--threads', type=int, default=4)
+   137	    ap.add_argument('--batch-size', type=int, default=8)
+   138	    ap.add_argument('--launch-head', help='record the head observed when the task began, if the shared checkout advanced')
+   139	    ap.add_argument('--replay-detector', nargs='*', help='S7: replay detector only, with bound cached CTC and R1 outputs')
+   140	    ap.add_argument('--output-dir', type=Path)
+   141	    ap.add_argument('--script-classes', type=Path, help='independent line script-class manifest; no reference text')
+   142	    a = ap.parse_args()
+   143	    if a.replay_detector is not None:
+
+exec
+/bin/zsh -lc "rg -n 'confidence|class.*Alignment|class.*Span' greekocr/ctc* greekocr -g '*align*.py'
+rg -n 'recognition_confidence' scripts/labelfix/clariden greekocr -g '*.py'
+rg -n 'apostrophe_candidates|opening_quotes|def.*quote|observation=' greekocr/labelfix/ink.py greekocr/labelfix/reading.py" in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ succeeded in 0ms:
+zsh:1: no matches found: greekocr/ctc*
+greekocr/labelfix/release_gate.py:352:        confidence=runtime.get('recognition_confidence')
+greekocr/labelfix/release_gate.py:572:    if 'recognition_confidence' in runtime:
+greekocr/labelfix/release_gate.py:573:        evidence['recognition_confidence']=runtime['recognition_confidence']
+greekocr/deploy/docling_plugin/model.py:224:            w.text,w.recognition_confidence = text,confidence
+greekocr/glyphs/oriented_page.py:37:    recognition_confidence: float | None = None
+greekocr/glyphs/oriented_page.py:49:                    recognition_confidence=self.recognition_confidence,
+greekocr/glyphs/orientation.py:313:        scores.append(score); readings.append(dict(orientation_cw=angle,text=text,recognition_confidence=float(confidence),score=score))
+greekocr/glyphs/orientation.py:318:    conf_gap = readings[best]['recognition_confidence']-readings[1-best]['recognition_confidence']
+greekocr/glyphs/orientation.py:333:    out.evidence['recognition_confidence_gap'] = conf_gap
+greekocr/labelfix/reading.py:30:    opening_quotes: list = field(default_factory=list)
+greekocr/labelfix/reading.py:320:    apost=I.apostrophe_candidates(ink,[(s['component'],s['base'],s['word_final']) for s in located])
+greekocr/labelfix/reading.py:376:            ev.observation=G.observation(ink,s)
+greekocr/labelfix/ink.py:277:                    observation=self.observation)
+greekocr/labelfix/ink.py:642:def apostrophe_candidates(ink, letters):
+greekocr/labelfix/ink.py:669:def opening_quote_candidates(ink, first_body, reserved=()):
+
+exec
+/bin/zsh -lc 'cat docs/labelfix/spellcheck/SF6_evidence/verification.json | head -n 64' in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ succeeded in 0ms:
+{
+  "schema": "sf6-verification-v1",
+  "policy": {
+    "schema": "sf6-release-v1",
+    "sources": {
+      "greekocr/labelfix/release_gate.py": "65030bc0ce3fabff15e0e5d267fe328a7e1948c973c02498cfcd504c20b2d555",
+      "greekocr/labelfix/reading.py": "6b2838a31e17960a03b2080bc7b23a68d8b58995490ca22e7761406ab8941518",
+      "greekocr/labelfix/text.py": "b2fbe9cf6d8c97d1f8e06e149bfe4e11cc58b9b4f2bb323bddc8afce2ca52c92",
+      "greekocr/labelfix/segmentation.py": "60fbf9a0252f78326ebad11b9451b722dbee666cd05daa7e3c040dccdbb789fe",
+      "scripts/labelfix/clariden/l1_common.py": "2778235994afaf31cd7587c08223c9b2a5d20ff6c6adfca9f37383062895af66",
+      "scripts/labelfix/clariden/l1r_recompose.py": "4de0eee56d61a974a33df699cfa6b037af208021578ef6182597ca34cbaa76a0",
+      "scripts/labelfix/owner_reading.py": "0915e831115c570bcdeab540e000cb840f2de8d1e80d0f78be9ba49cda6b4b2f",
+      "scripts/labelfix/owner_pages_build_combined.py": "843701c1ab7958b476a417740b244a26379768bfb84a61adfcd403bd4e3acea8"
+    },
+    "sha256": "544ad37c4b6c0c1e1c98a8c0d7642afc5c188bbd52e79aaf6eef0d1dce233460"
+  },
+  "evidence_complete": true,
+  "release_acceptance_complete": false,
+  "production_changed_functions": {
+    "greekocr/labelfix/release_gate.py": [
+      "_finite_span",
+      "bind_runtime",
+      "deletion_atoms",
+      "deletion_guard",
+      "google_deletions"
+    ],
+    "scripts/labelfix/clariden/l1_common.py": [
+      "overlay"
+    ],
+    "greekocr/labelfix/text.py": []
+  },
+  "all_other_production_functions_unchanged": true,
+  "frozen_source_commit": "05f2dafb",
+  "git_metadata_unchanged": false,
+  "git_metadata_files": 324,
+  "current_worktree_and_branch_git_metadata_unchanged": true,
+  "shared_git_metadata_drift": {
+    "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.git/info/refs": {
+      "before": "ca7e953e3d8066f30081af236f0bcdf902625321dad4b312cf2286efb4e80fac",
+      "after": "b9d881b881d17555cc4a076a590d3e170b5b2dceead6a15de82004628ed29960"
+    },
+    "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.git/logs/refs/heads/opus/spellcheck-l1r2": {
+      "before": "eee51f23fe16154147877a5c194e8df3378cb54793fc5654c910e786970d677f",
+      "after": "66276f51a6399e89cbf381fce9a395ab851cd89181ce13d9acf90737ae55335a"
+    },
+    "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.git/logs/refs/heads/opus/spellcheck-s8": {
+      "before": "6a5a99c6b02037347481e095ddc78cd20673482e9b22b08c1e834e9504d46b7f",
+      "after": "444a08d040a38a84fce0c5e7de707a14d3d840b816396d59f1d43861682a9514"
+    },
+    "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.git/refs/heads/opus/spellcheck-l1r2": {
+      "before": "f5b5201e33977d0ae4f99744f59def9cc28375bf3b5260e0400ee03c791b79bb",
+      "after": "79264521df0c5a9a3526471d66624446dc9d5e81f327ee376bfcc126748f1db4"
+    },
+    "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.git/refs/heads/opus/spellcheck-s8": {
+      "before": "10b6f7d6c978ff55bb503d9f29cb3a939afc23c737eb9694bbbafbc60a89d675",
+      "after": "4371f67daa8a2e45efd7456ac64915f79335f2704cc80e5eeccf95053656a35d"
+    },
+    "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.git/worktrees/greek-ocr-toolkit-sol-l1emask/logs/HEAD": {
+      "before": "6b018250b282bedc8845f2b30f59c3f2e0f69ce21588052f55b69536719bdc48",
+      "after": "2069a7f9a0623169291642feff10492ab3aa94d11457779ab77508ed7ee10839"
+    },
+    "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.git/worktrees/greek-ocr-toolkit-spellcheck-l1r/logs/HEAD": {
+      "before": "43c5c684a9c6eaef8d10ad4f209cadc5b0e83734ab467e3943b9e73e66f3e1da",
+      "after": "65d678ef2e3b280438501fcf20880fee1012a0d964cb4ec4568d4a404938e8a3"
+
+exec
+/bin/zsh -lc "nl -ba greekocr/labelfix/reading.py | sed -n '302,391p'
+nl -ba greekocr/labelfix/toolkit_geometry.py | sed -n '80,155p'
+nl -ba greekocr/labelfix/ink.py | sed -n '642,698p'" in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ succeeded in 0ms:
+   302	
+   303	def read_ink(ink, recogniser_text, alignment, model, *, filtered=True, output="print",
+   304	             substitutions=None):
+   305	    from .case import prepare, estimate_font
+   306	    from . import toolkit_geometry as G
+   307	    substitutions=QUALIFIED_GEOMETRY if substitutions is None else frozenset(substitutions)
+   308	    if substitutions-{'S1','S2','S3'}:
+   309	        raise ValueError('unknown geometry substitution')
+   310	    estimate_font(ink)
+   311	    if 'S2' in substitutions:
+   312	        G.shared_guides(ink,apply=True)
+   313	    slots=(G.physical_slots if 'S1' in substitutions else recogniser_slots)(ink,recogniser_text,alignment)
+   314	    prepare(ink,slots)
+   315	    if 'S2' in substitutions:
+   316	        G.capital_features(ink,slots)
+   317	    if 'S3' in substitutions:
+   318	        G.prepare_cuts(ink)
+   319	    located=[s for s in slots if s['component'] is not None]
+   320	    apost=I.apostrophe_candidates(ink,[(s['component'],s['base'],s['word_final']) for s in located])
+   321	    apost_boxes={(b.x0,b.y0,b.x1,b.y1) for bs in apost.values() for b in bs}
+   322	    for i,s in enumerate(located):
+   323	        c=s['component']
+   324	        # The union is already certified against all character owners. Pass it
+   325	        # directly so snap_body cannot include another overlapping character.
+   326	        ev=I.mark_evidence(ink,c.x0,c.x1,base_letter=s['base'],certified_body=(c.x0,c.x1), letter_region=s)
+   327	        ev.above=[b for b in ev.above if (b.x0,b.y0,b.x1,b.y1) not in apost_boxes]
+   328	        ev.apostrophes=list(apost.get(i,()))
+   329	        s.update(evidence=ev,apostrophe=i in apost)
+   330	    # Overhanging ink may enter two windows. Sloping meanlines can clip the
+   331	    # same native lobe by one different row, so exact-box equality is too weak.
+   332	    proposals=[]
+   333	    for s in located:
+   334	        for field in ('above','below'):
+   335	            for b in getattr(s['evidence'],field):
+   336	                proposals.append(dict(slot=s,field=field,blob=b,pixels=b.pixel_keys()))
+   337	    roots=list(range(len(proposals)))
+   338	    def root(i):
+   339	        while roots[i]!=i:
+   340	            roots[i]=roots[roots[i]];i=roots[i]
+   341	        return i
+   342	    for i,p in enumerate(proposals):
+   343	        a=p['blob']
+   344	        for j,q in enumerate(proposals[:i]):
+   345	            b=q['blob']
+   346	            if p['field']!=q['field']:continue
+   347	            if p['pixels'] & q['pixels']:roots[root(i)]=root(j)
+   348	    winners={}
+   349	    for i,p in enumerate(proposals):
+   350	        key=root(i);b=p['blob'];s=p['slot']
+   351	        rank=(abs(b.cx-s['component'].cx),-b.area,s['start'])
+   352	        if key not in winners or rank<winners[key][0]:winners[key]=(rank,i)
+   353	    accepted={i for rank,i in winners.values()}
+   354	    for key, (_, winner) in winners.items():
+   355	        group=[p for i,p in enumerate(proposals) if root(i)==key]
+   356	        pixels=set().union(*(p['pixels'] for p in group))
+   357	        b=proposals[winner]['blob']
+   358	        proposals[winner]['blob']=I.blob_from_pixels(ink,pixels,b.source)
+   359	        assert proposals[winner]['blob'].pixel_keys()==pixels
+   360	    for s in located:
+   361	        for field in ('above','below'):
+   362	            setattr(s['evidence'],field,[p['blob'] for i,p in enumerate(proposals) if i in accepted and p['slot'] is s and p['field']==field])
+   363	    flags=[]
+   364	    for s in slots:
+   365	        if s.get('localisation_unknown'):
+   366	            flags.append(dict(start=s['start'],reason='localisation_unknown'))
+   367	            if 'S1' in substitutions:
+   368	                s.update(hold=True,label_status='HOLD')
+   369	        if s['component'] is None:
+   370	            s['parts']=();s['unnamed']=()
+   371	            continue
+   372	        ev=s['evidence']
+   373	        names=name_marks(ev,model)
+   374	        s.update(parts=names.parts,unnamed=names.unnamed,naming=names)
+   375	        if 'S3' in substitutions:
+   376	            ev.observation=G.observation(ink,s)
+   377	            unseen=[]
+   378	            if s['base'].lower() in 'αεηιουωρ' and ev.observation['above']=='UNSEEN':unseen.append('above')
+   379	            if s['base'].lower() in 'αηω' and ev.observation['below']=='UNSEEN':unseen.append('below')
+   380	            if unseen:
+   381	                s.update(hold=True,label_status='HOLD',unseen_zones=unseen)
+   382	                flags.append(dict(start=s['start'],reason='crop_UNSEEN',zones=unseen))
+   383	        flags.extend(dict(start=s['start'],blob=i,reason='unnamed') for i in names.unnamed)
+   384	    reserved = [b for s in located for b in s['evidence'].above if b.source == 'preposed']
+   385	    quotes = I.opening_quote_candidates(ink,located[0]['component'],reserved) if located else []
+   386	    text = render_reading(recogniser_text,slots)
+   387	    # Quote glyphs in recogniser text are not evidence of printed punctuation.
+   388	    text = text.lstrip('“”«»„\" ')
+   389	    if quotes:
+   390	        text = '“'+text
+   391	    geometry={}
+    80	
+    81	def physical_slots(ink, text, alignment):
+    82	    from .segmentation import _region
+    83	    text=nfd(text); alignment=transfer_alignment(text,alignment)
+    84	    boxes=letter_boxes(glyph_view(ink))
+    85	    tokens=tokenize(text); slots=[]; owners={}
+    86	    for cl in clusters(text):
+    87	        if not cl.base.isalpha(): continue
+    88	        sp=alignment.span(cl.start)
+    89	        overlap=[I._overlap(sp.x0,sp.x1,b.x0,b.x1)/np.sqrt(max(b.w,.35*ink.xh)) for b in boxes]
+    90	        k=max(range(len(boxes)),key=lambda i:overlap[i]) if boxes else None
+    91	        if k is not None and overlap[k]<=0: k=None
+    92	        s=dict(base=cl.base,start=cl.start,end=cl.end,locator_span=[sp.x0,sp.x1],
+    93	               primary=k,indices=[],component_ids=[],component=None,
+    94	               word_final=any(cl.end==t.core_end for t in tokens),
+    95	               word_index=next((t.index for t in tokens if t.core_start<=cl.start<t.core_end),-1),
+    96	               fused=False,split_union=False,localisation_unknown=False,
+    97	               segmentation_source='toolkit_middle_pieces')
+    98	        slots.append(s)
+    99	        if k is not None: owners.setdefault(k,[]).append(s)
+   100	    ink.physical_letters=[dict(x0=b.x0,y0=b.y0,x1=b.x1,y1=b.y1,
+   101	                              parents=list(b.components),pieces=b.pieces,merged=b.merged,resolved=b.resolved,
+   102	                              recognizer_starts=[s['start'] for s in owners.get(i,[])]) for i,b in enumerate(boxes)]
+   103	    ink.physical_mapping=dict(physical_groups=len(boxes),recognizer_letters=len(slots),
+   104	        count_disagreement=len(boxes)!=len(slots),
+   105	        unassigned_physical=[i for i in range(len(boxes)) if i not in owners],
+   106	        shared_physical=[i for i,ss in owners.items() if len(ss)>1],
+   107	        unresolved_physical=[i for i,b in enumerate(boxes) if not b.resolved])
+   108	    ink.physical_mapping['ambiguous']=bool(ink.physical_mapping['count_disagreement'] or
+   109	        ink.physical_mapping['unassigned_physical'] or ink.physical_mapping['shared_physical'] or
+   110	        ink.physical_mapping['unresolved_physical'])
+   111	    lookup={c.index:c for c in ink.components}
+   112	    for k,ss in owners.items():
+   113	        b=boxes[k]; ambiguous=len(ss)!=1 or not b.resolved
+   114	        for s in ss:
+   115	            c=_region(ink,[lookup[i] for i in b.components],b.x0,b.x1)
+   116	            # The toolkit also bounds this group's vertical custody to its
+   117	            # own line. Do not re-expand a parent label into a neighbouring row.
+   118	            if c is not None:
+   119	                y0=max(c.y0,b.y0);y1=min(c.y1,b.y1)
+   120	                mask=I.component_mask(ink,c)[y0-c.y0:y1-c.y0].copy()
+   121	                mask.setflags(write=False)
+   122	                c=SimpleNamespace(**{**vars(c),'y0':y0,'y1':y1,'h':y1-y0,'mask':mask})
+   123	            s.update(component=c,component_ids=list(b.components),indices=[],
+   124	                     region_bounds=[b.x0,b.x1],fused=b.merged>1 or len(ss)>1,
+   125	                     fusion_size=max(b.merged,len(ss)),split_union=len(b.components)>1,
+   126	                     segmentation_uncertain=ambiguous,localisation_unknown=ambiguous,
+   127	                     physical_resolved=b.resolved,physical_piece_count=b.pieces,
+   128	                     physical_recognizer_count=len(ss),
+   129	                     ambiguity='physical_recognizer_count' if len(ss)!=1 else 'unresolved_bridge' if not b.resolved else None)
+   130	    for s in slots:
+   131	        if s['component'] is not None: continue
+   132	        a,b=s['locator_span']; left=max(0,min(ink.width-1,int(a)));right=min(ink.width,max(left+1,int(b)))
+   133	        top,base=ink.band((left+right)/2)
+   134	        s.update(component=SimpleNamespace(index=-s['start']-1,x0=left,x1=right,y0=int(top),y1=int(base),
+   135	                                          cx=(left+right)/2,w=right-left,h=base-top,role='letter'),
+   136	                 region_bounds=[left,right],localisation_unknown=True,segmentation_uncertain=True,
+   137	                 physical_resolved=False,physical_piece_count=0,physical_recognizer_count=1,
+   138	                 ambiguity='no_physical_piece')
+   139	    return slots
+   140	
+   141	
+   142	def capital_features(ink, slots):
+   143	    """Geometric pixel vote, independent of recognizer case and frozen model weights."""
+   144	    guides=ink.shared_guides
+   145	    for s in slots:
+   146	        c=s['component']; x=min(ink.width-1,max(0,int(c.cx)))
+   147	        mask=I.component_mask(ink,c)
+   148	        cut=int(np.clip(np.floor(guides.mean[x])-c.y0,0,mask.shape[0]))
+   149	        upper=mask[:cut];lower=mask[cut:]
+   150	        uw=int(upper.any(axis=0).sum()) if upper.size else 0
+   151	        lw=int(lower.any(axis=0).sum()) if lower.size else 0
+   152	        cap=(abs(c.y0-guides.ascender[x])<=.18*ink.xh and
+   153	             abs(c.y1-guides.base[x])<=.18*ink.xh and c.w>=.5*ink.xh and uw>=.6*max(lw,1))
+   154	        s['toolkit_capital_features']=dict(ascender_distance=(c.y0-guides.ascender[x])/ink.xh,
+   155	            baseline_distance=(c.y1-guides.base[x])/ink.xh,upper_width=uw,body_width=lw,
+   642	def apostrophe_candidates(ink, letters):
+   643	    """Geometric elision signs after an input-text word-final consonant.
+   644	
+   645	    `letters` supplies (component, base, word_final) from locator-only mapping.
+   646	    A sign must be detached, at meanline height, between words; no vowel under it.
+   647	    Returns slot-index -> blobs; the recogniser supplies no mark reading.
+   648	    """
+   649	    out = {}
+   650	    for i, (body, base, final) in enumerate(letters):
+   651	        if not final or base.lower() not in 'δτρθπ':
+   652	            continue
+   653	        top, _ = ink.band(body.cx)
+   654	        nxt = letters[i+1][0].x0 if i+1 < len(letters) else ink.width
+   655	        for c in ink.components:
+   656	            if c.role not in ('mark', 'punct', 'fragment') or c.x0 < body.x1 - .1*ink.xh:
+   657	                continue
+   658	            if not (body.x1 <= c.cx < nxt and c.cx-body.x1 <= .65*ink.xh):
+   659	                continue
+   660	            if not (.10*ink.xh <= c.h <= .8*ink.xh and c.w <= .6*ink.xh
+   661	                    and top-1.1*ink.xh <= c.y0 and c.y1 <= top+.25*ink.xh):
+   662	                continue
+   663	            b = _blob(component_mask(ink,c),c.y0,c.x0,'apostrophe',ink)
+   664	            if b.area >= MIN_BLOB_AREA and not b.faint:
+   665	                out.setdefault(i, []).append(b)
+   666	    return out
+   667	
+   668	
+   669	def opening_quote_candidates(ink, first_body, reserved=()):
+   670	    """Detached line-initial quote ink, separate from a capital's own marks.
+   671	
+   672	    Single curved opening signs occur in these editions. Ambiguous leading
+   673	    apostrophe/quote semantics remain a flag; the pixels are not vowel marks.
+   674	    """
+   675	    top, _ = ink.band(first_body.cx)
+   676	    used = {(b.x0,b.y0,b.x1,b.y1) for b in reserved}
+   677	    out = []
+   678	    for c in ink.components:
+   679	        if c.role not in ('punct','mark','fragment') or c.x1 >= first_body.x0:
+   680	            continue
+   681	        if (c.x0,c.y0,c.x1,c.y1) in used:
+   682	            continue
+   683	        if not (.2*ink.xh <= c.h <= .9*ink.xh and .12*ink.xh <= c.w <= .8*ink.xh
+   684	                and top-1.2*ink.xh <= c.y0 and c.y1 <= top+.25*ink.xh):
+   685	            continue
+   686	        b = _blob(component_mask(ink,c),c.y0,c.x0,'opening_quote',ink)
+   687	        if not b.faint and not b.touches_border:
+   688	            out.append(b)
+   689	    return out
+   690	
+   691	
+   692	def dialytika_shape(ev: MarkEvidence) -> bool:
+   693	    """Two small blobs side by side at the same height."""
+   694	    a = ev.above
+   695	    if len(a) != 2:
+   696	        return False
+   697	    p, q = a
+   698	    xh = ev.xh
+
+exec
+/bin/zsh -lc "rg -n 'class .*Alignment|class .*Span|confidence[=:]|def .*align' greekocr -g '*.py' | rg 'align|ctc|confidence' | head -n 85
+rg -n 'def extract_line|\\x27span\\x27|span=' scripts/labelfix/clariden -g '*.py' | head -n 65" in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ succeeded in 0ms:
+greekocr/readers/services/google_vision.py:91:        detected = [dict(languageCode=x.get('languageCode', ''), confidence=_confidence(x.get('confidence')))
+greekocr/readers/services/google_vision.py:94:        return dict(text=text, confidence=_confidence(node.get('confidence')),
+greekocr/readers/services/transkribus.py:119:                words.append(dict(text=text, confidence=conf, line_id=line.get('id')))
+greekocr/readers/services/transkribus.py:122:                    symbols.append(dict(text=text, confidence=conf, line_id=line.get('id')))
+greekocr/readers/services/transkribus.py:125:                symbols.append(dict(text=text, confidence=conf, line_id=line.get('id')))
+greekocr/readers/services/google_docai.py:95:                          confidence=confidence, segments=spans, page=page_number))
+greekocr/readers/cllg.py:14:                     confidence: bool = False) -> BatchReader | ConfidenceBatchReader:
+greekocr/harvest/report.py:38:            confidence=v.get('mean_confidence');conf='—' if confidence is None else f'{confidence:.3f}'
+greekocr/cli.py:304:                                          timeout=spec.get('timeout', 300), confidence=True)
+greekocr/harvest/admission.py:181:    pages = defaultdict(lambda: Counter(lines=0, eligible_lines=0, low_confidence=0, tall_boxes=0))
+greekocr/harvest/readers.py:69:                if box: result.append(dict(text=t,bbox=box,confidence=layout.get('confidence')))
+greekocr/harvest/readers.py:82:                                if boxes: result.append(dict(text=''.join(chars).strip(),bbox=union(boxes),confidence=para.get('confidence')))
+greekocr/harvest/readers.py:84:                    if boxes: result.append(dict(text=''.join(chars).strip(),bbox=union(boxes),confidence=para.get('confidence')))
+greekocr/harvest/readers.py:136:            result=dict(engine=engine,pieces=[],raw_text='',mean_confidence=None,min_confidence=None,
+greekocr/harvest/readers.py:151:                        mean_confidence=reading.mean_symbol_conf,min_confidence=reading.min_symbol_conf,
+greekocr/harvest/readers.py:157:            result=dict(engine=engine,pieces=[],raw_text='',mean_confidence=None,min_confidence=None,
+greekocr/harvest/readers.py:179:                                     mean_confidence=sum(confidences)/len(confidences) if confidences else None,
+greekocr/harvest/round1.py:126:    return dict(docai_mean_symbol_confidence=sum(confidences)/len(confidences) if confidences else None,
+greekocr/labelfix/segmentation.py:29:def recogniser_slots(ink, text, alignment):
+greekocr/harvest/round1_reads.py:120:                mean_confidence=statistics.mean(symbols) if symbols else None, symbol_count=len(symbols),
+greekocr/harvest/wikisource.py:158:def align_lines(docai, human, *, minimum_similarity=.65):
+greekocr/glyphs/report.py:84:        angle_deg=sk.angle_deg, trail_px=sk.trail_px, degree=sk.degree, confidence=sk.confidence,
+greekocr/harvest/montage.py:238:                result.append(dict(text=value, bbox=box, confidence=layout.get("confidence"),
+greekocr/harvest/montage.py:307:                            result.append(dict(text=symbol.get("text", ""), confidence=symbol.get("confidence"),
+greekocr/harvest/montage.py:317:                result.append(dict(text=value, confidence=layout.get("confidence"),
+greekocr/labelfix/release_gate.py:352:        confidence=runtime.get('recognition_confidence')
+greekocr/labelfix/reading.py:303:def read_ink(ink, recogniser_text, alignment, model, *, filtered=True, output="print",
+greekocr/labelfix/candidates.py:23:def align_chars(ref: str, hyp: str) -> list[tuple[int | None, int | None]]:
+greekocr/labelfix/toolkit_geometry.py:81:def physical_slots(ink, text, alignment):
+greekocr/_vendor/train/heads.py:341:def _uniform_align_marks(marks_targets: List[List[float]], t_frames: int, n_marks: int) -> torch.Tensor:
+greekocr/labelfix/sheet.py:59:def load_alignments(path: Path) -> dict:
+greekocr/labelfix/sheet.py:85:def render(rows: list[dict], seed: int, title: str, intro: str, align_path: Path | None) -> str:
+greekocr/labelfix/markshape_train.py:26:def collect(lines: list[dict], aligns: dict, log=print) -> list[dict]:
+greekocr/_vendor/scripts/fetch/r2_cllg_worker.py:94:def recognize(model, config, paths, *, confidence=False):
+greekocr/_vendor/scripts/fetch/r2_cllg_worker.py:110:        if confidence:
+greekocr/_vendor/scripts/fetch/r2_cllg_worker.py:116:                mean_confidence=sum(probabilities)/len(probabilities) if probabilities else None,
+greekocr/_vendor/scripts/fetch/r2_cllg_worker.py:117:                min_confidence=min(probabilities) if probabilities else None,
+greekocr/labelfix/sample.py:42:def align_records(recs: list[dict], seed: int, cache_dir: Path, name: str, threads: int, log=print) -> dict:
+greekocr/labelfix/sample.py:63:def run(recs: list[dict], lexicons: dict, aligns: dict, policy: str = 'strict', log=print, shape_model=None) -> tuple[list, dict]:
+greekocr/labelfix/validate.py:85:def alignments_for(lines: list[dict], seed: int, cache_dir: Path, threads: int = 4, log=print) -> dict:
+greekocr/labelfix/validate.py:132:def evaluate_lines(lines: list[dict], lexicons: dict, aligns: dict, policy: str, log=print, shape_model=None) -> tuple[list, list]:
+greekocr/glyphs/orientation.py:81:    axis_confidence: float = 0.
+greekocr/glyphs/orientation.py:82:    polarity_confidence: float = 0.
+greekocr/glyphs/orientation.py:163:    conf = re.search(r'Orientation confidence: ([\d.]+)',r.stdout)
+greekocr/glyphs/orientation.py:165:                confidence=float(conf[1]) if conf else 0.,returncode=r.returncode)
+greekocr/glyphs/orientation.py:188:    result = Orientation(axis='horizontal' if axis == 0 else 'vertical',axis_confidence=margin,
+greekocr/glyphs/orientation.py:310:        # Ignore CTC blank confidence: only a meaningful Greek reading can win.
+greekocr/glyphs/orientation.py:313:        scores.append(score); readings.append(dict(orientation_cw=angle,text=text,recognition_confidence=float(confidence),score=score))
+greekocr/glyphs/orientation.py:383:                        axis_confidence=float(np.median(1-1/strength[members])),xheight=ch*(sx+sy)/2))
+greekocr/labelfix/ctc_align.py:53:class CharSpan:
+greekocr/labelfix/ctc_align.py:63:class Alignment:
+greekocr/labelfix/ctc_align.py:69:    confidence: float = 0.0
+greekocr/labelfix/ctc_align.py:85:                    confidence=self.confidence,
+greekocr/labelfix/ctc_align.py:120:def transfer_alignment(text: str, al: Alignment) -> Alignment:
+greekocr/labelfix/ctc_align.py:182:    def align_batch(self, images: list[Image.Image]) -> list[Alignment]:
+greekocr/labelfix/ctc_align.py:209:    def align_paths(self, paths: list[str | Path], bs: int = 16, log=None) -> dict:
+greekocr/deploy/docling_plugin/model.py:179:        ours = [TextCell(index=i, from_ocr=True, rect=rect, text=text, orig=text, confidence=confidence)
+greekocr/deploy/docling_plugin/model.py:184:                      lines=[dict(rect=c.rect.model_dump(mode='json'), text=c.text, confidence=c.confidence,
+greekocr/deploy/docling_plugin/model.py:229:                                 confidence=confidence,text_direction=TextDirection.LEFT_TO_RIGHT))
+greekocr/deploy/docling_plugin/model.py:327:                             text=text, orig=text, confidence=confidence)
+greekocr/_vendor/bench/e1_readout.py:25:def alignment(ref, pred):
+greekocr/real/geometry_evaluate.py:40:    result = dict(text=raw['text'], mean_confidence=raw.get('mean_confidence'),
+greekocr/real/geometry_evaluate.py:41:                  min_confidence=raw.get('min_confidence'),
+greekocr/real/geometry_evaluate.py:51:                      mean_confidence=statistics.mean(probabilities) if probabilities else None,
+greekocr/real/geometry_evaluate.py:52:                      min_confidence=min(probabilities) if probabilities else None,
+greekocr/real/geometry_evaluate.py:257:            mean_reader_confidence=_mean(confidences), mean_inter_reader_agreement=_mean(agreements),
+greekocr/real/geometry_evaluate.py:262:            by_reader={name: dict(mean_reader_confidence=_mean([
+greekocr/real/geometry_evaluate.py:271:        signals=dict(reader_confidence='mean per-character natural log probability; zero probabilities floored at 1e-300',
+greekocr/_vendor/bench/e2_native.py:35:def cllg_kraken(checkpoint, contract=None, *, python=None, timeout=300, confidence=False):
+greekocr/_vendor/bench/e2_native.py:139:            if confidence:
+greekocr/glyphs/oriented_page.py:37:    recognition_confidence: float | None = None
+greekocr/glyphs/oriented_page.py:49:                    recognition_confidence=self.recognition_confidence,
+greekocr/glyphs/oriented_page.py:220:            decision = replace(decision, orientation_cw=None, polarity_confidence=0.,
+greekocr/glyphs/oriented_page.py:235:            decision = replace(decision, orientation_cw=None, polarity_confidence=0.,
+greekocr/glyphs/orientation_regions.py:63:                        axis_confidence=float(np.median([p['axis_confidence'] for p in members]))))
+scripts/labelfix/clariden/l1_common.py:82:                        peer_coverage=s.get('peer_coverage'),locator_span=s.get('locator_span'),
+scripts/labelfix/clariden/l1e_measure.py:42:            if c['span'][0]<0 or c['span'][1]>width:uncertainty.append('out_of_image_span')
+scripts/labelfix/clariden/r1_train.py:76:    span=((xx>=mask[:,0,None]) & (xx<mask[:,1,None])).float()[:,None,:].expand(-1,64,-1)
+scripts/labelfix/clariden/r1_score.py:79:                span=r['locator_span'];hits=[s for s in l['slots'] if min(span[1],s['bbox'][2])>max(span[0],s['bbox'][0])]
+scripts/labelfix/clariden/r1_extract.py:39:def extract_line(record, alignment, image, validation=False, evaluation=False):
+scripts/labelfix/clariden/r1_extract.py:83:        coverage.append(dict(evidence_state='UNKNOWN' if uncertainty else 'unadjudicated',uncertainty=uncertainty,window_contract=WINDOW_CONTRACT,start=c.start,base=c.base,span=list(span),scored=reason is None,reason=reason,**diagnostic))
+
+exec
+/bin/zsh -lc "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.venv/bin/python - <<'PY'
+import json,subprocess
+from pathlib import Path
+from greekocr.labelfix.release_gate import policy_binding
+root=Path.cwd();out=Path('/Users/foivoskarounos-zamparloukos/Projects/glossapi-ocr-local/experiments/ocr_program_review_20261006/review_scratch/ASTRA-SC1c3v3/ASTRA-SC1c3v3_evidence');out.mkdir(exist_ok=True)
+for p in ['greekocr/labelfix/text.py','greekocr/labelfix/release_gate.py','scripts/labelfix/clariden/l1_common.py']:
+ assert subprocess.check_output(['git','show','05f2dafb:'+p])==(root/'artifacts/labelfix_sf6/frozen_sf5_05f2dafb'/p).read_bytes()
+(out/'initial_receipt.json').write_text(json.dumps(dict(head=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),status=subprocess.check_output(['git','status','--short'],text=True),policy=policy_binding(),frozen_sources_verified=True),indent=2)+'\\n')
+(out/'witness_inputs.jsonl.gz').write_bytes((root/'docs/labelfix/spellcheck/SF6_evidence/witness_inputs.jsonl.gz').read_bytes())
+(out/'production_and_test.diff').write_bytes(subprocess.check_output(['git','diff','05f2dafb..HEAD','--','greekocr/labelfix/release_gate.py','scripts/labelfix/clariden/l1_common.py','tests/labelfix/test_sf5.py']))
+print(policy_binding()['schema'],policy_binding()['sha256'])
+PY" in /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck
+ succeeded in 195ms:
+sf6-release-v1 544ad37c4b6c0c1e1c98a8c0d7642afc5c188bbd52e79aaf6eef0d1dce233460
+

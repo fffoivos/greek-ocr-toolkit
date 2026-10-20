@@ -1,0 +1,154 @@
+"""Independent line reading: recogniser letters, detector marks, cached locations.
+
+No Google/human text, lexicon, truth labels or recogniser forward pass enters here.
+Use read_line_details for the parallel unnamed-mark and localisation flags.
+"""
+from __future__ import annotations
+from dataclasses import dataclass, field
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+from PIL import Image
+from . import ink as I
+from .ctc_align import Alignment, transfer_alignment
+from .markshape import name_marks
+from .text import clusters, nfd, nfc, tokenize
+
+MARKS = dict(psili='\u0313', dasia='\u0314', acute='\u0301', grave='\u0300',
+             circumflex='\u0342', subscript='\u0345', dialytika='\u0308')
+ELISION = "'’ʼ᾽"
+
+
+@dataclass
+class LineReading:
+    """Independent text with slot evidence and parallel unresolved-mark flags."""
+    text: str
+    slots: list
+    unnamed: list
+    opening_quotes: list = field(default_factory=list)
+
+
+def recogniser_slots(ink, text, alignment):
+    """One owner per recogniser character; disconnected strokes form one body.
+
+    An extra component must overlap that character's cached span, have no other
+    character owner, be adjacent, and fit within 1.6 x-height with the first.
+    """
+    text = nfd(text)
+    alignment = transfer_alignment(text, alignment)
+    letters = sorted((c for c in ink.components if c.role == 'letter'),key=lambda c:c.x0)
+    slots = []
+    for cl in clusters(text):
+        if not cl.base.isalpha():
+            continue
+        span = alignment.span(cl.start)
+        ovs = [I._overlap(span.x0,span.x1,c.x0,c.x1) for c in letters]
+        k = max(range(len(letters)),key=lambda k:ovs[k]) if letters else None
+        if k is not None and ovs[k] <= 0:
+            k = None
+        slots.append(dict(base=cl.base,start=cl.start,end=cl.end,
+                          locator_span=[span.x0,span.x1],primary=k,indices=[]))
+    owners = {}
+    for i,s in enumerate(slots):
+        if s['primary'] is not None:
+            owners.setdefault(s['primary'],[]).append(i)
+    tokens = tokenize(text)
+    for i,s in enumerate(slots):
+        k=s['primary'];s['word_final']=any(s['end']==t.core_end for t in tokens)
+        if k is None or len(owners[k]) != 1:
+            s['component']=None;s['localisation_unknown']=True
+            continue
+        members=[k]
+        a,b=s['locator_span']
+        if s['base'].isalpha():
+            extra=[j for j in (k-1,k+1) if 0<=j<len(letters) and j not in owners
+                   and I._overlap(a,b,letters[j].x0,letters[j].x1)>0]
+            if len(extra)==1:
+                j=extra[0]
+                if max(letters[k].x1,letters[j].x1)-min(letters[k].x0,letters[j].x0)<=1.6*ink.xh:
+                    members.append(j)
+        cs=[letters[j] for j in members]
+        x0,x1=min(c.x0 for c in cs),max(c.x1 for c in cs)
+        y0,y1=min(c.y0 for c in cs),max(c.y1 for c in cs)
+        s.update(indices=members,component_ids=[c.index for c in cs],
+                 component=SimpleNamespace(index=cs[0].index,x0=x0,x1=x1,y0=y0,y1=y1,
+                                           cx=(x0+x1)/2,w=x1-x0,h=y1-y0,role='letter'),
+                 localisation_unknown=False)
+    return slots
+
+
+def render_reading(text, slots):
+    """Replace every combining mark, preserving base characters and punctuation."""
+    by={s['start']:s for s in slots}
+    out=[]
+    for cl in clusters(nfd(text)):
+        if cl.base in ELISION:
+            continue
+        s=by.get(cl.start)
+        if s is None:
+            out.append(cl.base)
+        else:
+            out.append(cl.base+''.join(MARKS[p] for p in s.get('parts',()) if p in MARKS))
+            if s.get('apostrophe'):
+                out.append('’')
+    return nfc(''.join(out))
+
+
+def read_ink(ink, recogniser_text, alignment, model):
+    slots=recogniser_slots(ink,recogniser_text,alignment)
+    located=[s for s in slots if s['component'] is not None]
+    apost=I.apostrophe_candidates(ink,[(s['component'],s['base'],s['word_final']) for s in located])
+    apost_boxes={(b.x0,b.y0,b.x1,b.y1) for bs in apost.values() for b in bs}
+    for i,s in enumerate(located):
+        c=s['component']
+        # The union is already certified against all character owners. Pass it
+        # directly so snap_body cannot include another overlapping character.
+        ev=I.mark_evidence(ink,c.x0,c.x1,base_letter=s['base'],certified_body=(c.x0,c.x1))
+        ev.above=[b for b in ev.above if (b.x0,b.y0,b.x1,b.y1) not in apost_boxes]
+        s.update(evidence=ev,apostrophe=i in apost)
+    # Overhanging ink may enter two windows: credit it once, to its nearest body.
+    owners={}
+    for s in located:
+        for field in ('above','below'):
+            for b in getattr(s['evidence'],field):
+                key=(field,b.x0,b.y0,b.x1,b.y1)
+                distance=abs(b.cx-s['component'].cx)
+                if key not in owners or distance < owners[key][0]:
+                    owners[key]=(distance,s['start'])
+    flags=[]
+    for s in slots:
+        if s['component'] is None:
+            s['parts']=();s['unnamed']=();flags.append(dict(start=s['start'],reason='localisation_unknown'))
+            continue
+        ev=s['evidence']
+        for field in ('above','below'):
+            setattr(ev,field,[b for b in getattr(ev,field)
+                             if owners[(field,b.x0,b.y0,b.x1,b.y1)][1]==s['start']])
+        names=name_marks(ev,model)
+        s.update(parts=names.parts,unnamed=names.unnamed,naming=names)
+        flags.extend(dict(start=s['start'],blob=i,reason='unnamed') for i in names.unnamed)
+    reserved = [b for s in located for b in s['evidence'].above if b.source == 'preposed']
+    quotes = I.opening_quote_candidates(ink,located[0]['component'],reserved) if located else []
+    text = render_reading(recogniser_text,slots)
+    # Quote glyphs in recogniser text are not evidence of printed punctuation.
+    text = text.lstrip('“”«»„\" ')
+    if quotes:
+        text = '“'+text
+    return LineReading(text,slots,flags,[b.to_record() for b in quotes])
+
+
+def read_line_details(crop: str | Path | Image.Image | I.CropInk, recogniser_text: str,
+                      alignment: Alignment, model: Any) -> LineReading:
+    """Read a crop and retain per-slot evidence, unknown ownership and mark flags."""
+    if isinstance(crop,I.CropInk):
+        return read_ink(crop,recogniser_text,alignment,model)
+    if isinstance(crop,Image.Image):
+        return read_ink(I.analyse(crop),recogniser_text,alignment,model)
+    with Image.open(crop) as image:
+        return read_ink(I.analyse(image),recogniser_text,alignment,model)
+
+
+def read_line(crop: str | Path | Image.Image | I.CropInk, recogniser_text: str,
+              alignment: Alignment, model: Any) -> str:
+    """Return recogniser base letters combined solely with pixel-detected marks."""
+    return read_line_details(crop,recogniser_text,alignment,model).text

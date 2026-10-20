@@ -1,0 +1,509 @@
+diff --git a/greekocr/labelfix/ctc_align.py b/greekocr/labelfix/ctc_align.py
+index ecbdfc18..91217710 100644
+--- a/greekocr/labelfix/ctc_align.py
++++ b/greekocr/labelfix/ctc_align.py
+@@ -27,6 +27,18 @@ MAX_WIDTH = 2560
+ MIN_WIDTH = 64
+ 
+ 
++def recognition_fields(runtime):
++    """Carry saved score provenance through runtime copies, without upgrading it."""
++    from copy import deepcopy
++    fields = dict(recognition_confidence=runtime.get('recognition_confidence'),
++        recognition_evidence=deepcopy(runtime.get('recognition_evidence') or dict(
++            schema='ctc-window-score-v1', scored=False, scope='line', regions=[],
++            provenance='legacy_runtime_without_score_provenance' if runtime.get('recognition_confidence') is not None
++                       else 'missing_runtime_confidence')))
++    if 'image_width' in runtime:fields['image_width']=runtime['image_width']
++    return fields
++
++
+ def make_strip(image: Image.Image) -> tuple[np.ndarray, float]:
+     """Factory strip replica. Returns (uint8 [48, W] array, crop pixels per strip pixel)."""
+     im = image.convert('L')
+@@ -66,7 +78,8 @@ class Alignment:
+     n_frames: int = 0
+     scale: float = 1.0                          # crop px per strip px
+     strip_width: int = 0
+-    confidence: float = 0.0
++    confidence: float | None = None
++    frame_confidences: list | None = None       # max posterior, including blank, per valid frame
+ 
+     def span(self, i: int) -> CharSpan:
+         return self.spans[i]
+@@ -81,16 +94,65 @@ class Alignment:
+         return float(np.median(base)) if base else 0.0
+ 
+     def to_record(self) -> dict:
+-        return dict(prediction=self.prediction, n_frames=self.n_frames, scale=self.scale, strip_width=self.strip_width,
++        record = dict(prediction=self.prediction, n_frames=self.n_frames, scale=self.scale, strip_width=self.strip_width,
+                     confidence=self.confidence,
+                     spans=[[c.char, c.frame0, c.frame1, round(c.x0, 1), round(c.x1, 1)] for c in self.spans])
++        if self.frame_confidences is not None:
++            record['frame_confidences'] = list(self.frame_confidences)
++            import hashlib
++            record['frame_prediction_sha256'] = hashlib.sha256(self.prediction.encode()).hexdigest()
++        if getattr(self, 'transferred', False):record['transferred'] = True
++        return record
+ 
+     @classmethod
+     def from_record(cls, r: dict) -> 'Alignment':
+-        a = cls(r['prediction'], [], r['n_frames'], r['scale'], r['strip_width'], r.get('confidence', 0.0))
++        a = cls(r['prediction'], [], r['n_frames'], r['scale'], r['strip_width'], r.get('confidence'),
++                r.get('frame_confidences'))
+         a.spans = [CharSpan(ch, i, f0, f1, x0, x1) for i, (ch, f0, f1, x0, x1) in enumerate(r['spans'])]
++        import hashlib
++        if (r.get('transferred') or a.frame_confidences is not None
++                and r.get('frame_prediction_sha256') != hashlib.sha256(a.prediction.encode()).hexdigest()):
++            a.transferred = True
+         return a
+ 
++    def recognition_evidence(self, slots, image_width):
++        """Bind actual scored frames to each detector window; never fill legacy gaps.
++
++        A line mean (which includes blanks) cannot certify an omitted region.
++        Regional confidence is the minimum max-posterior of ALL overlapping
++        frames. This is model observation, not calibrated independent truth.
++        Transferred locations do not establish original frame ownership.
++        """
++        import hashlib
++        import json
++        import math
++        from .text import nfd
++        evidence = dict(schema='ctc-window-score-v1', scored=self.confidence is not None,
++            provenance='saved_alignment_confidence' if self.confidence is not None else 'missing_alignment_confidence',
++            scope='line', regions=[],
++            alignment_sha256=hashlib.sha256(json.dumps(self.to_record(),sort_keys=True).encode()).hexdigest(),
++            text_sha256=hashlib.sha256(nfd(self.prediction).encode()).hexdigest())
++        scores = self.frame_confidences
++        if (getattr(self, 'transferred', False) or scores is None or len(scores) != self.n_frames
++                or not self.scale > 0 or not math.isfinite(self.scale)
++                or not all(isinstance(x, (int, float)) and not isinstance(x, bool)
++                           and math.isfinite(x) and 0 <= x <= 1 for x in scores)):
++            return evidence
++        for slot in slots:
++            ev = slot.get('evidence', {})
++            ev = ev.to_record() if hasattr(ev, 'to_record') else ev
++            window = ev.get('window')
++            if not (isinstance(window, (list, tuple)) and len(window) == 2
++                    and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in window)
++                    and 0 <= window[0] < window[1] <= image_width):
++                continue
++            lo, hi = math.floor(window[0] / (STRIDE*self.scale)), math.ceil(window[1] / (STRIDE*self.scale))
++            if not 0 <= lo < hi <= len(scores):continue
++            evidence['regions'].append(dict(start=slot['start'], base=slot['base'], window=list(window),
++                image_width=image_width, scored=True, confidence=min(scores[lo:hi]),
++                frames=[lo, hi], provenance='minimum_max_frame_posterior_including_blank'))
++        return evidence
++
+ 
+ def _is_mark(c: str) -> bool:
+     import unicodedata
+@@ -203,7 +265,8 @@ class Recognizer:
+             ids = am[i, :L]
+             spans = frames_to_spans(ids, self._decode_atom, scales[i])
+             pred = ''.join(c.char for c in spans)
+-            results.append(Alignment(pred, spans, L, scales[i], widths[i], float(probs[i, :L].mean())))
++            results.append(Alignment(pred, spans, L, scales[i], widths[i], float(probs[i, :L].mean()),
++                                     probs[i, :L].tolist()))
+         return results
+ 
+     def align_paths(self, paths: list[str | Path], bs: int = 16, log=None) -> dict:
+diff --git a/greekocr/labelfix/release_gate.py b/greekocr/labelfix/release_gate.py
+index a5c1eb76..8a1c26bc 100644
+--- a/greekocr/labelfix/release_gate.py
++++ b/greekocr/labelfix/release_gate.py
+@@ -24,6 +24,7 @@ MODES = ('PRESENCE', 'FULL', 'ENSEMBLE_AB', 'ENSEMBLE_AE')
+ ENSEMBLE_CAVEAT = "A and B share training data (C1 agreement labels) and therefore share errors; agreement measures the reader's stability, not an independent pixel signal. Precision on the training waves is unmeasured until the training-wave DEV with print truth exists. Wave 1c on this release is a pseudo-label experiment."
+ R1_LETTERS = frozenset('αεηιουωρΑΕΗΙΟΥΩΡ')
+ LEADING_QUOTES = '“”«»„"'
++RECOGNISER_ABSENCE_FLOOR = 0.5
+ 
+ 
+ def policy_binding():
+@@ -32,7 +33,11 @@ def policy_binding():
+     paths = [Path(__file__), Path(R.__file__),Path(__file__).with_name('text.py'),
+              Path(__file__).with_name('segmentation.py'),
+              root/'scripts/labelfix/clariden/l1_common.py',root/'scripts/labelfix/clariden/l1r_recompose.py',
+-             root/'scripts/labelfix/owner_reading.py',root/'scripts/labelfix/owner_pages_build_combined.py']
++             root/'scripts/labelfix/owner_reading.py',root/'scripts/labelfix/owner_pages_build_combined.py',
++             Path(__file__).with_name('ctc_align.py'), root/'scripts/labelfix/m2_run.py',
++             root/'scripts/labelfix/clariden/r1_extract.py',root/'scripts/labelfix/clariden/l1_infer.py',
++             root/'scripts/labelfix/clariden/l1e_measure.py',root/'scripts/labelfix/clariden/l1e_run.py',
++             root/'scripts/labelfix/clariden/l1_detect.py',root/'scripts/labelfix/clariden/r1_common.py']
+     sources = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+     return dict(schema=POLICY, sources=sources,
+                 sha256=hashlib.sha256(json.dumps(sources,sort_keys=True).encode()).hexdigest())
+@@ -280,6 +285,52 @@ def _finite_span(value):
+             and 0<=value[0]<value[1])
+ 
+ 
++def _source_in_window(span, window, image_width=None, coverage=None):
++    """One coordinate contract for MOVE, reader absence and recogniser absence.
++
++    Source letter spans must belong to the saved target window. Padded reader
++    crops may be wider; their native target mask must still be inside the image.
++    Historical R1 extraction explicitly recorded out_of_image_span in uncertainty;
++    its known, scored, uncertainty-free records retain that bounds provenance.
++    Arbitrary finite coordinates alone never establish image bounds.
++    """
++    if not (_finite_span(span) and _finite_span(window)
++            and window[0]<=span[0]<span[1]<=window[1]):return False
++    if image_width is not None:
++        return (isinstance(image_width,(int,float)) and not isinstance(image_width,bool)
++                and math.isfinite(image_width) and span[1]<=image_width)
++    cov=coverage or {}
++    return bool(cov.get('window_contract',{}).get('schema')=='r1-trained-full-height-v1'
++                and cov.get('scored') is True and cov.get('evidence_state') not in (None,'UNKNOWN')
++                and cov.get('uncertainty')==[] and cov.get('span')==span)
++
++
++def _recogniser_scored(runtime, slot, window):
++    """An explicit line score AND scored observation of this entire window."""
++    def above_floor(value):
++        return (isinstance(value,(int,float)) and not isinstance(value,bool)
++                and math.isfinite(value) and RECOGNISER_ABSENCE_FLOOR<value<=1)
++    evidence=runtime.get('recognition_evidence') or {}
++    if not (above_floor(runtime.get('recognition_confidence'))
++            and evidence.get('schema')=='ctc-window-score-v1' and evidence.get('scored') is True
++            and evidence.get('provenance')=='saved_alignment_confidence'
++            and evidence.get('text_sha256')==hashlib.sha256(nfd(runtime.get('recogniser_text','')).encode()).hexdigest()
++            and isinstance(evidence.get('alignment_sha256'),str)
++            and len(evidence['alignment_sha256'])==64):return False
++    regions=[r for r in evidence.get('regions',()) if r.get('start')==slot.get('start')]
++    if len(regions)!=1:return False
++    region=regions[0];observed=region.get('window')
++    frames=region.get('frames')
++    return bool(region.get('base')==slot.get('base') and region.get('scored') is True
++        and region.get('provenance')=='minimum_max_frame_posterior_including_blank'
++        and above_floor(region.get('confidence')) and _finite_span(frames)
++        and all(isinstance(x,int) and not isinstance(x,bool) for x in frames)
++        and _source_in_window(observed,observed,region.get('image_width'))
++        and _finite_span(window) and observed[0]<=window[0]<window[1]<=observed[1]
++        and _source_in_window(slot.get('locator_span'),window,region.get('image_width'))
++        and (runtime.get('image_width') is None or runtime['image_width']==region['image_width']))
++
++
+ def deletion_guard(original, proposal, runtime, decision):
+     """SF6: two positive absences, except an R1-named same-kind breathing MOVE.
+ 
+@@ -337,8 +388,7 @@ def deletion_guard(original, proposal, runtime, decision):
+         for preds,covs in arms:
+             pred=preds.get(rc.start);cov=covs.get(rc.start)
+             named=bool(named and cov and not _reader_reasons(slot,pred,cov,'r1')
+-                and _finite_span(cov.get('span'))
+-                and window[0]<=cov['span'][0]<cov['span'][1]<=window[1]
++                and _source_in_window(cov.get('span'),window,runtime.get('image_width'),cov)
+                 and set(pred.get('parts',pred.get('cls','none').split('+')))&{'psili','dasia'}=={part})
+         if named:moves[x.start]=part
+     events=[]
+@@ -364,8 +414,9 @@ def deletion_guard(original, proposal, runtime, decision):
+             and ev.get('observation',{}).get(zone) not in ('UNSEEN','UNKNOWN'))
+         cov=coverage.get(c.start) if c else None
+         pred=predictions.get(c.start) if c else None
++        window=ev.get('window')
+         scored=bool(clean and cov and not _reader_reasons(s,pred,cov,'r1')
+-                    and _finite_span(cov.get('span')))
++                    and _source_in_window(cov.get('span'),window,runtime.get('image_width'),cov))
+         reader=bool(category=='mark' and part and c and c.base in R1_LETTERS and scored
+                     and part not in (pred.get('parts',pred.get('cls','none').split('+')) or []))
+         # The coordinator's A∧B is one reader absence in every release mode.
+@@ -375,7 +426,7 @@ def deletion_guard(original, proposal, runtime, decision):
+             pp=prediction_index(runtime.get('peer_predictions',{}).get(peer,())).get(c.start) if c else None
+             pc={x['start']:x for x in runtime.get('peer_coverage',{}).get(peer,())}.get(c.start) if c else None
+             reader=bool(reader and pc and not _reader_reasons(s,pp,pc,'peer')
+-                        and _finite_span(pc.get('span'))
++                        and _source_in_window(pc.get('span'),window,runtime.get('image_width'),pc)
+                         and part not in pp.get('parts',pp.get('cls','none').split('+')))
+         observed=ev.get('observation',{})
+         detector=bool(clean and _finite_span(ev.get('window')) and observed.get(zone)=='OBSERVED'
+@@ -391,10 +442,7 @@ def deletion_guard(original, proposal, runtime, decision):
+             detector=bool(clean and atom['key'][1]==0 and raw.get('opening_quotes')==[]
+                 and observed.get('above')=='OBSERVED' and observed.get('left')=='OBSERVED'
+                 and _finite_span(ev.get('window')))
+-        confidence=runtime.get('recognition_confidence')
+-        recogniser=bool(clean and _finite_span(s.get('locator_span'))
+-            and isinstance(confidence,(int,float)) and not isinstance(confidence,bool)
+-            and math.isfinite(confidence) and 0<=confidence<=1 and rec_atoms[atom['key']]==0)
++        recogniser=bool(clean and _recogniser_scored(runtime,s,window) and rec_atoms[atom['key']]==0)
+         # Text presence is decisive against absence, even if it has a score.
+         allowed=(detector and recogniser if category in ('apostrophe','quote','keraia')
+                  else reader and (detector or recogniser))
+@@ -614,8 +662,8 @@ def bind_runtime(runtime, k1_flags=()):
+         evidence['recogniser_nfd']=runtime['recogniser_nfd']
+     # SF6 uses this saved score to distinguish observed text absence from an
+     # unscored transcript. Bind its presence/value as well as all old inputs.
+-    if 'recognition_confidence' in runtime:
+-        evidence['recognition_confidence']=runtime['recognition_confidence']
++    for key in ('recognition_confidence','recognition_evidence','image_width'):
++        if key in runtime:evidence[key]=deepcopy(runtime[key])
+     if not isinstance(evidence['detector'],dict):evidence['detector']=serialize(evidence['detector'])
+     digest=hashlib.sha256(json.dumps(evidence,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+     if runtime.get('evidence_sha256',digest)!=digest:raise ValueError('runtime evidence binding mismatch')
+diff --git a/scripts/labelfix/clariden/l1_detect.py b/scripts/labelfix/clariden/l1_detect.py
+new file mode 100644
+index 00000000..68fb9d3b
+--- /dev/null
++++ b/scripts/labelfix/clariden/l1_detect.py
+@@ -0,0 +1,133 @@
++"""CPU S6 detector and unchanged R1-A window extraction, receipt per shard."""
++from __future__ import annotations
++import argparse
++from collections import Counter
++import json
++import multiprocessing as mp
++import os
++from pathlib import Path
++import time
++
++from scripts.labelfix.clariden.l1_common import canonical, rows, write_rows, sha256, write_json
++from scripts.labelfix.clariden.r1_common import crop_key, crop_path
++
++_STATE = None
++
++
++def initialise(settings):
++    global _STATE
++    from greekocr.labelfix import case, markshape
++    case.configure_model('docs/labelfix/case_model_S5.json')
++    _STATE = settings, markshape.load_model('docs/labelfix/markshape_model_S4.json')
++
++
++def chunk(task):
++    import numpy as np
++    from PIL import Image
++    from greekocr.labelfix import ink, reading
++    from greekocr.labelfix.ctc_align import Alignment
++    from greekocr.labelfix.text import nfc
++    from scripts.labelfix.clariden.r1_extract import extract_line
++    from scripts.labelfix.owner_reading import serialize
++    number, records = task
++    settings, detector = _STATE
++    out, crop_root, layout, log_lines = settings
++    prefix = Path(out) / f'shard-{number:05d}'
++    runtime, windows, samples, timings = [], [], [], []
++    for r, ar in records:
++        with Image.open(crop_path(r['crop'], crop_root, layout)) as source:
++            image = source.convert('L')
++        al = Alignment.from_record(ar)
++        started = time.perf_counter()
++        raw = reading.read_ink(ink.analyse(image), al.prediction, al, detector, filtered=False)
++        detector_seconds = time.perf_counter() - started
++        started = time.perf_counter()
++        ss, wide, _, losses, coverage, size = extract_line(
++            dict(id=r['id'], recogniser_text=al.prediction, _line=len(runtime)), ar, image, evaluation=True)
++        window_seconds = time.perf_counter() - started
++        for s in ss:
++            samples.append(dict(line=len(runtime), start=s[3], letter=s[4], mask=s[7][0]))
++        windows.extend(wide)
++        runtime.append(dict(id=r['id'], recogniser_text=nfc(al.prediction), recogniser_nfd=al.prediction, detector=serialize(raw),
++            recognition_confidence=al.confidence,image_width=image.width,
++            recognition_evidence=al.recognition_evidence(raw.slots,image.width),
++            coverage=coverage, font_size=size, extraction_counts=dict(losses)))
++        timings.append(dict(id=r['id'], detector_seconds=detector_seconds, window_seconds=window_seconds, windows=len(ss)))
++        if log_lines:
++            print('LINE_TIMING ' + canonical(timings[-1]), flush=True)
++    write_rows(str(prefix) + '-detector.jsonl.gz', runtime)
++    write_json(str(prefix) + '-samples.json', samples)
++    np.save(str(prefix) + '-wide.npy', np.asarray(windows, dtype=np.uint8).reshape(-1, 64, 128), allow_pickle=False)
++    write_rows(str(prefix) + '-timings.jsonl', timings)
++    paths = [Path(str(prefix) + suffix) for suffix in ('-detector.jsonl.gz', '-samples.json', '-wide.npy', '-timings.jsonl')]
++    receipt = dict(shard=number, lines=len(runtime), windows=len(windows), complete=True,
++        detector_seconds=sum(t['detector_seconds'] for t in timings),
++        window_seconds=sum(t['window_seconds'] for t in timings),
++        sha256={p.name: sha256(p) for p in paths})
++    write_json(str(prefix) + '-receipt.json', receipt)
++    return receipt
++
++
++def run(selection, alignments, out, crop_root, layout, workers=64, chunk_size=128, log_lines=False):
++    out = Path(out)
++    out.mkdir(parents=True, exist_ok=False)
++    started = time.monotonic()
++    records = {r['crop']: r for r in rows(selection)}
++    seen = set()
++    def tasks():
++        batch, number = [], 0
++        for path in alignments:
++            for ar in rows(path):
++                key = crop_key(ar['crop'])
++                if key not in records:
++                    continue
++                if key in seen:
++                    raise ValueError('duplicate alignment ' + key)
++                seen.add(key)
++                batch.append((records[key], ar['alignment']))
++                if len(batch) == chunk_size:
++                    yield number, batch
++                    number += 1
++                    batch = []
++        if batch:
++            yield number, batch
++    settings = (str(out), str(crop_root), layout, log_lines)
++    receipts = []
++    if workers == 1:
++        initialise(settings)
++        for task in tasks():
++            receipts.append(chunk(task))
++    else:
++        with mp.get_context('spawn').Pool(workers, initializer=initialise, initargs=(settings,)) as pool:
++            for receipt in pool.imap_unordered(chunk, tasks(), chunksize=1):
++                receipts.append(receipt)
++                print(f'DETECTOR_SHARD {len(receipts)} complete; lines={receipt["lines"]}', flush=True)
++    assert seen == set(records), f'missing alignments: {len(set(records)-seen)}'
++    receipt = dict(schema='l1-detector-windows-v1', complete=True, lines=len(records),
++        selection_sha256=sha256(selection), alignment_sha256={str(p): sha256(p) for p in alignments},
++        workers=workers, elapsed_seconds=time.monotonic()-started,
++        detector_cpu_seconds=sum(r['detector_seconds'] for r in receipts),
++        window_cpu_seconds=sum(r['window_seconds'] for r in receipts),
++        windows=sum(r['windows'] for r in receipts), shards=sorted(receipts, key=lambda r:r['shard']))
++    write_json(out / 'detector_receipt.json', receipt)
++    return receipt
++
++
++def main():
++    ap = argparse.ArgumentParser(description=__doc__)
++    for name in ('selection', 'out', 'crop-root'):
++        ap.add_argument('--' + name, type=Path, required=True)
++    ap.add_argument('--alignments', type=Path, nargs='+', required=True)
++    ap.add_argument('--layout', choices=['toolkit', 'e3'], required=True)
++    ap.add_argument('--workers', type=int, default=64)
++    ap.add_argument('--mock', action='store_true')
++    a = ap.parse_args()
++    if a.mock:
++        assert len(list(rows(a.selection))) <= 192 and a.workers == 1
++    else:
++        assert os.environ.get('SLURM_JOB_ID'), 'bulk work requires a Slurm allocation'
++    print(canonical(run(a.selection, a.alignments, a.out, a.crop_root, a.layout, a.workers, log_lines=a.mock)), flush=True)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/labelfix/clariden/l1_infer.py b/scripts/labelfix/clariden/l1_infer.py
+index 0f043f60..601b8806 100644
+--- a/scripts/labelfix/clariden/l1_infer.py
++++ b/scripts/labelfix/clariden/l1_infer.py
+@@ -9,6 +9,7 @@ import numpy as np
+ import torch
+ 
+ from greekocr.labelfix.release_gate import compose_runtime
++from greekocr.labelfix.ctc_align import recognition_fields
+ from scripts.labelfix.clariden.l1_common import canonical, rows, write_rows, write_json, sha256
+ from scripts.labelfix.clariden.r1_common import HEADS, LETTERS, compose
+ from scripts.labelfix.clariden.r1_model import MarkReader
+@@ -84,6 +85,7 @@ def run(data, checkpoint, out, device, batch_size=512, log_lines=False):
+         combined = []
+         for i, r in enumerate(records):
+             rr = dict(r,status='ok',r1_predictions=list(byline[i].values()))
++            rr.update(recognition_fields(r))
+             rr['modes']={mode:compose_runtime(rr,mode) for mode in ('PRESENCE','FULL')}
+             combined.append(rr)
+             if log_lines:
+diff --git a/scripts/labelfix/clariden/l1e_measure.py b/scripts/labelfix/clariden/l1e_measure.py
+index 21092295..caacc3fc 100644
+--- a/scripts/labelfix/clariden/l1e_measure.py
++++ b/scripts/labelfix/clariden/l1e_measure.py
+@@ -16,6 +16,7 @@ from greekocr.labelfix.text import nfd,clusters,strip_marks
+ from greekocr.labelfix.reading import LineReading,MARKS
+ from greekocr.labelfix.linemetric import mark_set
+ from greekocr.labelfix.release_gate import MODES,serialize,compose_runtime,edit_guard,policy_binding
++from greekocr.labelfix.ctc_align import recognition_fields
+ from scripts.labelfix.clariden.r1_common import rows,sha256,write_json,write_rows
+ from scripts.labelfix.clariden.l1e_run import decision_record
+ 
+@@ -66,6 +67,7 @@ def saved_runtime(line,meta,predictions):
+         opening_quotes=deepcopy(line.get('opening_quotes',[])),constraint_flags=deepcopy(line.get('reading_flags',[])))
+     if meta['recogniser_text']!=line['recogniser_text']:raise ValueError('recogniser identity mismatch')
+     return dict(id=line['line_id'],recogniser_text=line['recogniser_text'],recogniser_nfd=line['recogniser_text'],
++        **recognition_fields(meta),
+         detector=serialize(raw),coverage=meta['coverage'],font_size=meta['font_size'],r1_predictions=predictions['A'],
+         peer_predictions={a:predictions[a] for a in ('B','E')},peer_coverage={a:meta['coverage'] for a in ('B','E')})
+ 
+diff --git a/scripts/labelfix/clariden/l1e_run.py b/scripts/labelfix/clariden/l1e_run.py
+index dcd7d32e..469ad106 100644
+--- a/scripts/labelfix/clariden/l1e_run.py
++++ b/scripts/labelfix/clariden/l1e_run.py
+@@ -12,6 +12,7 @@ from scripts.labelfix.clariden.r1_model import MarkReader
+ from scripts.labelfix.clariden.r1_common import ARMS, LETTERS, rows, sha256, write_json, write_rows
+ from scripts.labelfix.clariden.l1e_windows import audit,checked,shard_inputs
+ from greekocr.labelfix.release_gate import policy_binding, compose_runtime, MODES
++from greekocr.labelfix.ctc_align import recognition_fields
+ 
+ 
+ def load_reader(checkpoint,arm,digest,device):
+@@ -74,6 +75,7 @@ def infer(historical,window_audit,checkpoints,out,code_hashes,device='cuda:0',ba
+             combined=[]
+             for i,r in enumerate(records):
+                 rr={k:v for k,v in r.items() if k!='modes'}
++                rr.update(recognition_fields(r))
+                 rr.update(peer_predictions={a:byline[a][i] for a in models},peer_coverage={a:r['coverage'] for a in models})
+                 combined.append(rr)
+             partial=dest.with_name(dest.name.replace('.jsonl.gz','.partial.jsonl.gz'))
+diff --git a/scripts/labelfix/clariden/r1_extract.py b/scripts/labelfix/clariden/r1_extract.py
+index eafea45f..d561b1cb 100644
+--- a/scripts/labelfix/clariden/r1_extract.py
++++ b/scripts/labelfix/clariden/r1_extract.py
+@@ -55,7 +55,9 @@ def extract_line(record, alignment, image, validation=False, evaluation=False):
+             continue
+         losses['vowel_rho_slots'] += 1
+         reason = None
+-        if alignment.get('confidence',0) < .5:
++        if alignment.get('confidence') is None:
++            reason = 'line_confidence_missing'
++        elif alignment['confidence'] < .5:
+             reason = 'line_confidence_below_0.5'
+         span = spans[c.start][3:5]
+         if reason is None:
+diff --git a/scripts/labelfix/m2_run.py b/scripts/labelfix/m2_run.py
+index 53d34b35..e0d5d949 100644
+--- a/scripts/labelfix/m2_run.py
++++ b/scripts/labelfix/m2_run.py
+@@ -125,7 +125,8 @@ def infer_line(identifier, image, alignment, detector_model, reader_model, *, sc
+     pred = reader_predictions(reader_model, ss, wide)
+     raw = reading.read_ink(ink.analyse(image), text, alignment, detector_model, filtered=False)
+     runtime = dict(id=identifier, status='ok', recogniser_text=nfc(text), recogniser_nfd=text,
+-        recognition_confidence=alignment.confidence, detector=serialize(raw),
++        recognition_confidence=alignment.confidence, image_width=image.width,
++        recognition_evidence=alignment.recognition_evidence(raw.slots,image.width), detector=serialize(raw),
+         r1_predictions=list(pred.values()), coverage=coverage, font_size=size, extraction_counts=dict(losses))
+     runtime['modes']={mode:compose_runtime(runtime,mode) for mode in ('PRESENCE','FULL')}
+     return runtime
+@@ -285,10 +286,14 @@ def replay_detector(substitutions, output, script_classes):
+         ar=als[identifier];assert ar['crop_sha256']==sha(item['crop'])
+         assert original['crop_sha256'][identifier]==ar['crop_sha256']
+         with Image.open(item['crop']) as image:
+-            raw=reading.read_ink(ink.analyse(image),ar['alignment']['prediction'],Alignment.from_record(ar['alignment']),model,
++            alignment=Alignment.from_record(ar['alignment'])
++            raw=reading.read_ink(ink.analyse(image),ar['alignment']['prediction'],alignment,model,
+                                  filtered=False,substitutions=substitutions)
++            score_evidence=alignment.recognition_evidence(raw.slots,image.width)
++            image_width=image.width
+         run={k:v for k,v in prior.items() if k not in ('detector','modes')}
+-        run.update(detector=serialize(raw),script_scope=annotation)
++        run.update(detector=serialize(raw),script_scope=annotation,image_width=image_width,
++                   recognition_confidence=alignment.confidence,recognition_evidence=score_evidence)
+         run['modes']={mode:compose_runtime(run,mode) for mode in ('PRESENCE','FULL')}
+         result.append(run)
+     write_rows(output/'runtime.jsonl',result)
+diff --git a/tests/labelfix/test_sf6.py b/tests/labelfix/test_sf6.py
+index 424c42fb..3888d0f2 100644
+--- a/tests/labelfix/test_sf6.py
++++ b/tests/labelfix/test_sf6.py
+@@ -25,6 +25,7 @@ def rich(text):
+     """Explicitly scored, fully observed fixture; never production evidence."""
+     rt=synthetic(text)
+     rt['recognition_confidence']=.9
++    rt['image_width']=1000
+     for i,s in enumerate(rt['detector']['slots']):
+         s.update(locator_span=[10+i*10,18+i*10],word_final=True)
+         s['evidence'].update(window=[8+i*10,20+i*10],above=[],below=[],apostrophes=[],
+@@ -32,6 +33,9 @@ def rich(text):
+             observation={z:'OBSERVED' for z in ('above','below','left','right')})
+     for cov in [rt['coverage'],*rt['peer_coverage'].values()]:
+         for c in cov:c['span']=[10+c['start']*10,18+c['start']*10]
++    from greekocr.labelfix.ctc_align import Alignment
++    rt['recognition_evidence']=Alignment(text,n_frames=250,confidence=.9,
++        frame_confidences=[.9]*250).recognition_evidence(rt['detector']['slots'],1000)
+     return rt
+ 
+ 

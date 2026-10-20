@@ -1,5 +1,5 @@
 """Readability and OCR relevance of a line crop (owner 8 Oct 16:40), from the glyph tools' measurements and limits
-calibrated on synthetic strips read by an OCR model (CLLG; docs/GLYPHS_CALIBRATION.md).
+calibrated on synthetic strips read by an OCR model (CLLG; docs/records/glyphs/GLYPHS_CALIBRATION.md).
 
 Per column segment the main line is judged; along x, each column is over a limit when:
   accent_cut  > LIMITS['accent_cut']   share of the accent / tall-letter zone (ascender line → mean line) cut by the top
@@ -25,7 +25,7 @@ from greekocr.glyphs.letters import letter_boxes
 
 __all__ = ['LIMITS', 'READER_LIMITS', 'Readability', 'readability']
 
-# Limits from 1,760 synthetic strips (40 base texts × 44 conditions) read by two OCR models (docs/GLYPHS_CALIBRATION.md,
+# Limits from 1,760 synthetic strips (40 base texts × 44 conditions) read by two OCR models (docs/records/glyphs/GLYPHS_CALIBRATION.md,
 # 8 Oct). Rule: the first measured bin whose median CER leaves the reader's clean band. Provenance per value (CP-G4 F4):
 #   cllg accent_cut .3, top_cut .05, bottom_cut .1  — measured crossings (adverse bins rest on ~6 base texts: thin)
 #   cllg tail_cut None — no measured tail bin left the band (0.6–1.0 bins: median NFC .032–.047); no limit established

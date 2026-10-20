@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 from .type_lattice import analyze as lattice, point_ownership, inspect_slot
 from .type_tables import analyze as tables
-from .type_ink_ownership import analyze as ownership
+from .ink_ownership import analyze as ownership
 from .type_completion import snap_components
 from .type_barriers import protect
 from .geometry import roi,mask
@@ -30,14 +30,16 @@ def ink_ownership(gray,polygon,items,h):
 
 
 def run(gray,items,detector,*,version=1,skip_initial_separator=False,
-        final_separators=True,grid_items=None,lattice_evidence=None,excluded_regions=()):
+        final_separators=True,grid_items=None,lattice_evidence=None,dense_slots=None,excluded_regions=(),tone_samples=None,glyph_samples=()):
     """Recover using current ownership and an optional distinct grid view.
 
     `grid_items` has one quadrilateral per current item in exactly the same order.
     It estimates pitch only; actual `items` own ink, including curved ribbons.
     `excluded_regions` are rejected polygons/items (or [x0,y0,x1,y1] rectangles).
     Precomputed lattice must describe this same grid/current pair; its cost is
-    caller-owned. The stack can skip both Q8 calls and apply its shared separator.
+    caller-owned. Dense slots belong to this same immutable image and version-3
+    measurement; changed slot coordinates trigger fresh measurement. Ownership is
+    always assessed against current polygons. The stack owns both Q8 passes.
     """
     start=perf_counter();sep=None if skip_initial_separator else separators(gray,items)
     current=list(items if sep is None else sep['items']);after_sep=perf_counter()
@@ -61,7 +63,13 @@ def run(gray,items,detector,*,version=1,skip_initial_separator=False,
     if version>=4:
         confirmed=[]
         for idx,s in runnable:
-            dense=inspect_slot(gray,s,current,dense=True,version=3);dense_checks.append(dict(slot=idx,evidence=dense))
+            dense=(dense_slots[1].get(idx) if dense_slots is not None and dense_slots[0] is gray else None)
+            reuse=dense is not None and all(dense[k]==s[k] for k in ('height','y','x0','x1','xref','slope'))
+            if reuse:
+                owned=point_ownership(dense['body_centres'],current)
+                dense=dict(dense,owned_centres=owned,owned_fraction=float(np.mean(owned)) if owned else 0.)
+            else:dense=inspect_slot(gray,s,current,dense=True,version=3)
+            dense_checks.append(dict(slot=idx,evidence=dense,reused=bool(reuse)))
             if dense['supported'] and dense['owned_fraction']<.25:confirmed.append((idx,dense))
             else:decisions.append(dict(slot=idx,reason='original-pixel contact or ownership disagrees'))
         runnable=confirmed
@@ -69,7 +77,7 @@ def run(gray,items,detector,*,version=1,skip_initial_separator=False,
         table=tables(gray,current,route='explicit',version=5 if version>=3 else 4)
         if version>=2:
             regions=[[s['x0'],s['y']-s['height'],s['x1'],s['y']+s['height']] for _,s in runnable]
-            layers=ownership(gray,current,regions,detail=True)
+            layers=ownership(gray,current,regions,detail=True,tone_samples=tone_samples,glyph_samples=glyph_samples)
     back_slots={runnable[j][0] for j in layers['suppress_indices']} if layers else set()
     for idx,s in runnable:
         h=s['height'];y=s.get('measured_y',s['y']);xm=s['xref']

@@ -1,0 +1,1 @@
+Read the boxed letter from word_image and line_image. Choose one option letter for each head from the mappings in items.jsonl. Do not transcribe words. Write answers.jsonl in item order using answer_schema.json.

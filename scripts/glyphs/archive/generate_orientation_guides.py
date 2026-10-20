@@ -4,6 +4,7 @@ No fitting or decision thresholds are learned here. Existing research images
 are never rewritten. PNG rotations are exact; composite resizes are recorded.
 """
 from __future__ import annotations
+from greekocr.ops.data_root import input_path as _data_input
 import argparse
 import hashlib
 import json
@@ -18,7 +19,7 @@ OUT=ROOT/'.astra/out/orientation_eval'
 REAL='s2-6419488b7f8e69fd20da-p00001'
 
 
-def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
+def sha(path):return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
 
 
 def generate(out=OUT):
@@ -43,7 +44,7 @@ def generate(out=OUT):
             ('prose','s2-3229200bf47ca465a42d-p00004',[100,540,1320,990]),
             ('label','an-d6fd2cf2f618-p000047',[130,328,550,390]),
             ('label','s2-3229200bf47ca465a42d-p00004',[105,546,600,642])]
-    for p in sorted((ROOT/'docs/tables/annotations').glob('*.json')):
+    for p in sorted((ROOT/'docs/records/tables/annotations').glob('*.json')):
         annotation=json.loads(p.read_text())
         if annotation['key']==REAL:continue  # already contains several readings
         if annotation.get('tables'):

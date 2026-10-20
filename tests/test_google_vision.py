@@ -230,6 +230,7 @@ def test_engine_run_builds_both_readings_and_deduplicates_anemi(tmp_path, monkey
     from greekocr.readers.services.google_docai import DocAIReader, DEFAULT_VERSION
     directory = tmp_path / 'catalogue'
     shutil.copytree(Path(__file__).parent / 'data/docai_failed_lines', directory)
+    directory.chmod(0o700)
     (directory / 'page_comments.json').write_text(json.dumps(dict(effects={'multi_line_segment':'two lines'}, records=[])))
     out = tmp_path / 'reports'
     monkeypatch.setattr(audit, 'ALLOW_ANEMI', True)
@@ -259,6 +260,7 @@ def test_permission_error_stops_full_runner_and_writes_partial_receipt(tmp_path,
     import shutil
     directory = tmp_path / 'catalogue'
     shutil.copytree(Path(__file__).parent / 'data/docai_failed_lines', directory)
+    directory.chmod(0o700)
     (directory / 'page_comments.json').write_text(json.dumps(dict(effects={'multi_line_segment':'two lines'}, records=[])))
     out, calls = tmp_path / 'reports', []
     def failed(*a, **k):

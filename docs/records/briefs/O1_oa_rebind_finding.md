@@ -1,0 +1,16 @@
+# O1 — Open Archives provenance finding: re-bind the existing wave-4 items (gpt-6.1-sol, xhigh, network ON, no spend, ≤ 1 hour)
+
+Workspace: this worktree `~/Projects/greek-ocr-toolkit-sol-inventory`; output dir `docs/records/harvest/oa_rebind_v1/` only. Other Sol runs are active in the `greek-ocr-toolkit-sol-funnel-*` worktrees: read their files, never write there.
+
+## Finding to measure
+F1-GR (`~/Projects/greek-ocr-toolkit-sol-funnel-gr/docs/harvest/funnel_v1/gr/`, see FUNNEL.md "Open Archives: identity, hosts and physical construction", `receipts/oa-projection-rebinding.json`, `receipts/hf-link-table.json`, `receipts/oa-catalogue-rebinding/`) found that the 15 Oct cached Open Archives text-shard metadata projection pairs titles, dates, collections and direct-PDF links that do not belong together (60 fresh PDFs map to 5 collections, not the 10 projection labels; 48/60 titles re-verified from the repositories' own catalogue pages). The existing collection's wave 4 (Open Archives modern scans, 15 Oct; `~/Projects/greek-ocr-toolkit/docs/harvest/openarchives/{books.json,candidates.json,inventory.json,records.jsonl,admitted.jsonl,holdout_books.json,acquisitions/,identity_audit.json}` and `~/Projects/greek-ocr-toolkit/docs/harvest/collection/{data_provenance.json,manifest_*.json,import_real_*.jsonl}` + `collection/v2/`) was selected and recorded from that kind of metadata. Read-only on all of these.
+
+## Do
+1. For every wave-4 book: take the PDF URL (and sha256 if recorded) actually downloaded; look it up in the fresh revision-pinned HF link table (exact canonical URL); record link-table collection_slug, external_link, edm_url, type. Compare with the recorded title, year/decade, collection, type. Classify: **consistent** / **collection mismatch** / **title mismatch** / **year mismatch** / **not in link table**.
+2. For mismatches (and a seeded random 20 of the consistent ones as a control), fetch the repository's own item page (≤ 1 request/s per host, contact User-Agent `greek-ocr-research/0.1 (foivos.karounos@gmail.com)`, robots honoured) and record the true title/date. Where the old pipeline_metadata fields (`ocr_success`, `page_count`, `polytonic_ratio`) were used for selection, say whether they belong to the downloaded document.
+3. Count affected **books and admitted lines per split (train / dev / test, v1 and v2)**, and say which downstream uses are affected: decade/period tags, source caps, holdout/test-book identity, edition dedupe, rights records. The page images and labels themselves are what was downloaded and read; the question is the metadata attached to them.
+4. Write a corrected binding table the data side can apply: `rebind.jsonl` (book id → fresh collection, title, year, URL, evidence, status). Do not modify any existing manifest.
+
+## Hand-off
+`docs/records/harvest/oa_rebind_v1/FINDING.md` (one-paragraph finding, the counts table per class and split, downstream effects, the apply procedure), `rebind.jsonl`, `receipts/`. Commit if git allows; otherwise leave a guarded commit helper. Last line exactly:
+`O1: done | wave4_books: <n> consistent: <n> mismatched: <n> (collection <n> title <n> year <n>) not_in_table: <n> | lines affected train/dev/test v2: <a>/<b>/<c> | test_books_affected: <n>`

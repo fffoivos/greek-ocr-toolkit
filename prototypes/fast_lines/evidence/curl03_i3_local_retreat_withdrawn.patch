@@ -1,0 +1,344 @@
+diff --git a/prototypes/fast_lines/shared/geometry_contacts.py b/prototypes/fast_lines/shared/geometry_contacts.py
+--- a/prototypes/fast_lines/shared/geometry_contacts.py
++++ b/prototypes/fast_lines/shared/geometry_contacts.py
+@@ -54,7 +54,7 @@
+     return dict(density=density,components=records,scale=[sx,sy],height=height,
+                 _centres=np.asarray([q['centre'] for q in records]).reshape(-1,2),
+                 _boxes=np.asarray([q['bbox'] for q in records]).reshape(-1,4),
+-                **({'labels': labels} if with_labels else {}))
++                **({'labels': labels,'stats':stats} if with_labels else {}))
+ 
+ 
+ def walk(signal, seed, step):
+diff --git a/prototypes/fast_lines/shared/geometry_envelopes.py b/prototypes/fast_lines/shared/geometry_envelopes.py
+--- a/prototypes/fast_lines/shared/geometry_envelopes.py
++++ b/prototypes/fast_lines/shared/geometry_envelopes.py
+@@ -37,7 +37,7 @@
+     return dict(height=h,lines=records,components=field['components'],seconds=perf_counter()-start,route=route,version=version)
+ 
+ 
+-def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_labels=False,map_bands=None,envelope_indices=None,field_cache=None,skip_ambiguous=False):
++def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_labels=False,map_bands=None,envelope_indices=None,field_cache=None,skip_ambiguous=False,column_evidence=None):
+     """Native contacts constrained by map ancestry, with competitors exposed.
+ 
+     The map supplies identity inside its observed extent, not a glyph envelope.
+@@ -94,16 +94,48 @@
+             # All routes keep the independently observed map identity. Native
+             # contacts provide extent; an uncorroborated tangent never does.
+             y=gaussian_filter1d(ay,max(1,.75*h/(x[1]-x[0])))
++        disagreement=float(np.max(abs(raw[inside]-ay[inside]))/h) if inside.any() else 0
++        shared=None
++        if (field_cache or {}).get('evidence') and not q.get('page_field'):
++            from .geometry_page_field import continuation
++            ev=field_cache['evidence'];bounds=[f['xs'] for f in ev['fields'] if f.get('curved') and f.get('xs')]
++            if bounds:
++                step=max(1,.25*h)
++                search=np.unique(np.r_[np.arange(max(0,min(v[0] for v in bounds)),x[0],step),x,
++                                        np.arange(x[-1]+step,min(gray.shape[1]-1,max(v[-1] for v in bounds)),step)])
++                shared=continuation(ev,anchor,search,column_evidence=column_evidence)
++                if shared is not None:
++                    prediction=np.asarray(shared['path'])[:,1];valid=np.isfinite(prediction)
++                    # Consume only the connected finite run containing the complete
++                    # observed anchor. Never remove a NaN and interpolate over its hole.
++                    runs=np.split(np.flatnonzero(valid),np.flatnonzero(np.diff(np.flatnonzero(valid))>1)+1)
++                    run=next((v for v in runs if len(v) and search[v[0]]<=anchor[0,0] and search[v[-1]]>=anchor[-1,0]),None)
++                    if run is None:shared=None
++                    else:
++                        xx=search[run];yy=prediction[run]
++                        left,right=anchor[0,0],anchor[-1,0]
++                        # Keep the original filtered observed path exactly. Only
++                        # outside it follows the common mesh, joined at each endpoint.
++                        cy=np.interp(xx,x,y)
++                        for edge,is_right in [(left,False),(right,True)]:
++                            offset=np.interp(edge,x,y)-np.interp(edge,xx,yy)
++                            use=xx>edge if is_right else xx<edge
++                            cy[use]=yy[use]+offset
++                        x,y=xx,cy;ay=cy.copy();seen=np.ones(len(x),bool)
++                        shared={k:v for k,v in shared.items() if k!='path'}
++                        shared['anchor_span']=[float(left),float(right)]
++                        shared['domain']=[float(x[0]),float(x[-1])]
+         eligible=(centres[:,0]>=x[0])&(centres[:,0]<=x[-1])&(abs(centres[:,1]-np.interp(centres[:,0],x,y))<.65*h)
+         contacts=[field['components'][k] for k in np.flatnonzero(eligible)]
+-        records.append(dict(line=i,path=np.c_[x,y].tolist(),reference=np.c_[x,ay].tolist(),observed=seen.tolist(),contacts=contacts,bbox=box,
+-            disagreement_h=float(np.max(abs(raw[inside]-ay[inside]))/h) if inside.any() else 0))
++        records.append(dict(line=i,path=np.c_[x,y].tolist(),reference=np.c_[x,ay].tolist(),observed=seen.tolist(),contacts=contacts,bbox=box,shared_continuation=shared,
++            disagreement_h=disagreement))
+     # The same physical glyph cannot independently belong to two row bands.
+     owners={};ambiguous=set()
+     for r in records:
+         x,y=np.array(r['path']).T
+         for c in r['contacts']:
+             cx,cy=c['centre'];d=abs(cy-np.interp(cx,x,y));owners.setdefault(c['id'],[]).append((d,r['line']))
++    ambiguous_ids={cid for cid,choices in owners.items() if len(choices)>1 and sorted(choices)[1][0]-sorted(choices)[0][0]<.25*h}
+     assigned={}
+     for cid,choices in owners.items():
+         choices.sort()
+@@ -111,7 +143,8 @@
+             ambiguous.update(i for _,i in choices)
+         assigned[cid]=choices[0][1]
+     for r in records:
+-        x,y=np.array(r['path']).T;box=r['bbox'];r['contacts']=[c for c in r['contacts'] if assigned[c['id']]==r['line']]
++        x,y=np.array(r['path']).T;box=r['bbox'];r['contacts']=[c for c in r['contacts'] if assigned[c['id']]==r['line'] or (r.get('shared_continuation') is not None and c['id'] in ambiguous_ids)]
++        r['ambiguous_components']=sorted(ambiguous_ids&{c['id'] for c in r['contacts']})
+         r['ambiguous']=r['line'] in ambiguous
+         contacts=r['contacts']
+         if version>=3:
+@@ -133,7 +166,7 @@
+         # Only contact-backed ends grow; no padding out to an unobserved tangent.
+         left=min(box[0],min(c['bbox'][0] for c in contacts)-.15*h);right=max(box[2],max(c['bbox'][2] for c in contacts)+.15*h)
+         r['owned']=len(contacts);r['extension_h']=[(box[0]-left)/h,(right-box[2])/h]
+-        if skip_ambiguous and r['ambiguous']:
++        if skip_ambiguous and r['ambiguous'] and r.get('shared_continuation') is None:
+             # The correction refuses these before examining an envelope. Keep
+             # the path/extension decision witness, skip only unused extrema.
+             r['polygon']=items[r['line']]['polygon'];r['envelope_skipped']='ambiguous contacts'
+@@ -168,7 +201,7 @@
+         r['polygon']=np.vstack([np.c_[x,lo],np.c_[x[::-1],hi[::-1]]]).tolist()
+         r['owned']=len(contacts);r['extension_h']=[(box[0]-left)/h,(right-box[2])/h]
+     return dict(height=h,lines=records,components=field['components'],seconds=perf_counter()-start,route=route,version=version,
+-                **({'_labels':field['labels']} if with_labels else {}))
++                **({'_labels':field['labels'],'_stats':field['stats']} if with_labels else {}))
+ 
+ 
+ def correct(gray,pm,items,original,*,scout=None,forbidden_regions=(),detail=False,map_bands=None,column_evidence=None,field_cache=None,universal=False):
+@@ -196,15 +229,16 @@
+             if r['y0']<=cy<=r['y1'] and b[0]-h<cx<b[2]+h:blocked=True;break
+         if not blocked:eligible.add(i)
+     if not eligible:return dict(items=items,changes=[],decisions=[],seconds=perf_counter()-t,trigger=True,eligible=[])
+-    evidence=guided(gray,pm,items,original,route='explicit',version=5,with_labels=True,map_bands=map_bands,envelope_indices=eligible,field_cache=field_cache,skip_ambiguous=True);labels=evidence.pop('_labels');h=evidence['height'];out=list(items);changes=[];decisions=[]
++    evidence=guided(gray,pm,items,original,route='explicit',version=5,with_labels=True,map_bands=map_bands,envelope_indices=eligible,field_cache=field_cache,skip_ambiguous=True,column_evidence=column_evidence);labels=evidence.pop('_labels');stats=evidence.pop('_stats');h=evidence['height'];out=list(items);changes=[];decisions=[]
+     for r in evidence['lines']:
++        shared=r.get('shared_continuation')
+         i=r['line'];q=items[i];p=r.get('polygon');reason=None
+         if not p or i not in eligible:continue
+         x,y=np.array(r['path']).T;b=bbox(q);inbox=(x>=b[0])&(x<=b[2]);a,sl=line_axis(q)
+         deviation=float(np.max(abs(y[inbox]-(a+sl*x[inbox])))/h) if inbox.any() else 0
+         if not universal and deviation<.3 and max(r.get('extension_h',[0]))<.5 and q.get('type_slot') is None:continue
+         if q.get('initial_completed'):reason='completed initial shoulder retained'
+-        elif r['ambiguous']:reason='competing row contacts'
++        elif r['ambiguous'] and shared is None:reason='competing row contacts'
+         elif any(counts[k]>1 for k in q.get('source_ids',[])):reason='separated source bounds retained'
+         # A smooth band cannot silently remove unique native ink (including
+         # small accents excluded from the body-component field).
+@@ -245,11 +279,24 @@
+             for c in r['contacts']:
+                 a,bb,z,w=c['bbox'];a=max(0,int(a-xx0-.2*h));bb=max(0,int(bb-yy0-.35*h));z=min(shape[1],int(np.ceil(z-xx0+.2*h)));w=min(shape[0],int(np.ceil(w-yy0+.2*h)))
+                 mine[bb:w,a:z]=1
+-            if np.any((new>0)&(old==0)&(other>0)&(mine==0)&ink):reason='new overlap with retained neighbor ink'
++            if shared is None:
++                if np.any((new>0)&(old==0)&(other>0)&(mine==0)&ink):reason='new overlap with retained neighbor ink'
++            else:
++                # The rectangle is not a competing row witness in this population.
++                # Test complete native components against actual witnessed phases.
++                obstructions=material_obstructions(r,evidence,field_cache['evidence'],labels,stats,new,old,origin,h,ink)
++                p,retreat=local_retreat(p,q,r,obstructions,labels,stats,h)
++                r['local_retreat']=retreat
++                r['component_decisions']=[{k:v for k,v in obj.items() if k!='points'} for obj in obstructions]
++                pb=np.asarray(p)
++                audit=owned_retention(gray,out,i,p,h,offrow,labels=labels,prepared=prepared)
++                if audit['lost_ink']:reason='local retreat cannot retain original unique ink'
++                elif p==q['polygon']:reason='local obstructions leave original support only'
++
+         if reason is None:
+             from .geometry_joinbarriers import inspect as rule_barriers
+             if rule_barriers(gray,p,h):reason='regional boundary remains unresolved'
+-        decision=dict(line=i,accepted=reason is None,reason=reason or 'smooth native contacts with unique ink retained',retention=audit,deviation_h=deviation)
++        decision=dict(line=i,accepted=reason is None,reason=reason or 'smooth native contacts with unique ink retained',retention=audit,deviation_h=deviation,shared_continuation=shared,local_retreat=r.get('local_retreat'))
+         decisions.append(decision)
+         if reason is None:
+             out[i]=dict(q,polygon=p,baseline=None,provenance='smooth native contact envelope')
+@@ -308,6 +355,7 @@
+     h=evidence['height'];count=Counter(k for q in items for k in q.get('source_ids',[]));pairs=[]
+     allcomps=evidence['components']
+     for r in evidence['lines']:
++        shared=r.get('shared_continuation')
+         i=r['line'];b=bbox(items[i]);owned={c['id'] for c in r['contacts']}
+         if r.get('ambiguous') or b[2]-b[0]<16*h:continue
+         x,y=np.array(r['path']).T
+@@ -321,3 +369,129 @@
+             pairs.append(dict(line=i,fragment=j,components=[c['id'] for c in cs],gap_h=gap/h))
+     counts=Counter(q['fragment'] for q in pairs)
+     return [q for q in pairs if counts[q['fragment']]==1]
++
++
++
++def material_obstructions(record,evidence,page_field,labels,stats,new,old,origin,h,ink):
++    """Collect whole local native obstructions; no component vetoes its row.
++
++    The regional ink contract is exactly the existing overlap guard's 3h
++    relative observation. Prepared page labels supply body witnesses only;
++    their different photometry is not substituted for the regional mask.
++    """
++    from .geometry_page_field import invert_points
++    state=record['shared_continuation'];f=page_field['fields'][state['field']]
++    peers=[r for r in evidence['lines'] if r.get('shared_continuation') and
++           r['shared_continuation']['field']==state['field'] and len(r['contacts'])>=4]
++    phases=np.array([r['shared_continuation']['phase'] for r in peers])
++    own={c['id'] for c in record['contacts']};ambiguous=set(record.get('ambiguous_components',[]))
++    n,lab,st,_=cv2.connectedComponentsWithStats(ink.astype(np.uint8),8)
++    x0,y0=origin;local=labels[y0:y0+new.shape[0],x0:x0+new.shape[1]]
++    ids=np.unique(lab[(new>0)&(old==0)&ink]);objects=[]
++    for k in ids:
++        if not k:continue
++        a,b,w,z,area=st[k];yy,xx=np.nonzero(lab[b:b+z,a:a+w]==k)
++        points=np.c_[xx+a+x0,yy+b+y0];strong=set(map(int,np.unique(local[yy+b,xx+a])))-{0}
++        reason=None
++        if a==0 or b==0 or a+w==new.shape[1] or b+z==new.shape[0]:reason='component meets finite observation boundary'
++        elif not len(phases):reason='no material body witnesses'
++        else:
++            p=invert_points(np.asarray(f['xs']),np.asarray(f['knots']),np.asarray(f['mesh']),points)
++            if not np.isfinite(p).all():reason='unknown inverse component support'
++            else:
++                distance=abs(p[:,None]-phases);nearest=distance.argmin(1)
++                tied=(distance==distance.min(1)[:,None]).sum(1)>1
++                if tied.any() or not np.all(nearest==nearest[0]):reason='component crosses witnessed material rows'
++                elif peers[int(nearest[0])]['line']!=record['line']:reason='witnessed neighboring body'
++                elif not strong or not strong<=own or strong&ambiguous:reason='unresolved body or mark identity'
++        objects.append(dict(component=int(k),bbox=[float(a+x0),float(b+y0),float(a+w+x0),float(b+z+y0)],
++                            reason=reason,state='own' if reason is None else 'obstruction',
++                            strong_components=sorted(strong),points=points))
++    return objects
++
++
++def local_retreat(polygon,item,record,objects,labels,stats,h):
++    """Retreat the existing envelope around finite whole-component support.
++
++    Only an obstruction's own x stretch can retain old support. If neither
++    boundary can pass it, stop that end without hopping to farther contacts.
++    Actual polygon geometry, not an exception mask, goes to final consumers.
++    """
++    from shapely.geometry import Polygon,box
++    from .geometry_bands import crop_mask
++    original=Polygon(item['polygon']);shape=Polygon(polygon)
++    if not shape.is_valid:shape=shape.buffer(0)
++    anchor=record['shared_continuation']['anchor_span'];pad=.12*h
++    own=[q for q in objects if q['state']=='own'];blocked=[q for q in objects if q['state']=='obstruction'];audit=[]
++    def hits(poly,points):
++        if not len(points) or poly.geom_type!='Polygon':return np.zeros(len(points),bool)
++        a,b=points.min(0).astype(int);c,d=points.max(0).astype(int)+1
++        mask=crop_mask((d-b,c-a),dict(polygon=list(poly.exterior.coords)[:-1]),(a,b))>0
++        return mask[points[:,1].astype(int)-b,points[:,0].astype(int)-a]
++    # A local old-shape retreat may retain an inherited partial component,
++    # but may not acquire a new partial glyph. Freeze this population once.
++    def valid(poly):
++        return poly.geom_type=='Polygon' and not poly.interiors and not poly.is_empty
++    def conserve(poly):
++        pending=list(own);restored=set()
++        while valid(poly):
++            changed=False
++            for q in pending:
++                hit=hits(poly,q['points']);before=hits(original,q['points'])
++                if hit.all() or np.array_equal(hit,before) or not hit.any():continue
++                key=q['component']
++                if key in restored:return None
++                restored.add(key);a,_,c,_=q['bbox'];bounds=poly.bounds
++                strip=box(a-pad,bounds[1]-h,c+pad,bounds[3]+h)
++                poly=poly.difference(strip).union(original.intersection(strip))
++                changed=True;break
++            if not changed:return poly
++        return None
++    def order(q):
++        a,_,c,_=q['bbox'];return (max(anchor[0]-c,a-anchor[1],0),a)
++    for q in sorted(blocked,key=order):
++        a,b,c,d=q['bbox'];lo=a-pad;hi=c+pad
++        pts=q['points'];was=hits(original,pts);now=hits(shape,pts)
++        if not np.any(now&~was):continue
++        bounds=shape.bounds;strip=box(lo,bounds[1]-h,hi,bounds[3]+h)
++        # Keep only the already claimed portion of this local stretch. There is
++        # no first-to-last aggregation of separated contested components.
++        retained=original.intersection(strip)
++        options=[]
++        for side,obstacle in [('top',box(lo,bounds[1]-h,hi,d+pad)),
++                              ('bottom',box(lo,b-pad,hi,bounds[3]+h))]:
++            candidate=shape.difference(obstacle).union(retained)
++            candidate=conserve(candidate)
++            if candidate is not None and not np.any(hits(candidate,pts)&~was):
++                options.append((shape.symmetric_difference(candidate).area,side,candidate))
++        if options:
++            _,side,shape=min(options,key=lambda v:v[0]);action='boundary '+side
++        else:
++            candidate=shape.difference(strip).union(retained)
++            candidate=conserve(candidate)
++            if candidate is not None and not np.any(hits(candidate,pts)&~was):shape=candidate;action='old local support'
++            else:
++                # A connected end cannot pass the whole obstruction. Back up
++                # before any own component that the stop would otherwise cut.
++                if lo>=anchor[1]:
++                    edge=lo
++                    for own_q in own:
++                        l,_,r,_=own_q['bbox']
++                        if l<edge<r:edge=min(edge,l-pad)
++                    shape=shape.intersection(box(bounds[0]-h,bounds[1]-h,edge,bounds[3]+h));action='stop right'
++                elif hi<=anchor[0]:
++                    edge=hi
++                    for own_q in own:
++                        l,_,r,_=own_q['bbox']
++                        if l<edge<r:edge=max(edge,r+pad)
++                    shape=shape.intersection(box(edge,bounds[1]-h,bounds[2]+h,bounds[3]+h));action='stop left'
++                else:
++                    shape=original;action='anchor cannot connect safely'
++        audit.append(dict(component=q['component'],bbox=q['bbox'],reason=q['reason'],action=action,clearance=pad))
++    shape=conserve(shape)
++    if shape is None:return item['polygon'],audit
++    # Unknown connected topology cannot be represented by one OCR polygon.
++    # Preserve the existing row, never return an enclosing mask exception.
++    if shape.geom_type!='Polygon' or shape.interiors or shape.is_empty:return item['polygon'],audit
++    if shape.equals(original):return item['polygon'],audit
++    return list(shape.exterior.coords)[:-1],audit
+diff --git a/prototypes/fast_lines/shared/geometry_field_detector.py b/prototypes/fast_lines/shared/geometry_field_detector.py
+--- a/prototypes/fast_lines/shared/geometry_field_detector.py
++++ b/prototypes/fast_lines/shared/geometry_field_detector.py
+@@ -29,6 +29,7 @@
+ def run(gray,original,detector,*,column_evidence=None,evidence=None,excluded_regions=(),field_cache=None):
+     start=perf_counter();e=render(gray,original,column_evidence=column_evidence,route='slow',excluded_regions=excluded_regions,with_source=field_cache is not None) if evidence is None else evidence
+     source=e.pop('_source',None)
++    if field_cache is not None:field_cache['evidence']=e
+     if source is not None and not excluded_regions:
+         field_cache.update(height=e['height'],shape=gray.shape,prepared=source,native_full=True)
+     out=[];regions=[]
+diff --git a/prototypes/fast_lines/shared/geometry_page_field.py b/prototypes/fast_lines/shared/geometry_page_field.py
+--- a/prototypes/fast_lines/shared/geometry_page_field.py
++++ b/prototypes/fast_lines/shared/geometry_page_field.py
+@@ -217,3 +217,42 @@
+             (points[:,1]>=warped[0])&(points[:,1]<=warped[-1])&
+             np.all(np.diff(warped,axis=0)>0,axis=0))
+     return np.where(inside,knots[idx]+fraction*(knots[idx+1]-knots[idx]),np.nan)
++
++
++def continuation(evidence, anchor, x, *, column_evidence=None):
++    """Locate one observed row in the existing finite correspondence.
++
++    The anchor supplies position, never a new bend fit. Unknown inverse phases,
++    folds, unsupported end certificates and finite printed rules abstain. The
++    caller still has to witness native extent and retain/exclude actual ink.
++    """
++    from .geometry_field_detector import displacement
++    anchor=np.asarray(anchor,float);x=np.asarray(x,float);h=evidence['height']
++    possible=[]
++    for fid,f in enumerate(evidence.get('fields',[])):
++        if not f.get('curved') or 'mesh' not in f:continue
++        xs=np.asarray(f['xs']);knots=np.asarray(f['knots']);mesh=np.asarray(f['mesh'])
++        phase=invert_points(xs,knots,mesh,anchor)
++        if not np.isfinite(phase).all():continue
++        t=float(np.median(phase));residual=phase-t
++        if np.quantile(abs(residual),.9)>.65*h:continue
++        records=[r for r in f.get('certificate',[]) if r.get('coherent') and
++                 abs(f['rows'][r['row']]['seed']-t)<8*h]
++        if not records:continue
++        inside=(x>=xs[0])&(x<=xs[-1]);y=t+displacement(f,x,t)
++        inside&=np.isfinite(invert_points(xs,knots,mesh,np.c_[x,y]))
++        a,b,c,d=f['region'];inside&=(y>=b)&(y<=d)
++        # A full-height median-x cut is not a finite rule contract. Consume
++        # only the observed path and its stated native vertical span.
++        for r in (column_evidence or {}).get('rules',[]):
++            if not r.get('accepted'):continue
++            rule=r['rule'];path=np.asarray(rule['path']);cy=np.interp(anchor[:,1],path[:,1],path[:,0])
++            active=(anchor[:,1]>=rule['y0'])&(anchor[:,1]<=rule['y1'])
++            sides=np.sign(anchor[active,0]-cy[active])
++            if not len(sides):continue
++            if not np.all(sides==sides[0]) or sides[0]==0:inside[:]=False;break
++            at=(y>=rule['y0'])&(y<=rule['y1'])
++            edge=np.interp(y,path[:,1],path[:,0]);inside&=~at|((x-edge)*sides[0]>0)
++        possible.append(dict(field=fid,phase=t,path=np.c_[x,np.where(inside,y,np.nan)],
++                             residual_h=(residual/h).tolist(),sides=sorted({r['side'] for r in records})))
++    return possible[0] if len(possible)==1 else None

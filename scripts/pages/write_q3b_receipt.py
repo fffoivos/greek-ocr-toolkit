@@ -10,11 +10,12 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+from greekocr.ops.data_root import input_path as _data_input
 from scripts.pages.check_q3b_equality import ALLOWLIST
 
 
 def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
 
 
 def main():
@@ -106,7 +107,7 @@ def main():
         book_selection_sha256=sha(ROOT/'.astra/book_pages/selection.json'),
         page_receipts={r['page_key']:sha(directory/(r['page_key']+'.json')) for r in pages['pages']},
         book_receipt_sha256=sha(directory/'books-summary.json'))
-    destination = ROOT/'docs/reviews'
+    destination = ROOT/'docs/records/reviews'
     (destination/'PAGE_LINES_Q3B_EQUALITY.json').write_text(json.dumps(receipt,indent=2,allow_nan=False)+'\n')
     with (destination/'PAGE_LINES_Q3B_DIFFERENCES.json.gz').open('wb') as file:
         with gzip.GzipFile(fileobj=file,mode='wb',mtime=0) as stream:

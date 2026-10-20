@@ -1,0 +1,1 @@
+Stage B CPU mock: 2 native lines / 36 slots; alignment 0.3404 s, windows 0.0184 s, teacher 0.1985 s. Export processing wall 0.5895 s (model startup excluded); whole Stage B 0.7660 s; 3.39 lines/s on this Mac. No GH200 throughput inference.

@@ -1,0 +1,491 @@
+[
+  {
+    "path": "/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/docs/data_contracts.md",
+    "sha256": "060d8cdf9544fa6ace5c206c1716036a0fd1926c8c7c5105a253750d81e269c0",
+    "start": 185,
+    "end": 208,
+    "excerpt": "held-out-font distributions and adds training-only detector-crop augmentation with\nautomatic destroyed-mark label repair, a 20% Greek letterpress ink-transfer cohort,\nhistorical-font routing, and an independent 7% lunate-sigma label-and-image rewrite.\nValidation and reserved renders stay crop/rewrite-free. This records the v5 recipe's\ncustody; promotion as the production recipe of record still requires its own full\naudit run. C0's fixture smoke audit does not certify the 200,000-row v5 distribution.\n\n## Provenance\n\nBinding P1–P5, verbatim from the 7 October plan copy:\n\nP1 **No ad-hoc shard writers.** `o5_prepare.py`-style scripts stop writing training shards directly. Real crops enter through the\n   factory's ingest path so they get the same schema, `script_class` and word tags, and appear in the same audit.\nP2 **Every mix is a manifest.** A training/eval set is defined by `mix.json`: components = {factory build dir with `build_info.json`\n   (synthetic) | real shard set with sha256 and source-partition id}, fraction per component, seed, codec version, recipe_sha256 per\n   synthetic component. Training reads `mix.json` only; `--train-dir` on a loose directory is removed.\nP3 **The trainer refuses unprovenanced data.** `train.py` (and the detector trainer) fail closed unless every synthetic component's\n   `recipe_sha256` equals the sha256 of a recipe file that is **git-tracked at a committed revision** and `audit_ok` is true; the\n   realised marginals of the assembled mix are recomputed from the rows and written next to the checkpoint (`data_provenance.json`).\nP4 **Recipes are versioned, never edited in place.** A new distribution = `recipe.vN+1.json` + a one-paragraph change note in\n   `docs/data_contracts.md`; the disclose-recipe-changes rule applies to every training launch (table recipe vs previous run).\nP5 **Reviews check it.** Every checkpoint brief that gates training (CP-C1, CP-C4) lists P1–P4 as acceptance criteria; a run whose\n   checkpoint lacks `data_provenance.json` is not reportable.\n",
+    "scope": "current local source; historical identity checked separately"
+  },
+  {
+    "path": "/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/docs/ocr_program_2026-10-06/TRAINING_DIRECTIONS_20261016.md",
+    "sha256": "c919fc77ae3b70e114555af0aa81474fedb7f336292ba307fc8617468daabb09",
+    "start": 53,
+    "end": 55,
+    "excerpt": "### Track G — generator (recipe v6 as a declared bundle, then ablations)\nBundle: capital-mark policy by orthography (strip marks on Greek capitals except dialytika; keep language-specific marks for Latin/Cyrillic), bold/condensed/letter-spaced display faces for caps, grouped-number prose in old-style-numeral faces, light-on-dark 2% → 5% (exposure experiment), per-mark visibility gate audited on 2,000 paired lines. **Leaders need a new GT contract**: the page compositor draws table-of-contents dots with no recognition GT; a line-level leader generator with explicit dot-run targets and crop ownership is built and verified on rendered samples before exposure changes. Each variant verified for rendered marks, spacing, polarity and crop ownership.\n",
+    "scope": "current local source; historical identity checked separately"
+  },
+  {
+    "path": "/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/docs/ocr_program_2026-10-06/POST_CLEANUP_PROGRAMME_20261019.md",
+    "sha256": "d0c0422e0596f4621c114d622c6effa06b99665c1dca4c3c40341d059230b2fb",
+    "start": 1,
+    "end": 1,
+    "excerpt": "# After the clean-up: filtering rerun, recipe retest, benchmark, scaling (19 Oct 2026, coordinator review and plan)",
+    "scope": "current local source; historical identity checked separately"
+  },
+  {
+    "path": "/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/factory/src/build.rs",
+    "sha256": "108a8e1b28d60949e16aee80912d675c2c55e09df77a47aacb14f36aac60e08b",
+    "start": 75,
+    "end": 143,
+    "excerpt": "}\n\nfn build_one(job: &Job, recipe: &Recipe, codec: &Codec, fonts: &FontPool, ctx: &distort::OpCtx) -> Outcome {\n    let job = if recipe.text_policy.is_some() {\n        let mut changed = job.clone();\n        changed.line.gt_nfd = crate::text_policy::apply(&job.line).text;\n        std::borrow::Cow::Owned(changed)\n    } else { std::borrow::Cow::Borrowed(job) };\n    let job = job.as_ref();\n    let class = job.line.script_class.clone();\n    let nfc = Codec::render_form(&job.line.gt_nfd);\n    let elig = fonts.eligible(&nfc);\n    if elig.is_empty() {\n        return Outcome::Drop(\"no_eligible_font\", class);\n    }\n    let seed = xxh3_64_with_seed(\n        job.line.line_id.as_bytes(),\n        recipe.seed ^ ((job.reuse_index as u64) << 32),\n    );\n    let mut rng = ChaCha20Rng::seed_from_u64(seed);\n    // Old-form rows route to the historical cuts only — BOTH the degradation cohort (`letterpress`) and\n    // the INDEPENDENT lunate set (`lunate`) need the old glyphs. If none is eligible for this text (e.g. a\n    // code-switch line no historical font covers), fall back to the full eligible set (counted). The\n    // neither-flag path is byte-identical: `pool == &elig`, so the rng draw is unchanged.\n    let lp_pool: Vec<usize>;\n    let pool: &[usize] = if job.letterpress || job.lunate {\n        let hist: Vec<usize> = elig\n            .iter()\n            .copied()\n            .filter(|&i| recipe.ink_transfer.historical_fonts.iter().any(|s| s == &fonts.fonts[i].stem))\n            .collect();\n        if hist.is_empty() {\n            LP_FONT_FALLBACK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n            &elig\n        } else {\n            lp_pool = hist;\n            &lp_pool\n        }\n    } else {\n        &elig\n    };\n    let fi = pool[rng.gen_range(0..pool.len())];\n    let font = &fonts.fonts[fi];\n    // OLD-FORM: lunate-sigma treatment (owner: \"use final sigma\"). Applied to a row minted `lunate`\n    // (INDEPENDENT of the degradation cohort) — rewrite medial σ→ς in the GT ITSELF, so the render string\n    // AND the label both use ς (image == label — a faithful old-orthography variant, NOT a swap; ς is a\n    // codec atom). Two guards: the chosen font is a historical cut (else the fallback fired → wrong glyph),\n    // and TRAIN-ONLY (mirror `crop_this`, Fable F1) — the LABEL rewrite must never touch eval splits, so\n    // val/reserved stay a clean frozen-eval instrument (data_contracts §eval-cleanliness). No rng here: the\n    // `lunate` decision was the independent select-time draw.\n    let apply_lunate = job.lunate\n        && recipe.ink_transfer.historical_fonts.iter().any(|s| s == &font.stem)\n        && job.line.split == \"train\";\n    let (gt_nfd, nfc): (std::borrow::Cow<str>, std::borrow::Cow<str>) = if apply_lunate {\n        let g = job.line.gt_nfd.replace('σ', \"ς\");\n        let n = Codec::render_form(&g);\n        (std::borrow::Cow::Owned(g), std::borrow::Cow::Owned(n))\n    } else {\n        (std::borrow::Cow::Borrowed(job.line.gt_nfd.as_str()), std::borrow::Cow::Borrowed(nfc.as_str()))\n    };\n    let tracking = if job.letterspaced { rng.gen_range(0.08f32..0.18) } else { 0.0 };\n    let j = recipe.ink_fit_jitter;\n    let target_h = recipe.ink_target_h + if j > 0.0 { rng.gen_range(-j..=j) } else { 0.0 };\n    let y_jit = if j > 0.0 { rng.gen_range(-2.0f32..2.0) } else { 0.0 };\n\n    // crop augmentation is TRAIN-ONLY: eval splits (val/reserved, incl. transfer-dev) render clean so the\n    // retrain-vs-baseline CER comparison is on a consistent clean instrument (F2). want_marks follows.\n    let crop_this = recipe.crop.enabled && job.line.split == \"train\";\n    let rendered = match render_ink(font, &nfc, tracking, target_h, y_jit, &gt_nfd, crop_this) {",
+    "scope": "current local source; historical identity checked separately"
+  },
+  {
+    "path": "/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/factory/src/render.rs",
+    "sha256": "ec0e327af575899467fef5b3d013f476923e5f0137140caefa577bc6b486dcd5",
+    "start": 177,
+    "end": 205,
+    "excerpt": "/// Shape + rasterize `nfc` with font `f`. `tracking_em` adds letterspacing (gesperrt);\n/// `target_ink_h` = ink-band height in px (crop-normalized contract, ~40); `y_jitter` = vertical\n/// placement jitter in px (detector-crop interface-match augmentation).\npub fn render_ink(\n    f: &FontEntry,\n    nfc: &str,\n    tracking_em: f32,\n    target_ink_h: f32,\n    y_jitter: f32,\n    gt_nfd: &str,\n    want_marks: bool,\n) -> Result<RenderedStrip> {\n    let face = ttf_parser::Face::parse(&f.data, 0).map_err(|e| anyhow::anyhow!(\"{e}\"))?;\n    let mut rb = rustybuzz::Face::from_slice(&f.data, 0).context(\"rustybuzz face\")?;\n    rb.set_pixels_per_em(Some((PX_PER_EM as u16, PX_PER_EM as u16)));\n    let upem = face.units_per_em() as f32;\n    let scale = PX_PER_EM / upem;\n    let tracking_px = tracking_em * PX_PER_EM;\n\n    let mut buf = rustybuzz::UnicodeBuffer::new();\n    buf.push_str(nfc);\n    let glyphs = rustybuzz::shape(&rb, &[], buf);\n    let infos = glyphs.glyph_infos();\n    let poss = glyphs.glyph_positions();\n    if infos.iter().any(|i| i.glyph_id == 0) {\n        bail!(\"notdef glyph — font not eligible for this text\");\n    }\n\n    // pen positions in px (y-up for now), then find ink bbox to place baseline.",
+    "scope": "current local source; historical identity checked separately"
+  },
+  {
+    "path": "/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/factory/src/corpus.rs",
+    "sha256": "8b4ccb7ac79d5a1ac6f5b077293fd14a0e1890fc670b15244c52630e7dbe136a",
+    "start": 1,
+    "end": 20,
+    "excerpt": "//! Corpus ingest: JSONL line records -> quality-gated, codec-encodable, deduped candidate pool.\n//! Every rejection is ACCOUNTED (reason x source), never silent.\n\nuse crate::codec::Codec;\nuse crate::recipe::Recipe;\nuse anyhow::{Context, Result};\nuse serde::{Deserialize, Serialize};\nuse std::collections::HashMap;\nuse std::io::BufRead;\nuse xxhash_rust::xxh3::xxh3_64_with_seed;\n\npub const SPLIT_SALT: &str = \"greek-page-ocr/v1\";\n\nfn d_provenance() -> String {\n    \"born_digital\".into()\n}\n\n#[derive(Deserialize)]\nstruct RawLine {\n    text: String,",
+    "scope": "current local source; historical identity checked separately"
+  },
+  {
+    "path": "/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/bench/e1_prepare.py",
+    "sha256": "6db9f343462236cf04d563a4cced7935c74b219930b7f237e81d01d0cedb4fe4",
+    "start": 128,
+    "end": 153,
+    "excerpt": "    corpus = []\n    rejected = Counter()\n    train_texts = texts(selected['train'])\n    blocked_docs = set(assignment['val'] + assignment['reserved'])\n    def accept(raw, paired=False):\n        for key in ('text', 'source_dataset', 'source_doc_id', 'license'):\n            if key not in raw or not isinstance(raw[key], str) or not raw[key].strip():\n                raise ValueError(f'corpus provenance field required: {key}')\n        text = exclusion_text(normalize(raw['text'], folds))\n        if text in test_texts or raw['source_doc_id'] in blocked_docs:\n            rejected['test_text_or_heldout_document'] += 1\n        elif paired and (text not in train_texts or raw['source_doc_id'] not in assignment['train']):\n            rejected['non_train_paired_row'] += 1\n        else:\n            corpus.append(raw)\n    if not fixture:\n        for raw in read_rows(o5/'synth_corpus.jsonl'):\n            accept(raw, paired=True)\n    for path in corpora:\n        for raw in read_rows(path):\n            accept(raw)\n    if not corpus:\n        raise ValueError('no provenanced generator corpus; supply --corpus JSONL on the node')\n    write_rows(out/'corpus.jsonl', corpus)\n    run([factory, 'ingest', '--corpus', out/'corpus.jsonl', '--recipe', recipe, '--out', out/'pool.jsonl'])\n    pool = list(read_rows(out/'pool.jsonl'))",
+    "scope": "current local source; historical identity checked separately"
+  },
+  {
+    "path": "factory/src/build.rs",
+    "revision": "2e3cf6f2b68dfca94a8c4ae7403a6b61a37d8d7b",
+    "sha256": "d264cbfe00abe0b871092cb919b6e76f34b7bda081e82bb65d4d19894ccf0eff",
+    "prepare_sha256": "d264cbfe00abe0b871092cb919b6e76f34b7bda081e82bb65d4d19894ccf0eff",
+    "prepare_match": true,
+    "selected_lines": [
+      {
+        "line": 24,
+        "text": "/// eligible font set (still get `ink_transfer_v2`, just not a historical face). Surfaced in build_info."
+      },
+      {
+        "line": 77,
+        "text": "fn build_one(job: &Job, recipe: &Recipe, codec: &Codec, fonts: &FontPool, ctx: &distort::OpCtx) -> Outcome {"
+      },
+      {
+        "line": 80,
+        "text": "    let elig = fonts.eligible(&nfc);"
+      },
+      {
+        "line": 82,
+        "text": "        return Outcome::Drop(\"no_eligible_font\", class);"
+      },
+      {
+        "line": 91,
+        "text": "    // code-switch line no historical font covers), fall back to the full eligible set (counted). The"
+      },
+      {
+        "line": 98,
+        "text": "            .filter(|&i| recipe.ink_transfer.historical_fonts.iter().any(|s| s == &fonts.fonts[i].stem))"
+      },
+      {
+        "line": 111,
+        "text": "    let font = &fonts.fonts[fi];"
+      },
+      {
+        "line": 115,
+        "text": "    // codec atom). Two guards: the chosen font is a historical cut (else the fallback fired → wrong glyph),"
+      },
+      {
+        "line": 120,
+        "text": "        && recipe.ink_transfer.historical_fonts.iter().any(|s| s == &font.stem)"
+      },
+      {
+        "line": 129,
+        "text": "    let tracking = if job.letterspaced { rng.gen_range(0.08f32..0.18) } else { 0.0 };"
+      },
+      {
+        "line": 137,
+        "text": "    let rendered = match render_ink(font, &nfc, tracking, target_h, y_jit, &gt_nfd, crop_this) {"
+      },
+      {
+        "line": 161,
+        "text": "                if let Ok(nr) = render_ink(font, nb, 0.0, recipe.ink_target_h, 0.0, \"\", false) {"
+      },
+      {
+        "line": 177,
+        "text": "        if job.letterspaced {"
+      },
+      {
+        "line": 178,
+        "text": "            applied.push(\"letterspaced\".into());"
+      },
+      {
+        "line": 210,
+        "text": "                .and_then(|v| render_ink(font, v, 0.0, recipe.ink_target_h, 0.0, \"\", false).ok());"
+      },
+      {
+        "line": 275,
+        "text": "                font: font.stem.clone(),"
+      },
+      {
+        "line": 291,
+        "text": "                font: font.stem.clone(),"
+      },
+      {
+        "line": 325,
+        "text": "        anyhow::ensure!(!eval.fonts.is_empty(), \"eval-only fonts must be nonempty\");"
+      },
+      {
+        "line": 326,
+        "text": "        FontPool::stems_in(&recipe.fonts.dir)?.into_iter()"
+      },
+      {
+        "line": 327,
+        "text": "            .filter(|s| !eval.fonts.contains(s)).collect()"
+      },
+      {
+        "line": 328,
+        "text": "    } else { recipe.fonts.held_out.clone() };"
+      },
+      {
+        "line": 329,
+        "text": "    let fonts = FontPool::load(&recipe.fonts.dir, &excluded)?;"
+      },
+      {
+        "line": 331,
+        "text": "    eprintln!(\"[build] fonts loaded: {} | watermarks: {}\", fonts.fonts.len(), ctx.watermarks.len());"
+      },
+      {
+        "line": 363,
+        "text": "            .map(|j| build_one(j, recipe, codec, &fonts, &ctx))"
+      },
+      {
+        "line": 435,
+        "text": "            eprintln!(\"[build] WARN compute_marks could not isolate {skips} cluster(s) → undropable under the crop-repair (font-pool drift?)\");"
+      },
+      {
+        "line": 457,
+        "text": "    let font_meta: Vec<serde_json::Value> = fonts"
+      },
+      {
+        "line": 458,
+        "text": "        .fonts"
+      },
+      {
+        "line": 474,
+        "text": "        \"letterpress_font_fallbacks\": LP_FONT_FALLBACK.load(std::sync::atomic::Ordering::Relaxed),"
+      },
+      {
+        "line": 475,
+        "text": "        \"fonts\": font_meta,"
+      },
+      {
+        "line": 476,
+        "text": "        \"held_out_fonts\": recipe.fonts.held_out,"
+      },
+      {
+        "line": 500,
+        "text": "    let fonts = FontPool::load(&recipe.fonts.dir, &recipe.fonts.held_out)?;"
+      },
+      {
+        "line": 513,
+        "text": "        let elig = fonts.eligible(&nfc);"
+      },
+      {
+        "line": 517,
+        "text": "        let font = &fonts.fonts[elig[rng.gen_range(0..elig.len())]];"
+      },
+      {
+        "line": 518,
+        "text": "        let Ok(r) = render_ink(font, &nfc, 0.0, recipe.ink_target_h, 0.0, \"\", false) else { continue };"
+      },
+      {
+        "line": 591,
+        "text": "    let fonts = FontPool::load(&recipe.fonts.dir, &recipe.fonts.held_out)?;"
+      },
+      {
+        "line": 605,
+        "text": "        let elig = fonts.eligible(&nfc);"
+      },
+      {
+        "line": 606,
+        "text": "        anyhow::ensure!(!elig.is_empty(), \"no font for probe {name}\");"
+      },
+      {
+        "line": 607,
+        "text": "        let f = &fonts.fonts[elig[0]];"
+      },
+      {
+        "line": 612,
+        "text": "    let (probe, _font) = render_probe(\"poly\")?;"
+      },
+      {
+        "line": 701,
+        "text": "    let fonts = FontPool::load(&recipe.fonts.dir, &recipe.fonts.held_out)?;"
+      },
+      {
+        "line": 726,
+        "text": "        let elig = fonts.eligible(&nfc);"
+      },
+      {
+        "line": 733,
+        "text": "        let font = &fonts.fonts[fi];"
+      },
+      {
+        "line": 734,
+        "text": "        let tracking = if job.letterspaced { rng.gen_range(0.08f32..0.18) } else { 0.0 };"
+      },
+      {
+        "line": 738,
+        "text": "        let Ok(rendered) = render_ink(font, &nfc, tracking, target_h, y_jit, \"\", false) else { continue };"
+      },
+      {
+        "line": 760,
+        "text": "                    if let Ok(nr) = render_ink(font, nb, 0.0, recipe.ink_target_h, 0.0, \"\", false) {"
+      },
+      {
+        "line": 785,
+        "text": "            let vr = job.verso_nfc.as_deref().and_then(|v| render_ink(font, v, 0.0, recipe.ink_target_h, 0.0, \"\", false).ok());"
+      },
+      {
+        "line": 803,
+        "text": "            \"severity\": sev, \"font\": font.stem, \"bg\": job.bg_type,"
+      },
+      {
+        "line": 804,
+        "text": "            \"letterspaced\": job.letterspaced,"
+      }
+    ]
+  },
+  {
+    "path": "factory/src/render.rs",
+    "revision": "2e3cf6f2b68dfca94a8c4ae7403a6b61a37d8d7b",
+    "sha256": "ec0e327af575899467fef5b3d013f476923e5f0137140caefa577bc6b486dcd5",
+    "prepare_sha256": "ec0e327af575899467fef5b3d013f476923e5f0137140caefa577bc6b486dcd5",
+    "prepare_match": true,
+    "selected_lines": [
+      {
+        "line": 2,
+        "text": "//! face (no fallback — a .notdef glyph means the font is ineligible: the TeX-Gyre lesson), raster"
+      },
+      {
+        "line": 26,
+        "text": "    pub fonts: Vec<FontEntry>,"
+      },
+      {
+        "line": 31,
+        "text": "        let mut fonts = Vec::new();"
+      },
+      {
+        "line": 33,
+        "text": "            .with_context(|| format!(\"fonts dir {dir}\"))?"
+      },
+      {
+        "line": 48,
+        "text": "                Ok(f) => fonts.push(f),"
+      },
+      {
+        "line": 49,
+        "text": "                Err(e) => eprintln!(\"[fonts] SKIP {stem}: {e}\"),"
+      },
+      {
+        "line": 52,
+        "text": "        if fonts.is_empty() {"
+      },
+      {
+        "line": 53,
+        "text": "            bail!(\"no usable fonts in {dir}\");"
+      },
+      {
+        "line": 55,
+        "text": "        Ok(FontPool { fonts })"
+      },
+      {
+        "line": 58,
+        "text": "    /// All font stems (ttf/otf) present in `dir`, sorted. Used to INVERT `held_out` for the"
+      },
+      {
+        "line": 62,
+        "text": "            .with_context(|| format!(\"fonts dir {dir}\"))?"
+      },
+      {
+        "line": 78,
+        "text": "        self.fonts"
+      },
+      {
+        "line": 177,
+        "text": "/// Shape + rasterize `nfc` with font `f`. `tracking_em` adds letterspacing (gesperrt);"
+      },
+      {
+        "line": 194,
+        "text": "    let tracking_px = tracking_em * PX_PER_EM;"
+      },
+      {
+        "line": 198,
+        "text": "    let glyphs = rustybuzz::shape(&rb, &[], buf);"
+      },
+      {
+        "line": 202,
+        "text": "        bail!(\"notdef glyph — font not eligible for this text\");"
+      },
+      {
+        "line": 217,
+        "text": "    // ink bbox in y (font units via glyph bboxes)"
+      },
+      {
+        "line": 318,
+        "text": "/// the ink each mark ADDS. `scale2 = scale·fit` (font-units→px), `baseline` = px baseline row."
+      },
+      {
+        "line": 324,
+        "text": "    // font-units → px: render_ink's net position multiplier is scale·fit = scale2 (positions and"
+      },
+      {
+        "line": 325,
+        "text": "    // outlines share it), so shaped x_offset/x_advance (font units) scale by scale2 exactly like outlines."
+      },
+      {
+        "line": 334,
+        "text": "        let g = rustybuzz::shape(&rb, &[], buf);"
+      },
+      {
+        "line": 432,
+        "text": "/// under the crop-repair. Empirically 0 on the current pool; build.rs surfaces it so font-pool drift is visible (F9)."
+      },
+      {
+        "line": 439,
+        "text": "/// NFC of a char slice (fonts carry precomposed glyphs — match the strip's render form)."
+      },
+      {
+        "line": 477,
+        "text": "    let glyphs = rustybuzz::shape(&rb, &[], buf);"
+      },
+      {
+        "line": 480,
+        "text": "        bail!(\"notdef glyph — font not eligible for this cap\");"
+      },
+      {
+        "line": 534,
+        "text": "    // Gated (CROP_PROBE=1): measures, at the deepest legal top crop over the real font pool, how many"
+      },
+      {
+        "line": 541,
+        "text": "        let pool = FontPool::load(\"../assets/fonts\", &[]).expect(\"fonts\");"
+      },
+      {
+        "line": 554,
+        "text": "                let f = &pool.fonts[fi];"
+      }
+    ]
+  },
+  {
+    "path": "factory/src/select.rs",
+    "revision": "2e3cf6f2b68dfca94a8c4ae7403a6b61a37d8d7b",
+    "sha256": "24714cc17d658a5255e57c656fca6c73e835b8242a0330cd98c51084bbc7a322",
+    "prepare_sha256": "24714cc17d658a5255e57c656fca6c73e835b8242a0330cd98c51084bbc7a322",
+    "prepare_match": true,
+    "selected_lines": [
+      {
+        "line": 25,
+        "text": "    pub letterspaced: bool,"
+      },
+      {
+        "line": 97,
+        "text": "        letterspaced: greekish && rng.gen::<f64>() < recipe.letterspacing_fraction,"
+      },
+      {
+        "line": 145,
+        "text": "        s = s.to_uppercase(); // capital Milesian forms (Ϝ Ϙ Ϡ) as in headings/titles"
+      },
+      {
+        "line": 168,
+        "text": "            pick(rng, n).to_uppercase()"
+      },
+      {
+        "line": 212,
+        "text": "/// them with the HELD-OUT fonts (invert `recipe.fonts.held_out`) to make the set font-OOD. Bypasses the"
+      },
+      {
+        "line": 232,
+        "text": "    anyhow::ensure!((0.0..=1.0).contains(&eval.max_font_share), \"invalid eval font share\");"
+      }
+    ]
+  },
+  {
+    "path": "factory/src/corpus.rs",
+    "revision": "2e3cf6f2b68dfca94a8c4ae7403a6b61a37d8d7b",
+    "sha256": "8b4ccb7ac79d5a1ac6f5b077293fd14a0e1890fc670b15244c52630e7dbe136a",
+    "prepare_sha256": "8b4ccb7ac79d5a1ac6f5b077293fd14a0e1890fc670b15244c52630e7dbe136a",
+    "prepare_match": true,
+    "selected_lines": [
+      {
+        "line": 202,
+        "text": "                reject(&mut rep, \"unmapped_codepoint\", &raw.source_dataset);"
+      }
+    ]
+  },
+  {
+    "path": "bench/e1_prepare.py",
+    "revision": "2e3cf6f2b68dfca94a8c4ae7403a6b61a37d8d7b",
+    "sha256": "28a08f26875a2418cff927dfb193d411f60a4df9a9363418059e0b9b02328838",
+    "prepare_sha256": "28a08f26875a2418cff927dfb193d411f60a4df9a9363418059e0b9b02328838",
+    "prepare_match": true,
+    "selected_lines": []
+  },
+  {
+    "path": "docs/data_contracts.md",
+    "revision": "2e3cf6f2b68dfca94a8c4ae7403a6b61a37d8d7b",
+    "sha256": "9575138fcd50c4ddf6893696f6ddafb971b8245eefdb9f6a9961ed758c5295de",
+    "prepare_sha256": null,
+    "prepare_match": false,
+    "selected_lines": [
+      {
+        "line": 10,
+        "text": "  canonical ordering). Rendering uses NFC (fonts carry precomposed glyphs); labels never do."
+      },
+      {
+        "line": 20,
+        "text": "  the enumerated G0-3 folds below; any unmapped codepoint ⇒ the LINE is rejected at corpus ingest"
+      },
+      {
+        "line": 73,
+        "text": "| `font` | utf8 | font file stem |"
+      },
+      {
+        "line": 158,
+        "text": "| v7 (eval-only) | `4fbf257172cab1255fd068e37b1a6cac11b5f2fb84ecce83da0136a9150fb87f` | E1 clean synthetic held-out (held-out fonts; polytonic ≥300, Cyrillic ≥300) | this commit |"
+      },
+      {
+        "line": 163,
+        "text": "held-out-font distributions and adds training-only detector-crop augmentation with"
+      },
+      {
+        "line": 165,
+        "text": "historical-font routing, and an independent 7% lunate-sigma label-and-image rewrite."
+      },
+      {
+        "line": 330,
+        "text": "in `word_tags.jsonl`, keeping Parquet columns frozen. Severity=0, font=`real`, reuse=0;"
+      },
+      {
+        "line": 363,
+        "text": "and realised counts/fractions for script_class, severity, bg_type, polarity, font"
+      },
+      {
+        "line": 381,
+        "text": "three v5 held-out fonts and an explicit 0.85 maximum per-font share (the training"
+      },
+      {
+        "line": 382,
+        "text": "audit's 0.25 cap cannot apply to a three-font instrument). Crop augmentation and"
+      },
+      {
+        "line": 386,
+        "text": "on supply deficits, and audits all emitted reserved rows, fonts and minima."
+      },
+      {
+        "line": 389,
+        "text": "sources/fonts/strata fail rather than changing the recipe. The recipe must be"
+      }
+    ]
+  }
+]

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_coordinator_scores_replayed_for_all_400_saved_readings():
-    recorded = json.loads((ROOT/'docs/O4D_G1_measure_v1.json').read_text())
+    recorded = json.loads((ROOT/'docs/records/glyphs/O4D_G1_measure_v1.json').read_text())
     rows = []
     for row in recorded['rows']:
         scores = comparison_scores(row['layer'], row['old'], row['new'])

@@ -1,0 +1,330 @@
+"""FP3 allocation-free preparation. All writes confined to census_03/prepared build.
+
+No native inference, Slurm submission or census --execute. Original SQLite is
+opened immutable (its WAL is empty); it is never used as a writable ledger.
+"""
+import collections as C
+import difflib, gzip, hashlib, importlib.util, json, os, pathlib as P
+import re, shutil, sqlite3, sys, time
+
+R = P.Path('/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/filter_pipeline_20261018')
+E = R.parent
+A = R/'attempts/census_03'
+S = A/'sources'
+OLD = R/'code/d74ad2830c479f7b/projects'
+OLD_CONFIG = R/'prepared/d74ad2830c479f7b/census_w64_pf64.json'
+
+def canonical(x): return json.dumps(x, ensure_ascii=False, sort_keys=True, separators=(',',':'), allow_nan=False)
+def digest(x): return hashlib.sha256(x.encode()).hexdigest()
+def sha(p):
+    with P.Path(p).open('rb') as f: return hashlib.file_digest(f,'sha256').hexdigest()
+def dump(p,x):
+    p=P.Path(p); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(canonical(x)+'\n')
+def rows(p):
+    with (gzip.open(p,'rt') if str(p).endswith('.gz') else P.Path(p).open()) as f:
+        for n,line in enumerate(f,1):
+            if line.strip(): yield n,json.loads(line)
+def emit(s,x): s.write(canonical(x)+'\n')
+def log(x): print(x,flush=True)
+def ref(p,**kw): return dict(path=str(p),sha256=sha(p),**kw)
+
+config=json.loads(OLD_CONFIG.read_text())
+assert sha(OLD_CONFIG)=='897132a8d979bd8c0d35c5b8a9da6c7aa4144f38c5df7bbc93dc1a1246e086a0'
+source_receipt=json.loads((S/'source_receipt.json').read_text())
+for n,v in source_receipt.items(): assert sha(S/n)==v['sha256'],n
+oldtext=(OLD/'greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline.py').read_text()
+before='elif tool == "numerics" and not any(c in text for c in ".-·"):'
+after='elif tool == "numerics" and not re.search(r"\\d[.\\-·]\\d", text):'
+assert oldtext.count(before)==1
+recipe=dict(schema='fp3-build-v1',old_config=sha(OLD_CONFIG),old_code_manifest=sha(OLD/'SHA256SUMS'),
+    preparation_script=sha(__file__),sources=source_receipt,patch=dict(before=before,after=after),
+    test=sha(A/'test_numeric_adjacency.py'),owner='FP3 2026-10-19; W1/W2 unassigned; SF7 edits candidate_pre_audit')
+build=digest(canonical(recipe))[:16]
+B=R/'prepared'/build
+CODE=B/'code'/build/'projects'
+assert not B.exists(), 'refuse to overwrite a prepared fingerprint'
+B.mkdir(parents=True)
+dump(A/'build_recipe.json',recipe)
+dump(A/'paths.json',dict(build=build,prepared=str(B),projects=str(CODE)))
+log('build '+build)
+
+# Stat/hash custody receipt: no SQLite connection is opened without immutable=1.
+old_db=R/'attempts/census_02/census/ledger.sqlite'
+assert (old_db.parent/'ledger.sqlite-wal').stat().st_size==0
+protected={}
+for root in [R/'attempts/census_02',R/'prepared/d74ad2830c479f7b',R/'code/d74ad2830c479f7b']:
+    for p in sorted(root.rglob('*')):
+        if p.is_file() and not p.is_symlink():
+            st=p.stat();protected[str(p)]=dict(bytes=st.st_size,mtime_ns=st.st_mtime_ns,
+                sha256=sha(p) if st.st_size<100_000_000 else None)
+dump(A/'owner_before.json',protected)
+shutil.copytree(OLD,CODE)
+core=CODE/'greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline.py'
+core.write_text(oldtext.replace(before,after))
+dump(A/'numeric_patch.json',dict(old=sha(OLD/core.relative_to(CODE)),new=sha(core),before=before,after=after))
+(A/'numeric_fix.diff').write_text(''.join(difflib.unified_diff(oldtext.splitlines(True),core.read_text().splitlines(True),fromfile='census_02/line_pipeline.py',tofile='census_03/line_pipeline.py')))
+shutil.copyfile(A/'test_numeric_adjacency.py',CODE/'greek-ocr-toolkit-sol-recut/tests/test_fp3_numeric_adjacency.py')
+vpath=CODE/'greek-ocr-toolkit-sol-recut/docs/harvest/line_pipeline/tool_versions.json'
+v=json.loads(vpath.read_text())
+for name,t in v['tools'].items():
+    for p in t['components']: t['components'][p]=sha(CODE/p)
+    if name=='numerics':
+        t['components']['greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline.py']=sha(core)
+        t['scope']+='; FP3 exact digit-separator-digit candidate-negative patch; no correction gate change'
+    t['digest']=digest(json.dumps(t['components'],sort_keys=True,separators=(',',':')))
+v['build_patch']=dict(id='FP3-numeric-adjacency-v1',method_versions_unchanged=True,source_sha256=sha(core))
+dump(vpath,v)
+versions=v['tools']
+sys.path.insert(0,str(CODE/'greek-ocr-toolkit-sol-recut'))
+from greekocr.harvest.line_pipeline import identity, span_edits, validate_result, expectations, automatic_result, russian_eligible
+from greekocr.harvest.line_pipeline_sources import canonicalize
+from greekocr.harvest import admission as adm
+from greekocr.harvest.serbian import SERBIAN_DOCUMENTS,SERBIAN_EXTENSION_ATOMS
+from greekocr.harvest.line_pipeline_adapters import byte_edits
+db=sqlite3.connect('file:'+str(old_db)+'?mode=ro&immutable=1',uri=True)
+assert db.execute('select count(*) from observations').fetchone()[0]==592466
+
+# Read the literal frozen parents, keeping only identity/declared-class facts.
+parents={x['id']:x for x in config['parents']}
+parent_bindings={};bookdata={};pagedata={};aliases=C.defaultdict(set)
+for parent in config['parents']:
+    assert sha(parent['path'])==parent['sha256']
+    count=0
+    for n,r in rows(parent['path']):
+        count+=1
+        row=canonicalize(r,parent,{})
+        b=row['book_id']; pk=canonical([row['source'],b,row['page_id']])
+        if b not in bookdata:bookdata[b]=dict(sample=r,parent=parent['id'],line=n,classes=set(),splits=set(),rows=0)
+        x=bookdata[b];x['classes'].add(r.get('script_class',r.get('primary_class')));x['splits'].add(row['split']);x['rows']+=1
+        if pk not in pagedata:pagedata[pk]=dict(book=b,classes=set(),sample=r,line=n,parent=parent['id'],rows=0)
+        pagedata[pk]['classes'].add(r.get('script_class',r.get('primary_class')));pagedata[pk]['rows']+=1
+        if parent['format']=='collection-v2' and r.get('source_url'):
+            aliases[r['source_url'].rstrip('/')].add(b)
+    assert count==parent['rows']
+    parent_bindings[parent['id']]=dict(path=parent['path'],sha256=parent['sha256'],rows=count,split=parent.get('split','unassigned'))
+    log('parent verified '+parent['id']+' '+str(count))
+catalogues={};catalogue_refs={}
+for name in ['W1_manifest.jsonl','W2_manifest.jsonl','W1/resolved_manifest.jsonl','W2/resolved_manifest.jsonl']:
+    p=S/'collect-v3-data/run'/name
+    for n,r in rows(p):
+        key=(r['source'],r['item']); catalogue_refs.setdefault(key,[]).append(dict(file=str(p),line=n,record_sha256=digest(canonical(r)),page_id=r['id']))
+        catalogues[key]=r['item_record']
+cybooks=json.loads((S/'greek-ocr-toolkit/docs/harvest/cyrillic/books.json').read_text())
+cybooks={'cyrillic:'+r['key']:r for r in cybooks}
+policy_ref=dict(source='frozen admission.py:335-453 CENSUS3 source/class/document table',sha256=sha(CODE/'greek-ocr-toolkit-sol-recut/greekocr/harvest/admission.py'))
+plan_ref=dict(source='FP3 owner source declarations 2026-10-19; collection plan source table; ADM5 source policy',
+    plan_sha256=source_receipt['greek-ocr-toolkit-sol-collect/docs/harvest/COLLECTION_PLAN_v1.md']['sha256'])
+
+def expectation(r,classes):
+    if r.get('doc'):
+        policies=[adm.expected_policy(dict(r,script_class=c)) for c in sorted(classes)]
+        scripts=sorted(set(s for p in policies for s in p['expected_letters']))
+        langs=sorted(set(p['language'] for p in policies))
+        orth='polytonic' if 'greek_poly' in classes else 'monotonic' if 'greek_mono' in classes else 'unknown'
+        # Mixed classes have Greek + Latin declarations; wave/year is recorded source metadata.
+        if 'greek' in scripts and orth=='unknown':
+            orth='polytonic' if r.get('wave') in {'round1','round2','mixed','vouli','wikisource'} else 'monotonic'
+        if r['doc'] in cybooks:
+            cat=cybooks[r['doc']]; codes=cat['catalogue_language'];codes=[codes] if isinstance(codes,str) else codes
+            languages={'rus':'russian','Russian':'russian','bul':'bulgarian','eng':'english','srp':'serbian','Serbian':'serbian','ger':'german','lat':'latin'}
+            langs=sorted({languages[c] for c in codes})
+            if 'serbian' in langs: orth='modern' # Vuk/modern Serbian regime; no Russian terminal-hard-sign rule.
+            elif 'russian' in langs:orth='historical_russian' if cat['year']<1918 else 'modern'
+            else:orth='historical_bulgarian'
+        elif r['source']=='wikisource_ru':langs=['russian'];orth='historical_russian' if isinstance(r.get('year'),int) and r['year']<1918 else 'modern'
+        extra=dict(latin_policy='allowed' if 'latin' in scripts else 'mixed_class_or_minority' if scripts==['greek'] else 'none')
+        if r.get('doc') in SERBIAN_DOCUMENTS:extra['allowed_characters']=list(SERBIAN_EXTENSION_ATOMS)
+        provenance=policy_ref
+    else:
+        src=r['source'];scripts=['greek'];langs=['greek'];orth='polytonic';extra=dict(latin_policy='mixed_class_or_minority')
+        if src=='ia_greek_latin':scripts=['greek','latin'];langs=['greek','latin'];extra['latin_policy']='allowed'
+        elif src=='serbia':scripts=['cyrillic'];langs=['serbian'];orth='modern';extra=dict(latin_policy='none',allowed_characters=list(SERBIAN_EXTENSION_ATOMS))
+        elif src=='ia_russian':scripts=['cyrillic'];langs=['russian'];orth='historical_russian';extra=dict(latin_policy='none')
+        elif src=='gazette_modern':orth='monotonic' if r['year']>=1982 else 'polytonic'
+        elif src=='elstat':orth='numeric';extra['content_role']='numerics_tables'
+        elif src not in {'bsb_poly1850','ia_poly1850','nlg','kosmopolis','lekythos'}:raise ValueError(src)
+        provenance=plan_ref
+    return dict(languages=langs,scripts=scripts,orthography=orth,provenance=provenance,**extra)
+
+metadata=json.loads(P.Path(config['metadata']).read_text())
+original_crops_sha=digest(canonical(metadata['crops']))
+metadata.update(schema='fp3-book-page-metadata-v1',books={},pages={},provenance_sources=source_receipt)
+join_report=[]
+for b,x in sorted(bookdata.items()):
+    assert len(x['splits'])==1,(b,x['splits'])
+    r=x['sample']; declaration=expectation(r,x['classes']);split=next(iter(x['splits']))
+    provenance=dict(parent=parent_bindings[x['parent']],first_row=x['line'],first_record_sha256=digest(canonical(r)),
+        class_values=sorted(x['classes']),expectations=declaration['provenance'])
+    edition=b
+    if not r.get('doc'):
+        cat=catalogues[(r['source'],r['item'])]
+        provider='ia' if r['source'].startswith('ia_') else r['source'].replace('_poly1850','')
+        edition=provider+':'+str(r['item'])
+        urls=[cat.get(k) for k in ['source_url','url','manifest_url','catalogue_url'] if cat.get(k)]
+        if provider=='ia':urls.append('https://archive.org/details/'+r['item'])
+        matches=set().union(*(aliases.get(u.rstrip('/'),set()) for u in urls))
+        if len(matches)==1:edition=next(iter(matches))
+        elif len(matches)>1:raise ValueError('ambiguous v2 alias '+str(matches))
+        provenance.update(catalogue_records=catalogue_refs[(r['source'],r['item'])],catalogue=cat,edition_alias_matches=sorted(matches))
+    elif b in cybooks:provenance['catalogue']=cybooks[b]
+    declaration.update(edition_id=edition,split=split,source=r['source'],document_id=r.get('doc'),item=r.get('item'),year=r.get('year'),
+        classes=sorted(x['classes']),field_provenance={k:provenance for k in ['edition_id','split','languages','scripts','orthography','source','document_id','item','year']})
+    metadata['books'][b]=declaration
+    join_report.append(dict(book_id=b,edition_id=edition,split=split,rows=x['rows'],source=r['source'],item=r.get('item'),classes=sorted(x['classes'])))
+for pk,x in sorted(pagedata.items()):
+    r=x['sample'];d=expectation(r,x['classes'])
+    d.update(classes=sorted(x['classes']),field_provenance=dict(parent=parent_bindings[x['parent']],first_row=x['line'],class_values=sorted(x['classes']),expectations=d['provenance']))
+    metadata['pages'][pk]=d
+assert digest(canonical(metadata['crops']))==original_crops_sha
+dump(B/'metadata.json',metadata)
+dump(A/'metadata_join_report.json',dict(parents=parent_bindings,books=join_report,pages=len(pagedata),crops=len(metadata['crops']),
+    crops_canonical_sha256=original_crops_sha,ambiguous_joins=[],split_changes=0))
+log('metadata ready '+str(len(bookdata))+' books '+str(len(pagedata))+' pages')
+
+# Canonical row-level identity receipt, all fields refer to the hash-bound book/page declarations.
+metadata_sha=sha(B/'metadata.json')
+with gzip.open(A/'row_metadata.jsonl.gz','wt',compresslevel=1) as f:
+    for parent in config['parents']:
+        for n,r in rows(parent['path']):
+            row=canonicalize(r,parent,metadata);bk=metadata['books'][row['book_id']];pk=canonical([row['source'],row['book_id'],row['page_id']])
+            emit(f,dict(parent_id=parent['id'],id=row['id'],source=row['source'],document=row['book_id'],edition_id=row['edition_id'],
+                page_id=row['page_id'],split=row['split'],source_split=r.get('split'),item=r.get('item'),year=r.get('year'),
+                expectations={k:v for k,v in expectations(row,metadata).items() if k in {'languages','scripts','orthography','latin_policy','allowed_characters'}},field_provenance=dict(parent_id=parent['id'],parent_sha256=parent['sha256'],line=n,record_sha256=digest(canonical(r)),book_key=row['book_id'],page_key=pk,metadata_sha256=metadata_sha)))
+
+# Read SF7 A's sf6-schema outcomes from the actual Clariden job, retaining every
+# producer HOLD. The raw-parent edits-only artifact is the sole edit authority.
+sf7root=E/'labelfix_sf7_20261017/output_3687228'
+sf7file=sf7root/'release/overlay_A.jsonl.gz'
+sf7release=json.loads((sf7root/'release/release_A.json').read_text())
+assert sha(sf7file)==sf7release['overlay_sha256']=='80421ec0c9579d4dcf0d483e3d906873959210c0f44bda3b2af1325c5f7abf65'
+assert sf7release['source_sha256']==parents['collection-v2-train']['sha256']
+sf7={};sf7counts=C.Counter()
+with gzip.open(A/'sf7_scoped_outcomes.jsonl.gz','wt',compresslevel=1) as f:
+    for n,r in rows(sf7file):
+        i=r['line_id'];assert i not in sf7
+        small={k:v for k,v in r.items() if k in {'line_id','status','original_label_sha256','policy_sha','variant','release_policy','hold_slots','alias_only','evidence_sha256'}}
+        small['original_record_sha256']=digest(canonical(r));small['line_number']=n
+        sf7[i]=small;sf7counts[r['status']]+=1;emit(f,small)
+        if n%10000==0:log('SF7 outcomes '+str(n))
+assert dict(sf7counts)==sf7release['counts_by_status'] or dict(sf7counts)=={k:v for k,v in sf7release['counts_by_status'].items() if v}
+sf7editpath=OLD/'greek-ocr-toolkit-spellcheck/artifacts/sf7_rc1/release_edits_only_A.jsonl'
+sf7edits={r['line_id']:r for _,r in rows(sf7editpath)}
+assert len(sf7edits)==605
+release_receipt=json.loads((S/'greek-ocr-toolkit-spellcheck/artifacts/sf7_rc1/RELEASE_RECEIPT.json').read_text())
+normalization_only=set(release_receipt['excluded_composer_normalization_only']['line_ids'])
+assert len(normalization_only)==81
+assert set(sf7edits)|normalization_only=={i for i,x in sf7.items() if x['status']=='corrected'}
+
+def canonical_result(row,tool,status,edits,evidence):
+    out=dict(tool=tool,tool_version=versions[tool]['version'],tool_digest=versions[tool]['digest'],binding=identity(row),
+        raw_text_sha256=digest(row['raw_text']),status=status,edits=edits,evidence=evidence)
+    validate_result(out,row,tool,versions)
+    return out
+
+def legacy_convert(row,tool,r,path):
+    raw=row['raw_text'];parent=r.get('parent_label',r.get('label_parent',r.get('parent_text')))
+    parent_sha=r.get('parent_text_sha256',r.get('original_label_sha256',r.get('parent_utf8_sha256')))
+    assert parent==raw if parent is not None else parent_sha==digest(raw),(tool,row['id'])
+    target=r.get('new_label',r.get('text',r.get('label',raw)))
+    holds=r.get('holds',r.get('hold_slots',[]))
+    edits=[] if holds else span_edits(raw,target)
+    state='required_evidence_unresolved' if holds or r.get('status') in {'hold','failed','out_of_scope'} else 'applied' if edits else 'verified_no_change'
+    evidence=dict(source_artifact=str(path),source_artifact_sha256=artifact_shas[str(path)],original_record_sha256=digest(canonical(r)),
+        original_status=r.get('status','ok'),holds=holds,producer={k:r[k] for k in ['source_job','variant','policy_digest','wave'] if k in r},
+        parent_label_conversion='parent_label -> exact raw_text' if 'parent_label' in r else 'exact raw parent verified')
+    return canonical_result(row,tool,state,edits if state=='applied' else [],evidence)
+
+n1train=S/'greek-ocr-toolkit-secondary/artifacts/n1/n1_v1_train.jsonl'
+n1w1=OLD/'greek-ocr-toolkit-secondary/artifacts/n1/n1_v1_w1.jsonl'
+ru1train=OLD/'greek-ocr-toolkit-secondary/artifacts/ru1/ru1_v3_edits.jsonl'
+ru1test=S/'greek-ocr-toolkit-secondary/artifacts/ru1/ru1_v3_test_edits.jsonl'
+artifact_shas={str(p):sha(p) for p in [n1train,n1w1,ru1train,ru1test]}
+assert artifact_shas[str(n1train)]=='0b32e8d9b04383cc8fe5542b0b40ccfa47978c5cd09b36c1a535083f0b41bf92'
+assert artifact_shas[str(n1w1)]=='94fb67c1aab9f2ec3bf5d47bc36508b7e700508cd27391f70ebfc26f8d73230e'
+assert artifact_shas[str(ru1train)]=='4f1a51f5eb80788fb1cdc7a01220c90df028e79711cf0eeec2d0ace2ee42d1d0'
+assert artifact_shas[str(ru1test)]=='c4b3a248b660ce670e35a2ac9b9c4e5380f357f1ab3ec3c488de67de61a756a1'
+n1w1rows={r['id']:r for _,r in rows(n1w1)}
+ru1rows=C.defaultdict(dict)
+for _,r in rows(ru1train):ru1rows['collection-v2-train'][r['id']]=r
+for _,r in rows(ru1test):ru1rows['collection-v2-'+r['split']][r['id']]=r
+spec=importlib.util.spec_from_file_location('fp3_n1_tokens',S/'greek-ocr-toolkit-secondary/greekocr/numerics/tokens.py')
+tokens=importlib.util.module_from_spec(spec);sys.modules[spec.name]=tokens;spec.loader.exec_module(tokens)
+def n1_candidates(text):
+    return [s for t in tokens.tokenize(text) if t.digit_count>=4 for s in t.slots if not s.boundary and s.glyph in ('-','.')]
+
+corrections=[];coverage={};seen_raw=C.defaultdict(set)
+for parent in config['parents']:
+    pid=parent['id'];paths={};streams={};counts=C.Counter()
+    for tool in ['polytonic','numerics','cyrillic']:
+        paths[tool]=B/(tool+'_'+pid+'.jsonl');streams[tool]=paths[tool].open('w')
+    candidate_path=B/('polytonic_candidate_'+pid+'.jsonl');candidate_stream=candidate_path.open('w');candidate_count=0
+    n1iter=iter(rows(n1train)) if pid=='collection-v2-train' else None
+    for n,r in rows(parent['path']):
+        row=canonicalize(r,parent,metadata);raw=row['raw_text'];i=row['id'];expected=expectations(row,metadata)
+        def write(tool,result):
+            emit(streams[tool],result);counts[tool+':'+result['status']]+=1
+        if pid=='collection-v2-train' and i in sf7:
+            s=sf7[i];assert s['original_label_sha256']==digest(raw)
+            evidence=dict(source_job='3687228',variant='A',source_artifact=str(sf7file),source_artifact_sha256=sf7release['overlay_sha256'],
+                original_record_sha256=s['original_record_sha256'],original_status=s['status'],policy_sha=s['policy_sha'],hold_slots=s.get('hold_slots',[]))
+            if i in sf7edits:
+                e=sf7edits[i];assert e['parent_text_sha256']==digest(raw)
+                edits=byte_edits(raw,e['byte_patches'])
+                result=canonical_result(row,'polytonic','applied',edits,dict(evidence,release_gate='candidate_pre_audit',raw_edit_record_sha256=digest(canonical(e)),raw_edits_sha256=sha(sf7editpath)))
+                emit(candidate_stream,result);candidate_count+=1;counts['polytonic:proposal_only']+=1
+            else:
+                state='required_evidence_unresolved' if s['status']=='hold' else 'verified_no_change'
+                if i in normalization_only:evidence['raw_parent_outcome']='composer normalization only; zero qualified raw-parent edits'
+                write('polytonic',canonical_result(row,'polytonic',state,[],evidence))
+            seen_raw['sf7'].add(i)
+        elif parent['format']=='collection-v2' and r.get('script_class')!='greek_poly':
+            # A declared tool scope, not sparse omission, establishes this negative.
+            write('polytonic',canonical_result(row,'polytonic','verified_no_change',[],dict(candidate_scan='SF7 declared script_class != greek_poly',
+                definition='scripts/labelfix/clariden/l1_common.py:39-44',definition_sha256=source_receipt['greek-ocr-toolkit-spellcheck/scripts/labelfix/clariden/l1_common.py']['sha256'])))
+        if n1iter:
+            _,nr=next(n1iter);assert nr['id']==i
+            write('numerics',legacy_convert(row,'numerics',nr,n1train));seen_raw['n1train'].add(i)
+        elif pid=='collect-v3-W1-20261018-0524' and i in n1w1rows:
+            write('numerics',legacy_convert(row,'numerics',n1w1rows[i],n1w1));seen_raw['n1w1'].add(i)
+        elif not n1_candidates(raw):
+            write('numerics',canonical_result(row,'numerics','verified_no_change',[],dict(candidate_scan='no N1 token with >=4 ASCII digits and internal single - or . slot',
+                definition='scripts/numerics/n1tr.py:41-53 enumerate_slots; greekocr/numerics/tokens.py:1-89',
+                definition_sha256=source_receipt['greek-ocr-toolkit-secondary/scripts/numerics/n1tr.py']['sha256'],tokens_sha256=source_receipt['greek-ocr-toolkit-secondary/greekocr/numerics/tokens.py']['sha256'])))
+        if i in ru1rows.get(pid,{}):
+            path=ru1train if pid=='collection-v2-train' else ru1test
+            write('cyrillic',legacy_convert(row,'cyrillic',ru1rows[pid][i],path));seen_raw['ru1:'+pid].add(i)
+        else:
+            result=automatic_result(row,'cyrillic',expected,versions['cyrillic']['version'],versions['cyrillic']['digest'])
+            if result is not None:
+                result['evidence'].update(definition='frozen line_pipeline.py:248-254; Russian final-soft-sign or declared modern regime',definition_sha256=sha(OLD/'greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline.py'))
+                write('cyrillic',result)
+    if n1iter:assert next(n1iter,None) is None
+    for stream in streams.values():stream.close()
+    candidate_stream.close()
+    for tool,path in paths.items():
+        total=sum(v for k,v in counts.items() if k.startswith(tool+':'))-(candidate_count if tool=='polytonic' else 0)
+        if total:
+            corrections.append(dict(tool=tool,parent_id=pid,parent_manifest_sha256=parent['sha256'],path=str(path),sha256=sha(path),status='released',format='line-tool-result-v1'))
+    if candidate_count:
+        corrections.append(dict(tool='polytonic',parent_id=pid,parent_manifest_sha256=parent['sha256'],path=str(candidate_path),sha256=sha(candidate_path),status='candidate_pre_audit',format='line-tool-result-v1'))
+    coverage[pid]=dict(counts)
+    log('ledgers '+pid+' '+canonical(dict(counts)))
+assert seen_raw['sf7']==set(sf7)
+assert len(seen_raw['n1train'])==214436
+assert seen_raw['n1w1']==set(n1w1rows)
+for pid,rr in ru1rows.items():assert seen_raw['ru1:'+pid]==set(rr)
+dump(A/'coverage.json',dict(by_parent=coverage,raw_artifacts=artifact_shas,sf7_outcomes=dict(sf7counts),sf7_raw_edited_rows=605,
+    sf7_normalization_only=81,ledger_rows={t:sum(sum(n for k,n in c.items() if k.startswith(t+':')) for c in coverage.values()) for t in ['polytonic','numerics','cyrillic']}))
+
+# Preserve all census_02 policy inputs, with its codec made explicit by hash.
+new=dict(config,versions=str(vpath),metadata=str(B/'metadata.json'),corrections=corrections,
+    codec=str(CODE/'greek-ocr-toolkit-sol-recut/greekocr/_vendor/codec/v2.json'),
+    component_roots={name:str(CODE/name) for name in ['greek-ocr-toolkit-sol-recut','greek-ocr-toolkit-secondary','greek-ocr-toolkit-spellcheck']})
+dump(B/'census_w64_pf64.json',new)
+dump(A/'config_receipt.json',dict(build=build,config=ref(B/'census_w64_pf64.json'),metadata=ref(B/'metadata.json'),
+    versions=ref(vpath),codec=ref(new['codec']),predictor=ref(new['predictor']),runtime=ref(new['runtime_manifest']),parents=parent_bindings))
+files=sorted(p for p in CODE.rglob('*') if p.is_file() and p.name!='SHA256SUMS' and '__pycache__' not in p.parts)
+(CODE/'SHA256SUMS').write_text(''.join(sha(p)+'  '+str(p.relative_to(CODE))+'\n' for p in files))
+dump(A/'code_receipt.json',dict(projects=str(CODE),manifest_sha256=sha(CODE/'SHA256SUMS'),files=len(files),core_sha256=sha(core),versions_sha256=sha(vpath)))
+db.close()
+log('PREPARATION COMPLETE '+str(B/'census_w64_pf64.json'))

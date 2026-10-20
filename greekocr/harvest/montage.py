@@ -18,8 +18,85 @@ from PIL import Image, ImageDraw
 from .core import edits, list_return
 from .readers import atomic, polygon_box, response_pieces
 
-__all__ = ["build_montages", "assign_lines", "response_lines", "response_symbols",
+__all__ = ["build_montages", "background_shade", "group_flush_crops", "assign_lines", "response_lines", "response_symbols",
            "assign_symbols", "compare_nfd", "summarise"]
+
+
+def _background_shade(image):
+    # Luminance is used only for the estimate; the pasted pixels stay native.
+    histogram = image.convert("L").histogram()
+    count = image.width * image.height
+    start = count // 2  # brightest ceil(count / 2) pixels, including ties
+    kept = count - start
+    ranks = (start + (kept - 1) // 2, start + kept // 2)
+    cumulative, values = 0, []
+    for shade, frequency in enumerate(histogram):
+        previous, cumulative = cumulative, cumulative + frequency
+        values.extend(shade for rank in ranks if previous <= rank < cumulative)
+    return sum(values) / 2
+
+
+def background_shade(crop_path: str | Path) -> float:
+    """Median of the brightest ceil(50%) native pixels (RGB: L luminance).
+
+    The estimate can be half-integral; 8-bit padding rounds halves upward.
+    Measured 255 is retained for white crops, rather than used as a fallback.
+    """
+    with Image.open(crop_path) as image:
+        if image.mode not in ("L", "RGB"):
+            raise ValueError("native crops must be 8-bit L or RGB, without alpha")
+        return _background_shade(image)
+
+
+def group_flush_crops(records: Iterable[dict[str, Any]], n: int) -> list[list[dict[str, Any]]]:
+    """Stable (background shade, native height) sort, then consecutive N crops.
+
+    Ties preserve input order. Copies record source/sorted indices, shade,
+    native dimensions and group name; caller-owned records are never mutated.
+    """
+    if isinstance(n, bool) or not isinstance(n, int) or n not in (10, 20, 40):
+        raise ValueError("N must be 10, 20 or 40")
+    rows = []
+    for index, record in enumerate(records):
+        with Image.open(record["straight_crop"]) as image:
+            shade = background_shade(record["straight_crop"])
+            rows.append(dict(record, background_shade=shade, height=image.height,
+                             width=image.width, source_index=index))
+    if len({row["id"] for row in rows}) != len(rows):
+        raise ValueError("crop IDs must be unique")
+    rows.sort(key=lambda row: (row["background_shade"], row["height"]))
+    for index, row in enumerate(rows):
+        row.update(sorted_index=index, group=f"n{n:02d}-{index // n:03d}")
+    return [rows[start:start + n] for start in range(0, len(rows), n)]
+
+
+def _render_flush(records):
+    images = []
+    for record in records:
+        with Image.open(record["straight_crop"]) as source:
+            if source.mode not in ("L", "RGB"):
+                raise ValueError("native crops must be 8-bit L or RGB, without alpha")
+            images.append(source.copy())
+    mode = "L" if all(crop.mode == "L" for crop in images) else "RGB"
+    width, height = max(crop.width for crop in images), sum(crop.height for crop in images)
+    image = Image.new(mode, (width, height))
+    boxes, y = {}, 0
+    for record, crop in zip(records, images):
+        shade = _background_shade(crop)
+        fill = math.floor(shade + .5)
+        # Fill this entire band with its own paper shade, then overwrite only
+        # the native crop rectangle. Every canvas pixel belongs to a band.
+        image.paste(fill if mode == "L" else (fill,) * 3, (0, y, width, y + crop.height))
+        image.paste(crop, (0, y))
+        boxes[record["id"]] = dict(x0=0, x1=crop.width, y0=y, y1=y + crop.height,
+            width=crop.width, height=crop.height, background_shade=shade, padding_shade=fill,
+            crop=str(Path(record["straight_crop"]).resolve()),
+            crop_sha256=hashlib.sha256(Path(record["straight_crop"]).read_bytes()).hexdigest())
+        y += crop.height
+    stream = io.BytesIO()
+    image.save(stream, format="PNG")
+    return stream.getvalue(), dict(width=width, height=height, mode=mode, layout="flush",
+                                  boxes=boxes, separators=[])
 
 
 def _render(records, *, grey_rule=True):
@@ -61,19 +138,23 @@ def _render(records, *, grey_rule=True):
 def build_montages(records: Iterable[dict[str, Any]], n: int, images_dir: str | Path,
                    maps_dir: str | Path, *, max_width: int = 2600,
                    max_height: int = 10000, max_png_bytes: int = 8_000_000,
-                   grey_rule: bool = True) -> list[dict[str, Any]]:
+                   grey_rule: bool = True, layout: str = "gap") -> list[dict[str, Any]]:
     """Stack up to N crops, preserving pixels; split on height or encoded size.
 
     N is 10, 20 or 40. Bands and rules use half-open coordinates. Each gap is
     max(60, the two adjacent native crop heights); a centred 2px 40%-black rule
     is grey 153 on white 255. With grey_rule=False, the same gaps are pure white
     and rule coordinates are None. A too-large singleton fails instead of resizing.
-    Returns maps, also saved separately from the bulk PNG files.
+    layout="flush" has zero gaps/rules/outer padding and ignores grey_rule.
+    Each band's right padding uses its own brightest-half median, rounded to
+    8-bit; crop pixels are unchanged. Returns maps saved apart from bulk PNGs.
     """
     if isinstance(n, bool) or not isinstance(n, int) or n not in (10, 20, 40):
         raise ValueError("N must be 10, 20 or 40")
     if not isinstance(grey_rule, bool):
         raise ValueError("grey_rule must be boolean")
+    if layout not in ("gap", "flush"):
+        raise ValueError("layout must be gap or flush")
     records = list(records)
     if len({record["id"] for record in records}) != len(records):
         raise ValueError("crop IDs must be unique")
@@ -94,7 +175,9 @@ def build_montages(records: Iterable[dict[str, Any]], n: int, images_dir: str | 
         for record in group:
             with Image.open(record["straight_crop"]) as crop:
                 sizes.append(crop.size)
-        height = sum(h for _, h in sizes) + sum(max(60, a[1], b[1]) for a, b in zip(sizes, sizes[1:]))
+        height = sum(h for _, h in sizes)
+        if layout == "gap":
+            height += sum(max(60, a[1], b[1]) for a, b in zip(sizes, sizes[1:]))
         if height > max_height:
             if len(group) == 1:
                 raise ValueError("native singleton exceeds montage height/PNG limit")
@@ -102,11 +185,11 @@ def build_montages(records: Iterable[dict[str, Any]], n: int, images_dir: str | 
             emit(group[:midpoint], split_reasons + ["height"])
             emit(group[midpoint:], split_reasons + ["height"])
             return
-        data, layout = _render(group, grey_rule=grey_rule)
-        if layout["height"] > max_height or len(data) > max_png_bytes:
+        data, geometry = (_render_flush(group) if layout == "flush" else _render(group, grey_rule=grey_rule))
+        if geometry["height"] > max_height or len(data) > max_png_bytes:
             if len(group) == 1:
                 raise ValueError("native singleton exceeds montage height/PNG limit")
-            reason = "height" if layout["height"] > max_height else "png_bytes"
+            reason = "height" if geometry["height"] > max_height else "png_bytes"
             midpoint = len(group) // 2
             emit(group[:midpoint], split_reasons + [reason])
             emit(group[midpoint:], split_reasons + [reason])
@@ -121,7 +204,7 @@ def build_montages(records: Iterable[dict[str, Any]], n: int, images_dir: str | 
         mapping = dict(schema="greekocr-montage-1", n=n, actual_n=len(group),
             image=str(image_path.resolve()), image_sha256=hashlib.sha256(data).hexdigest(),
             png_bytes=len(data), map=str(map_path.resolve()), split_reasons=split_reasons,
-            limits=dict(width=max_width, height=max_height, png_bytes=max_png_bytes), **layout)
+            limits=dict(width=max_width, height=max_height, png_bytes=max_png_bytes), **geometry)
         atomic(map_path, mapping)
         result.append(mapping)
 

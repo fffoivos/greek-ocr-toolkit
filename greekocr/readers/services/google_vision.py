@@ -18,7 +18,7 @@ from .google_docai import _atomic_json, _canonical, _lock, _sha, _timestamp
 
 __all__ = ['VisionReader', 'VisionReading', 'VisionError', 'load_google_vision']
 ENDPOINT = 'https://vision.googleapis.com/v1/images:annotate'
-DEFAULT_RESPONSES = Path(__file__).resolve().parents[3] / 'docs/harvest/vision_failed_lines/responses'
+DEFAULT_RESPONSES = Path(__file__).resolve().parents[3] / 'docs/records/harvest/vision_failed_lines/responses'
 
 
 class VisionError(RuntimeError):

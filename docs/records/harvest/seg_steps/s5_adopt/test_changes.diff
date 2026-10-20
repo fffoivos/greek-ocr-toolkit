@@ -1,0 +1,60 @@
+diff --git a/tests/test_content_gate.py b/tests/test_content_gate.py
+index f81114348..06ef389e1 100644
+--- a/tests/test_content_gate.py
++++ b/tests/test_content_gate.py
+@@ -56,7 +56,10 @@ def test_codec_mark_keeps_segmentation_and_content_repair():
+ 
+ 
+ def test_clear_row_matches_pre_change_output_exactly():
+-    assert engine().evaluate(row()) == json.loads((ARTIFACTS / 'clear-before.json').read_text())
++    before = json.loads((ARTIFACTS / 'clear-before.json').read_text())
++    assert before['pipeline_version'] == '0.3'
++    before['pipeline_version'] = '0.3.1'
++    assert engine().evaluate(row()) == before
+ 
+ 
+ @pytest.mark.parametrize('text,disposition', [('日', 'HOLD'), ('Αθηνa', 'DROP')])
+diff --git a/tests/test_seg_gate.py b/tests/test_seg_gate.py
+index dfb541135..4000d2278 100644
+--- a/tests/test_seg_gate.py
++++ b/tests/test_seg_gate.py
+@@ -50,7 +50,7 @@ def test_cut_witness_decides_by_frozen_length(native):
+     assert box == before['evidence']['box_evidence']
+     ratio = (answer['evidence']['characters']+1)/(box['predictions'][2]+1)
+     assert answer['evidence']['padding_evidence']['total_padding_line_heights'] <= 1.5
+-    assert answer['verdict'] == ('DROP' if ratio < .5 or ratio > 1.5 else 'KEEP')
++    assert answer['verdict'] == ('DROP' if ratio < .30 or ratio > 2.00 else 'KEEP')
+     print(f'{rid}: length ratio={ratio!r}; verdict={answer["verdict"]}')
+ 
+ 
+@@ -234,3 +234,17 @@ def test_s2_horizontal_orientation_byte_identical_to_s1(native,size):
+     a,af=old.orient_crop(image,None,None,QuarterTurn)
+     b,bf=native.crop_tools.orient_crop(image,None,None,QuarterTurn)
+     assert a.tobytes()==b.tobytes() and af==bf
++
++
++@pytest.mark.parametrize('chars,verdict', [(2999, 'KEEP'), (19999, 'KEEP'), (2998, 'DROP'), (20000, 'DROP')])
++def test_s5_mode2_length_boundaries(native, chars, verdict):
++    # (chars+1)/(9999+1) = .30, 2.00, .2999, 2.0001.
++    # Both orchestration branches exercise the two default-band entry points.
++    for small in (False, True):
++        evidence = dict(characters=chars, small_segment=small,
++            box_evidence=dict(available=True, predictions=[None, None, 9999]),
++            padding_evidence=dict(available=True, total_padding_line_heights=0),
++            lines=[dict(side='main', votes=1)])
++        result = native.service.call(dict(operation='decide', policy_sha256=native.policy_sha, evidence=evidence))
++        assert result['verdict'] == verdict
++        assert result['reason'].startswith('length:')
+diff --git a/tests/test_seg_small.py b/tests/test_seg_small.py
+index 556fc1286..fd237632e 100644
+--- a/tests/test_seg_small.py
++++ b/tests/test_seg_small.py
+@@ -56,5 +56,8 @@ def test_non_small_native_result_is_byte_identical_to_s3(turned,tmp_path):
+  old,new=replay.worker('s3'),replay.worker()
+  try:a,b=old(row),new(row)
+  finally:old.close();new.close()
++ # S5 changes the default band and its policy fingerprint, not geometry.
++ assert a['policy_sha256'] != b['policy_sha256']
++ a=dict(a);b=dict(b);a.pop('policy_sha256');b.pop('policy_sha256')
+  assert replay.canonical(replay.norm(a))==replay.canonical(replay.norm(b))
+  assert replay.canonical(a['evidence'])==replay.canonical(b['evidence'])

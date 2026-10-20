@@ -1,0 +1,137 @@
+........................................................................ [ 10%]
+........................................................................ [ 21%]
+........................................................................ [ 32%]
+........................................................................ [ 42%]
+........................................................................ [ 53%]
+........................................................................ [ 64%]
+........................................................................ [ 75%]
+........................................................................ [ 85%]
+........................................................................ [ 96%]
+..................F.FF                                                   [100%]
+=================================== FAILURES ===================================
+___________________ StagedCrops.test_01_paths_and_all_hashes ___________________
+
+self = <test_stage_crops.StagedCrops testMethod=test_01_paths_and_all_hashes>
+
+    def test_01_paths_and_all_hashes(self):
+        self.assertEqual(self.receipt['failures'], 0)
+        self.assertEqual((BASE / 'crops_failures.jsonl').read_bytes(), b'')
+        self.assertEqual(len(self.manifest), len(self.admitted))
+        self.assertEqual({r['row_id'] for r in self.manifest}, set(self.admitted))
+        self.assertEqual(len(list((BASE / 'crops').rglob('*.png'))), len(self.retained))
+        total = 0
+        for row in self.manifest:
+            admitted = self.admitted[row['row_id']]
+            self.assertEqual(row['path'], f"crops/{admitted['source']}/{row['row_id']}.png")
+            self.assertEqual(row['class'], admitted['primary_class'])
+            path = BASE / row['path']
+            self.assertEqual(sha(path), admitted['crop_sha256'])
+            self.assertEqual(row['sha256'], admitted['crop_sha256'])
+            self.assertEqual(path.stat().st_size, row['bytes'])
+            total += row['bytes']
+        self.assertEqual(sum(r['bytes'] for r in self.retained), self.receipt['total_bytes'])
+>       self.assertEqual(self.receipt['withdrawn_count'], sum(not r['admitted'] for r in self.retained))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'withdrawn_count'
+
+docs/harvest/collect_v3_admission/test_stage_crops.py:54: KeyError
+_____________ StagedCrops.test_03_full_second_run_changes_nothing ______________
+
+self = <test_stage_crops.StagedCrops testMethod=test_03_full_second_run_changes_nothing>
+
+    def test_03_full_second_run_changes_nothing(self):
+        before = inventory()
+        subprocess.run([str(INTERPRETER), str(BASE / 'stage_crops.py'),
+                        '--admitted', self.receipt['admitted_file'],
+                        '--features', self.receipt['features_file'],
+                        '--out', str(BASE / 'crops')], check=True)
+>       self.assertEqual(inventory(), before)
+E       AssertionError: {'/Us[8654816 chars]': (73513657, 1229, 1792296986221121630, 17922[79 chars]5e')} != {'/Us[8654816 chars]': (72842372, 1178, 1792272541277395153, 17922[79 chars]c9')}
+E       Diff is 29001576 characters long. Set self.maxDiff to None to see it.
+
+docs/harvest/collect_v3_admission/test_stage_crops.py:87: AssertionError
+----------------------------- Captured stdout call -----------------------------
+1000/28798 processed; 0 failures
+2000/28798 processed; 0 failures
+3000/28798 processed; 0 failures
+4000/28798 processed; 0 failures
+5000/28798 processed; 0 failures
+6000/28798 processed; 0 failures
+7000/28798 processed; 0 failures
+8000/28798 processed; 0 failures
+9000/28798 processed; 0 failures
+10000/28798 processed; 0 failures
+11000/28798 processed; 0 failures
+12000/28798 processed; 0 failures
+13000/28798 processed; 0 failures
+14000/28798 processed; 0 failures
+15000/28798 processed; 0 failures
+16000/28798 processed; 0 failures
+17000/28798 processed; 0 failures
+18000/28798 processed; 0 failures
+19000/28798 processed; 0 failures
+20000/28798 processed; 0 failures
+21000/28798 processed; 0 failures
+22000/28798 processed; 0 failures
+23000/28798 processed; 0 failures
+24000/28798 processed; 0 failures
+25000/28798 processed; 0 failures
+26000/28798 processed; 0 failures
+27000/28798 processed; 0 failures
+28000/28798 processed; 0 failures
+28798/28798 processed; 0 failures
+{"admitted_count": 28798, "admitted_file": "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-sol-recut/docs/harvest/collect_v3_admission/w1_originals_v3_admitted.jsonl", "admitted_sha256": "b6d13fa8bb4b07be632e299fd650cd75dd80348ecf0e0fd9e5cb34bdb6c72bfe", "collector_storage_sha256": "ea8043721f48ecd0fe18bae5f0b0afaafbc4e4c2cbd84933e5c2a25836d08f47", "count": 28798, "failures": 0, "features_file": "/Users/foivoskarounos-zamparloukos/Projects/collect-v3-data/run/W1/features.jsonl", "features_sha256": "c85b407a724f4a17dfbe659cc9e2dfd171660de5e29baf1fd86b291f7cbd9c4c", "interpreter_executable": "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/.venv/bin/python", "interpreter_path": "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-sol-collect/.venv/bin/python", "interpreter_version": "3.11.3 (v3.11.3:f3909b8bc8, Apr  4 2023, 20:12:10) [Clang 13.0.0 (clang-1300.0.29.30)]", "manifest_path_base": "parent of --out", "output_root": "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-sol-recut/docs/harvest/collect_v3_admission/crops", "pillow_version": "12.3.0", "retained_count": 28798, "total_bytes": 466780146, "withdrawn_count": 0}
+______ StagedCrops.test_04_missing_and_mismatched_sources_record_failures ______
+
+self = <test_stage_crops.StagedCrops testMethod=test_04_missing_and_mismatched_sources_record_failures>
+
+    def test_04_missing_and_mismatched_sources_record_failures(self):
+        row = self.manifest[0]
+        with Path(self.receipt['features_file']).open() as stream:
+            feature = next(json.loads(line) for line in stream
+                           if json.loads(line).get('id') == row['row_id'])
+        for source, digest in [('/nonexistent/CROPS1-source.png', feature['crop_source_sha256']),
+                               (feature['crop_source_image'], '0' * 64)]:
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                admitted = root / 'admitted.jsonl'
+                features = root / 'input/features.jsonl'
+                features.parent.mkdir()
+                admitted.write_text(json.dumps(self.admitted[row['row_id']]) + '\n')
+                features.write_text(json.dumps(dict(feature, crop_source_image=source,
+                                                   crop_source_sha256=digest)) + '\n')
+                result = subprocess.run([str(INTERPRETER), str(BASE / 'stage_crops.py'),
+                                         '--admitted', str(admitted), '--features', str(features),
+                                         '--out', str(root / 'output/crops')], capture_output=True)
+                self.assertEqual(result.returncode, 1, result.stderr)
+>               failure = json.loads((root / 'output/crops_failures.jsonl').read_text())
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+docs/harvest/collect_v3_admission/test_stage_crops.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/pathlib.py:1058: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/var/folders/5q/65_c_z89577cz_zxgkpkz36m0000gn/T/tmp46tdmit9/output/crops_failures.jsonl')
+mode = 'r', buffering = -1, encoding = 'locale', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/var/folders/5q/65_c_z89577cz_zxgkpkz36m0000gn/T/tmp46tdmit9/output/crops_failures.jsonl'
+
+/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/pathlib.py:1044: FileNotFoundError
+=========================== short test summary info ============================
+FAILED docs/harvest/collect_v3_admission/test_stage_crops.py::StagedCrops::test_01_paths_and_all_hashes
+FAILED docs/harvest/collect_v3_admission/test_stage_crops.py::StagedCrops::test_03_full_second_run_changes_nothing
+FAILED docs/harvest/collect_v3_admission/test_stage_crops.py::StagedCrops::test_04_missing_and_mismatched_sources_record_failures
+3 failed, 667 passed in 40.48s

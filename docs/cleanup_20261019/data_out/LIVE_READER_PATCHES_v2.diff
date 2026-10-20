@@ -1,0 +1,3506 @@
+--- a/greekocr/_vendor/bench/common.py
++++ b/greekocr/_vendor/bench/common.py
+@@ -1,4 +1,5 @@
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ import hashlib
+ import json
+ import unicodedata as ud
+@@ -10,14 +11,14 @@
+ 
+ def sha256(path):
+     h = hashlib.sha256()
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         for chunk in iter(lambda: f.read(1024 * 1024), b''):
+             h.update(chunk)
+     return h.hexdigest()
+ 
+ 
+ def read_rows(path):
+-    with Path(path).open(encoding='utf-8') as f:
++    with _data_input(Path(path)).open(encoding='utf-8') as f:
+         for line in f:
+             if line.strip():
+                 yield json.loads(line)
+--- a/greekocr/_vendor/bench/e1_common.py
++++ b/greekocr/_vendor/bench/e1_common.py
+@@ -8,6 +8,7 @@
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ sys.path.insert(0, str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr._vendor.train.mix import sha256, shard_inventory
+ 
+ FRACTIONS = (0, 25, 50, 75, 100)
+@@ -16,7 +17,7 @@
+ 
+ 
+ def read_json(path):
+-    return json.loads(Path(path).read_text())
++    return json.loads(_data_input(Path(path)).read_text())
+ 
+ 
+ def atomic_json(path, value):
+--- a/greekocr/_vendor/train/mix.py
++++ b/greekocr/_vendor/train/mix.py
+@@ -4,6 +4,7 @@
+ not the index or working copy. Real shard inventories must match exactly.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ import copy
+@@ -26,7 +27,7 @@
+ 
+ def sha256(path):
+     h = hashlib.sha256()
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         for block in iter(lambda: f.read(1 << 20), b''):
+             h.update(block)
+     return h.hexdigest()
+--- a/greekocr/adjudicate/_files.py
++++ b/greekocr/adjudicate/_files.py
+@@ -1,5 +1,6 @@
+ """Private local-file helpers; never acquire data or follow custody symlinks."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ import gzip
+ import hashlib
+ import json
+@@ -9,7 +10,7 @@
+ 
+ def sha(path: str | Path) -> str:
+     digest = hashlib.sha256()
+-    with Path(path).open('rb') as stream:
++    with _data_input(Path(path)).open('rb') as stream:
+         for block in iter(lambda: stream.read(1024*1024), b''):
+             digest.update(block)
+     return digest.hexdigest()
+@@ -21,7 +22,7 @@
+ 
+ def rows(path: str | Path) -> Iterator[dict]:
+     path = Path(path)
+-    with (gzip.open(path, 'rt') if path.suffix == '.gz' else path.open()) as stream:
++    with (gzip.open(_data_input(path), 'rt') if path.suffix == '.gz' else _data_input(path).open()) as stream:
+         for line in stream:
+             if line.strip():
+                 yield json.loads(line)
+--- a/greekocr/harvest/application_identity.py
++++ b/greekocr/harvest/application_identity.py
+@@ -1,10 +1,11 @@
+ """Canonical CP8 application closure identity, with content validation."""
++from greekocr.ops.data_root import input_path as _data_input
+ import hashlib,json,sys
+ import importlib.metadata
+ from pathlib import Path
+ ROOT=Path(__file__).resolve().parents[2]
+ DEFAULT=ROOT/'docs/harvest/collect_v3_admission/seg/cp8a/application_manifest.json'
+-def digest(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
++def digest(p):return hashlib.sha256(_data_input(Path(p)).read_bytes()).hexdigest()
+ def identity(path=DEFAULT,verify=True):
+     data=Path(path).read_bytes();manifest=json.loads(data)
+     if verify:
+--- a/greekocr/harvest/collection.py
++++ b/greekocr/harvest/collection.py
+@@ -1,5 +1,6 @@
+ """Offline T28 collection close-out. Original wave files and crops are read only."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ from collections import Counter, defaultdict
+ from hashlib import sha256
+@@ -27,11 +28,11 @@
+ 
+ 
+ def digest(path: Path) -> str:
+-    return sha256(path.read_bytes()).hexdigest()
++    return sha256(_data_input(path).read_bytes()).hexdigest()
+ 
+ 
+ def read_jsonl(path: Path) -> list[dict]:
+-    with path.open() as stream:
++    with _data_input(path).open() as stream:
+         return [json.loads(line) for line in stream if line.strip()]
+ 
+ 
+--- a/greekocr/harvest/geometry_observations.py
++++ b/greekocr/harvest/geometry_observations.py
+@@ -3,6 +3,7 @@
+ Collector geometry is evidence, not a qualified whole-word/structural decision.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import gzip
+ from collections.abc import Mapping
+@@ -24,7 +25,7 @@
+ 
+ 
+ def sha(path):
+-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(Path(path)).read_bytes()).hexdigest()
+ 
+ 
+ def code_identity(root):
+@@ -126,14 +127,14 @@
+                         ('labels.npz','labels_sha256')]:
+         if sha(cache/name) != receipt[field]:
+             raise ValueError('corrupt_detector_cache:'+name)
+-    data = json.loads(gzip.decompress((cache/'detector.json.gz').read_bytes()))
++    data = json.loads(gzip.decompress((_data_input(cache/'detector.json.gz')).read_bytes()))
+     with Image.open(source) as image:
+         size = image.size
+         if getattr(image, 'n_frames', 1) != 1:
+             raise ValueError('ambiguous_source_frame')
+-    with Image.open(cache/'ink.png') as mask:
++    with Image.open(_data_input(cache/'ink.png')) as mask:
+         ink = np.asarray(mask).astype(bool)
+-    with np.load(cache/'labels.npz', allow_pickle=False) as archive:
++    with np.load(_data_input(cache/'labels.npz'), allow_pickle=False) as archive:
+         labels = archive['labels']
+     if (data['schema'] != SCHEMA or list(size) != data['image_size']
+             or ink.shape != size[::-1] or labels.shape != ink.shape
+--- a/greekocr/harvest/pipeline.py
++++ b/greekocr/harvest/pipeline.py
+@@ -1,5 +1,6 @@
+ """Resumable page extraction and budget-aware stratified reader orchestration."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ from pathlib import Path
+ from collections import defaultdict
+ from contextlib import closing
+@@ -16,7 +17,7 @@
+ DEFAULT_SOURCE=HOME/'greek-page-ocr'
+ 
+ def digest(path):
+-    with Path(path).open('rb') as stream: return hashlib.file_digest(stream,'sha256').hexdigest()
++    with _data_input(Path(path)).open('rb') as stream: return hashlib.file_digest(stream,'sha256').hexdigest()
+ 
+ def append(path,row):
+     with Path(path).open('a') as f: f.write(json.dumps(row,ensure_ascii=False,allow_nan=False)+'\n'); f.flush()
+--- a/greekocr/harvest/readers.py
++++ b/greekocr/harvest/readers.py
+@@ -1,5 +1,6 @@
+ """Budget-reserved single-crop Google calls; no implicit retries."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ from pathlib import Path
+ from concurrent.futures import ThreadPoolExecutor
+ import dataclasses, fcntl, json, hashlib, time, threading
+@@ -11,7 +12,7 @@
+ PRICE = .0015
+ 
+ def read_jsonl(path):
+-    return [json.loads(s) for s in Path(path).read_text().splitlines() if s.strip()] if Path(path).exists() else []
++    return [json.loads(s) for s in _data_input(Path(path)).read_text().splitlines() if s.strip()] if Path(path).exists() else []
+ 
+ def atomic(path, value):
+     path=Path(path); path.parent.mkdir(parents=True,exist_ok=True)
+--- a/greekocr/harvest/separator_inventory.py
++++ b/greekocr/harvest/separator_inventory.py
+@@ -4,6 +4,7 @@
+ The existing pixel preparer supplies gutters/rules; build_structure validates
+ those proposals on original ink using the already recorded row curves.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import json
+ from pathlib import Path
+ from . import geometry_observations as g
+@@ -40,12 +41,12 @@
+ 
+ def load(page, directory):
+     directory = Path(directory)
+-    receipt = json.loads((directory/'receipt.json').read_text())
++    receipt = json.loads((_data_input(directory/'receipt.json')).read_text())
+     if receipt['binding'] != binding(page):
+         raise ValueError('stale_separator_inventory')
+     if g.sha(directory/'inventory.json') != receipt['inventory_sha256']:
+         raise ValueError('corrupt_separator_inventory')
+-    data = json.loads((directory/'inventory.json').read_text())
++    data = json.loads((_data_input(directory/'inventory.json')).read_text())
+     if data['binding'] != receipt['binding']:
+         raise ValueError('separator_binding_mismatch')
+     return data
+--- a/greekocr/labelfix/lqb.py
++++ b/greekocr/labelfix/lqb.py
+@@ -3,6 +3,7 @@
+ No recognition, adjudication, network access or writes to source worktrees.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import defaultdict
+ from functools import lru_cache
+@@ -28,14 +29,14 @@
+ 
+ def sha256(path):
+     h = hashlib.sha256()
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         for block in iter(lambda: f.read(1024*1024), b''): h.update(block)
+     return h.hexdigest()
+ 
+ 
+ def rows(path):
+     import gzip
+-    with (gzip.open(path, 'rt') if str(path).endswith('.gz') else Path(path).open()) as f:
++    with (gzip.open(_data_input(path), 'rt') if str(path).endswith('.gz') else _data_input(Path(path)).open()) as f:
+         for line in f:
+             if line.strip(): yield json.loads(line)
+ 
+--- a/greekocr/labelfix/spellcheck_validate.py
++++ b/greekocr/labelfix/spellcheck_validate.py
+@@ -3,6 +3,7 @@
+ python -m greekocr.labelfix.spellcheck_validate --seed 0 --seed 1 --out docs/labelfix/spellcheck
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter, defaultdict
+ import gzip
+@@ -36,7 +37,7 @@
+ 
+ 
+ def read_jsonl(path):
+-    with open(path, encoding='utf-8') as f:
++    with open(_data_input(path), encoding='utf-8') as f:
+         return [json.loads(x) for x in f if x.strip()]
+ 
+ 
+@@ -393,7 +394,7 @@
+     ap.add_argument('--no-sheets',action='store_true')
+     a=ap.parse_args(argv)
+     a.shape_model=a.shape_model.resolve()
+-    a.samples=a.samples.resolve()
++    a.samples=_data_input(a.samples).resolve()
+     start=time.monotonic()
+     a.out=a.out.resolve()
+     a.out.mkdir(parents=True,exist_ok=True)
+--- a/greekocr/numerics/ink_rule.py
++++ b/greekocr/numerics/ink_rule.py
+@@ -3,6 +3,7 @@
+ Input is n1_render.render's side record, made with glyphs.components.line_glyphs.
+ No OCR character is used to classify ink. Character custody only gates edits.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import hashlib
+ import itertools
+ import json
+@@ -21,7 +22,7 @@
+ 
+ 
+ def sha(path):
+-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(Path(path)).read_bytes()).hexdigest()
+ 
+ 
+ def freeze(path, config):
+--- a/greekocr/verify/cli.py
++++ b/greekocr/verify/cli.py
+@@ -1,5 +1,6 @@
+ """CLI adapters; images/text/calibrate are offline, vlm is explicitly online."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ import json
+ from pathlib import Path
+ from .images import readability_profile, render_overlay
+@@ -88,7 +89,7 @@
+ 
+ 
+ def _read_jsonl(path: Path) -> list[dict]:
+-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
++    return [json.loads(line) for line in _data_input(path).read_text().splitlines() if line.strip()]
+ 
+ 
+ def write_jsonl(path: Path, rows: list[dict]) -> None:
+--- a/prototypes/fast_lines/shared/manifest.py
++++ b/prototypes/fast_lines/shared/manifest.py
+@@ -1,4 +1,5 @@
+ """S0: the only image enumerator. Selection is metadata, never an algorithm input."""
++from greekocr.ops.data_root import input_path as _data_input
+ from pathlib import Path
+ import hashlib, json, platform
+ from PIL import Image
+@@ -10,7 +11,7 @@
+ 
+ def digest(path):
+     h = hashlib.sha256()
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         for b in iter(lambda: f.read(1 << 20), b''): h.update(b)
+     return h.hexdigest()
+ 
+@@ -43,7 +44,7 @@
+                 scope='54 dev + 80 disagreement + 40 supplied agreement; no held-out', schema=1)
+ 
+ def load(path):
+-    obj=json.loads(Path(path).read_text())
++    obj=json.loads(_data_input(Path(path)).read_text())
+     for r in obj['pages']:
+         p=Path(r['path'])
+         if p.is_absolute() or '..' in p.parts: raise ValueError('unsafe manifest path')
+--- a/prototypes/harvest/google_failed_lines.py
++++ b/prototypes/harvest/google_failed_lines.py
+@@ -5,6 +5,7 @@
+ response is deliberately not retried (its billing outcome may be unknown).
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ from collections import Counter, defaultdict
+@@ -46,7 +47,7 @@
+ 
+ 
+ def sha256(path: Path) -> str:
+-    return hashlib.sha256(path.read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
+ 
+ 
+ def canonical(value) -> str:
+--- a/scripts/glyphs/archive/audit_orientation_guides.py
++++ b/scripts/glyphs/archive/audit_orientation_guides.py
+@@ -17,6 +17,7 @@
+ from scipy import ndimage as ndi
+ 
+ ROOT=Path(__file__).resolve().parents[3];sys.path.insert(0,str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ import greekocr.glyphs.oriented_page as oriented_module
+ from greekocr.glyphs.oriented_page import oriented_page
+ from greekocr.glyphs.orientation import Orientation,QuarterTurn,measure_orientation
+@@ -29,8 +30,8 @@
+ OLD=ROOT/'.astra/previous_round4_part2'
+ 
+ 
+-def read(path):return json.loads(path.read_text())
+-def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
++def read(path):return json.loads(_data_input(path).read_text())
++def sha(path):return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
+ 
+ 
+ def compact_word(w,image):
+--- a/scripts/glyphs/archive/generate_orientation_guides.py
++++ b/scripts/glyphs/archive/generate_orientation_guides.py
+@@ -4,6 +4,7 @@
+ are never rewritten. PNG rotations are exact; composite resizes are recorded.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ import hashlib
+ import json
+@@ -18,7 +19,7 @@
+ REAL='s2-6419488b7f8e69fd20da-p00001'
+ 
+ 
+-def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
++def sha(path):return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
+ 
+ 
+ def generate(out=OUT):
+--- a/scripts/glyphs/archive/report_orientation_guides.py
++++ b/scripts/glyphs/archive/report_orientation_guides.py
+@@ -7,11 +7,12 @@
+ import sys
+ import xml.etree.ElementTree as ET
+ ROOT=Path(__file__).resolve().parents[3];sys.path.insert(0,str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ OUT=ROOT/'.astra/out/orientation_eval'
+ REPORT=ROOT/'docs/reviews/PAGE_LINES_ROUND4_ORIENTATION_GUIDES_20261009.md'
+ 
+ 
+-def read(p):return json.loads(p.read_text())
++def read(p):return json.loads(_data_input(p).read_text())
+ def pct(x):return '—' if x is None else f'{100*x:.1f}%'
+ def table(lines,headers,rows):
+     lines.extend(['','| '+' | '.join(headers)+' |','|'+'|'.join('---' for _ in headers)+'|'])
+--- a/scripts/glyphs/archive/review_line_structure.py
++++ b/scripts/glyphs/archive/review_line_structure.py
+@@ -19,6 +19,7 @@
+ 
+ ROOT=Path(__file__).resolve().parents[3]
+ sys.path.insert(0,str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.glyphs.line_structure import (
+     ADDRESS, _table_structure, _crosses, build_structure, join_pieces, render_structure,
+ )
+@@ -26,7 +27,7 @@
+ 
+ 
+ def read(path):
+-    return json.loads(path.read_text())
++    return json.loads(_data_input(path).read_text())
+ 
+ 
+ def write(path,value):
+@@ -34,7 +35,7 @@
+ 
+ 
+ def sha(path):
+-    return hashlib.sha256(path.read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
+ 
+ 
+ def _area(b):
+--- a/scripts/harvest/_anemi_round1_fetcher.py
++++ b/scripts/harvest/_anemi_round1_fetcher.py
+@@ -1,6 +1,7 @@
+ #!/usr/bin/env python3
+ """Internal-only Anemi page-PDF acquisition; transport/login belong to O4c."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ from contextlib import closing, contextmanager
+@@ -24,7 +25,7 @@
+ 
+ 
+ def sha256(path):
+-    with Path(path).open("rb") as stream:
++    with _data_input(Path(path)).open("rb") as stream:
+         return hashlib.file_digest(stream, "sha256").hexdigest()
+ 
+ 
+--- a/scripts/harvest/admit_round1.py
++++ b/scripts/harvest/admit_round1.py
+@@ -5,6 +5,7 @@
+ No provider adapter, HTTP client, model, or Git command is used.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ from collections import Counter, defaultdict
+@@ -34,14 +35,14 @@
+ 
+ def sha(path: Path) -> str:
+     digest = hashlib.sha256()
+-    with path.open("rb") as stream:
++    with _data_input(path).open("rb") as stream:
+         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+             digest.update(chunk)
+     return digest.hexdigest()
+ 
+ 
+ def read_jsonl(path: Path) -> list[dict]:
+-    return [json.loads(line) for line in path.read_text().splitlines() if line]
++    return [json.loads(line) for line in _data_input(path).read_text().splitlines() if line]
+ 
+ 
+ def write_json(path: Path, value) -> None:
+--- a/scripts/harvest/cyrillic.py
++++ b/scripts/harvest/cyrillic.py
+@@ -1,5 +1,6 @@
+ """T26 resumable IA scans -> frozen gate -> at-most-once, automatic-language DocAI."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter
+ from concurrent.futures import ProcessPoolExecutor
+@@ -52,7 +53,7 @@
+             print_review=r['print_review'],media_probe=probes.get(ident,r['media_probe'])))
+     frozen(OUT/'source_books.json',books)
+     frozen(OUT/'holdout_books.json',policy.holdout(books))
+-    limits=json.loads((round1.OUT/'selection.json').read_text())['quality_limits']
++    limits=json.loads((_data_input(round1.OUT/'selection.json')).read_text())['quality_limits']
+     frozen(OUT/'selection.json',dict(schema='t26-selection-1',seed=policy.SEED,holdout_seed=policy.HOLDOUT_SEED,
+         books=books,quality_limits=limits,inputs={str(INPUT/n):sha(INPUT/n) for n in ('candidates.jsonl','media_probes.jsonl')},
+         gate_sha256=round1.GATE_SHA,admission_sha256=ADMISSION_SHA,selected_candidates=rows))
+--- a/scripts/harvest/cyrillic_outputs.py
++++ b/scripts/harvest/cyrillic_outputs.py
+@@ -1,5 +1,6 @@
+ """Offline T26 mapping, page-language exclusion, unchanged T20 admission and validation."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter, defaultdict
+ from concurrent.futures import ProcessPoolExecutor
+ from datetime import datetime
+@@ -165,7 +166,7 @@
+     for stem,rows in [('admitted',admitted),('rejected',rejected),('prior_train_exclusions',exclusions)]:write_jsonl(OUT/(stem+'.jsonl'),rows)
+     atomic(OUT/'admission_summary.json',summary);atomic(OUT/'cyrillic_share.json',share_report(reads['pages']))
+     # Carry prior O5/source-cap exclusions forward in a minimal combined training overlay.
+-    prior_pool=read_jsonl(REPO/'docs/harvest/mixed/train_pool.jsonl');excluded={r['id'] for r in exclusions}
++    prior_pool=read_jsonl(_data_input(REPO/'docs/harvest/mixed/train_pool.jsonl'));excluded={r['id'] for r in exclusions}
+     pool=[r for r in prior_pool if r['id'] not in excluded]
+     fields=('id','source','script_class','label','crop_path','crop_sha256','book_key','read_batch','licence','split')
+     pool.extend(dict({k:r[k] for k in fields},admission_record_file='docs/harvest/cyrillic/admitted.jsonl') for r in admitted if r['split']=='train')
+@@ -178,7 +179,7 @@
+             entries.append(entry)
+             if i%100==0:print(f'compiled {i}/{len(tasks)}',flush=True)
+     atomic(BULK/'compiled/compile_receipt.json',dict(schema='t26-compiled-1',pages=entries,page_count=len(entries),
+-        builder_sha256=sha(Path(__file__)),base_builder_sha256=sha(Path(compiler.__file__)),records_sha256=sha(OUT/'records.jsonl')))
++        builder_sha256=sha(Path(__file__)),base_builder_sha256=sha(Path(compiler.__file__)),records_sha256=sha(_data_input(OUT/'records.jsonl'))))
+     (BULK/'compiled/README.txt').write_text(compiler.README+'Red headings mark bad_page and/or not_cyrillic_page exclusions. No owner Cyrillic transcription review is available.\n')
+     print(json.dumps(dict(lines=len(records),admitted=len(admitted),compiled=len(entries))),flush=True)
+ 
+@@ -217,12 +218,12 @@
+         assert g['supplemental_quality_flags']==flags and g['faint_suppression_share']==ratio
+         assert p['harvest_accepted']==(g['pilot_gate']['accepted'] and not flags)
+         assert not p['harvest_accepted'] or 'more_than_two_columns' not in g['flags']
+-    records,reads=read_records(plan);assert records==read_jsonl(OUT/'records.jsonl')
++    records,reads=read_records(plan);assert records==read_jsonl(_data_input(OUT/'records.jsonl'))
+     assert reads==json.loads((OUT/'read_summary.json').read_text())
+     old=old_records();expected,rejected,quality,before,exclusions=admit_records(records,held,old)
+     expected,crej,failures,geometry=previous.plan_crops(records,expected,{p['id']:(p['width'],p['height']) for p in plan['pages']})
+-    rejected=sorted(rejected+crej,key=lambda r:r['id']);actual=read_jsonl(OUT/'admitted.jsonl')
+-    assert rejected==read_jsonl(OUT/'rejected.jsonl') and exclusions==read_jsonl(OUT/'prior_train_exclusions.jsonl')
++    rejected=sorted(rejected+crej,key=lambda r:r['id']);actual=read_jsonl(_data_input(OUT/'admitted.jsonl'))
++    assert rejected==read_jsonl(_data_input(OUT/'rejected.jsonl')) and exclusions==read_jsonl(OUT/'prior_train_exclusions.jsonl')
+     assert {r['id'] for r in expected}=={r['id'] for r in actual}
+     assert len(actual)+len(rejected)==len(records)
+     amap={r['id']:r for r in actual};groups=defaultdict(list)
+@@ -248,7 +249,7 @@
+     assert summary['per_reason']=={reason:sum(reason in r['reasons'] for r in rejected) for reason in REASONS}
+     assert summary['per_class_split']=={c:{s:sum(r['script_class']==c and r['split']==s for r in actual) for s in ('train','dev','test')} for c in admission.CLASSES}
+     assert json.loads((OUT/'cyrillic_share.json').read_text())==share_report(reads['pages'])
+-    pool=read_jsonl(OUT/'train_pool.jsonl');labels={admission.normalize_label(r['label']) for r in old+actual if r['split'] in ('test','dev')}
++    pool=read_jsonl(_data_input(OUT/'train_pool.jsonl'));labels={admission.normalize_label(r['label']) for r in old+actual if r['split'] in ('test','dev')}
+     assert not any(admission.normalize_label(r['label']) in labels for r in pool)
+     compiled=json.loads((BULK/'compiled/compile_receipt.json').read_text());assert compiled['page_count']==len(plan['pages'])
+     assert compiled['builder_sha256']==sha(Path(__file__)) and compiled['base_builder_sha256']==sha(Path(compiler.__file__))
+--- a/scripts/harvest/mixed.py
++++ b/scripts/harvest/mixed.py
+@@ -1,5 +1,6 @@
+ """T25 resumable three-part collection. Only acquire/read modes use network."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ from collections import Counter, defaultdict
+@@ -72,7 +73,7 @@
+         raise ValueError('crop key collision')
+     for i,b in enumerate(books,1):
+         b['catalogue']['rank'] = i
+-    raw = json.loads((REPO/'docs/harvest/openarchives/wave5_candidates.json').read_text())
++    raw = json.loads((_data_input(REPO/'docs/harvest/openarchives/wave5_candidates.json')).read_text())
+     repos, failures = [], Counter()
+     for row in raw:
+         try:
+@@ -82,12 +83,12 @@
+     repo_order = policy.repository_order(repos)
+     inputs = {relative(REPO/f'docs/harvest/{n}/selection.json'):sha(REPO/f'docs/harvest/{n}/selection.json') for n in ('round1','round2')}
+     inputs.update({str(round2.CATALOGUE):sha(round2.CATALOGUE),
+-        'docs/harvest/openarchives/wave5_candidates.json':sha(REPO/'docs/harvest/openarchives/wave5_candidates.json'),**early_inputs})
++        'docs/harvest/openarchives/wave5_candidates.json':sha(_data_input(REPO/'docs/harvest/openarchives/wave5_candidates.json')),**early_inputs})
+     frozen(OUT/'selection.json',dict(schema='t25-selection-1',seed=policy.SEED,books=books,
+         excluded=sorted(excluded),exclusion_counts=dict(round1_round2=len(prior),early=len(early)),
+         eligible_anemi=len(candidates),anemi_rejections=dict(rejected),
+         repository_candidates=len(repo_order),repository_rejections=dict(failures),
+-        quality_limits=json.loads((round1.OUT/'selection.json').read_text())['quality_limits'],inputs=inputs))
++        quality_limits=json.loads((_data_input(round1.OUT/'selection.json')).read_text())['quality_limits'],inputs=inputs))
+     frozen(OUT/'repository_order.json',repo_order)
+     frozen(OUT/'books_A.json',books)
+     frozen(OUT/'holdout_A.json',policy.select_holdout(books))
+@@ -419,7 +420,7 @@
+ def acquire_b():
+     vouli.check_frozen()
+     limits = json.loads((OUT/'selection.json').read_text())['quality_limits']
+-    candidates = json.loads((OUT/'repository_order.json').read_text())
++    candidates = json.loads((_data_input(OUT/'repository_order.json')).read_text())
+     path = OUT/'repository_attempts.json'
+     attempts = json.loads(path.read_text()) if path.exists() else []
+     results = [json.loads(p.read_text()) for p in sorted((OUT/'direct_results_B').glob('*.json'))]
+--- a/scripts/harvest/mixed_outputs.py
++++ b/scripts/harvest/mixed_outputs.py
+@@ -1,5 +1,6 @@
+ """T25 offline DocAI mapping, frozen admission, crops and evidence reports."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ from collections import Counter, defaultdict
+ from concurrent.futures import ProcessPoolExecutor
+@@ -288,7 +289,7 @@
+             compiled.append(result)
+             if i%100==0:print(f'compiled {i}/{len(tasks)}',flush=True)
+     atomic(BULK/'compiled/compile_receipt.json',dict(schema='t25-compiled-1',pages=compiled,page_count=len(compiled),
+-        records_sha256=sha(OUT/'records.jsonl'),base_builder_sha256=sha(Path(compiler.__file__)),builder_sha256=sha(Path(__file__)),jpeg_quality=85))
++        records_sha256=sha(_data_input(OUT/'records.jsonl')),base_builder_sha256=sha(Path(compiler.__file__)),builder_sha256=sha(Path(__file__)),jpeg_quality=85))
+     (BULK/'compiled/README.txt').write_text(compiler.README.replace(' (the weakest 5%)','')+
+         'Bad pages have red REJECTED: bad_page headings. Their lines are excluded at admission. Parts A/B/C follow the selection report.\n')
+     print(json.dumps(dict(lines=len(records),admitted=len(admitted),compiled=len(compiled))),flush=True)
+@@ -307,7 +308,7 @@
+ 
+ def validate(plan):
+     books=json.loads((OUT/'books.json').read_text());held=json.loads((OUT/'holdout_books.json').read_text())
+-    selection=json.loads((OUT/'selection.json').read_text());manifest=json.loads((OUT/'manifest.json').read_text())
++    selection=json.loads((OUT/'selection.json').read_text());manifest=json.loads((_data_input(OUT/'manifest.json')).read_text())
+     assert Counter(b['part'] for b in books)=={'A':40,'B':40,'C':1}
+     assert len({b['key'][:8] for b in books})==81
+     assert held==policy.select_holdout(books)
+@@ -363,19 +364,19 @@
+     atomic(OUT/'direct_http_validation.json',dict(requests=len(direct),required_host_gap_s=1,
+         min_host_gap_s=min(gaps) if gaps else None,passed=True,per_host=dict(Counter(r['host'] for r in direct))))
+     records,reads=read_records(plan)
+-    assert records==read_jsonl(OUT/'records.jsonl') and reads==json.loads((OUT/'read_summary.json').read_text())
++    assert records==read_jsonl(_data_input(OUT/'records.jsonl')) and reads==json.loads((OUT/'read_summary.json').read_text())
+     assert len({r['id'] for r in records})==len(records)
+     old=old_records();expected,rejected,quality,before,exclusions=admit_records(records,held,old)
+     expected,crop_rejected,failures,geometries=previous.plan_crops(records,expected,{p['id']:(p['width'],p['height']) for p in plan['pages']})
+-    actual=read_jsonl(OUT/'admitted.jsonl');summary=json.loads((OUT/'admission_summary.json').read_text())
++    actual=read_jsonl(_data_input(OUT/'admitted.jsonl'));summary=json.loads((OUT/'admission_summary.json').read_text())
+     rejected=sorted(rejected+crop_rejected,key=lambda r:r['id'])
+-    assert rejected==read_jsonl(OUT/'rejected.jsonl')
++    assert rejected==read_jsonl(_data_input(OUT/'rejected.jsonl'))
+     assert len(actual)+len(rejected)==len(records)
+     assert [r['id'] for r in actual]==[r['id'] for r in expected]
+     assert all(all(a[k]==v for k,v in e.items() if k!='docai_text') for a,e in zip(actual,expected))
+     pool,cap_exclusions,cap=training_pool(old,actual,exclusions)
+     assert len(pool)==len({r['id'] for r in pool})
+-    assert pool==read_jsonl(OUT/'train_pool.jsonl')
++    assert pool==read_jsonl(_data_input(OUT/'train_pool.jsonl'))
+     assert exclusions+cap_exclusions==read_jsonl(OUT/'train_pool_exclusions.jsonl')
+     labels={admission.normalize_label(r['label']) for r in old+actual if r['split'] in ('dev','test')}
+     assert not labels&{r['label'] for r in pool} and cap['passed']
+--- a/scripts/harvest/montage_controls.py
++++ b/scripts/harvest/montage_controls.py
+@@ -17,6 +17,7 @@
+ 
+ REPO = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(REPO))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.harvest.core import list_return
+ from greekocr.harvest.montage import assign_lines, build_montages, response_lines
+ from greekocr.harvest.montage_controls import compare_control, summarise_controls
+@@ -29,7 +30,7 @@
+ 
+ 
+ def sha(path):
+-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(Path(path)).read_bytes()).hexdigest()
+ 
+ 
+ def frozen(path, value):
+--- a/scripts/harvest/montage_flush.py
++++ b/scripts/harvest/montage_flush.py
+@@ -18,6 +18,7 @@
+ 
+ REPO = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(REPO))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.harvest.montage import (assign_lines, assign_symbols, build_montages,
+     group_flush_crops, response_lines, response_symbols)
+ from greekocr.harvest.montage_controls import compare_control, summarise_controls
+@@ -113,7 +114,7 @@
+     preview = OUT / "preview_n10.png"
+     first = next(m for m in manifest if m["experiment_layout"] == "flush" and m["n"] == 10)
+     # A native copy: preview-only rescaling is unnecessary for this small PNG.
+-    if not preview.exists():
++    if not _data_input(preview).exists():
+         shutil.copyfile(first["image"], preview)
+     if sha(preview) != first["image_sha256"]:
+         raise ValueError("preview differs from the first native flush montage")
+@@ -270,7 +271,7 @@
+         pricing_sources=["https://cloud.google.com/vision/pricing", "https://cloud.google.com/products/document-ai/pricing"],
+         policy="all attempts reserved at list price; no free-tier deduction or automatic retries",
+         reader_bindings=sample["bindings"], bulk_root=str(BULK), n_adopt=summary["n_adopt"],
+-        preview_bytes=(OUT / "preview_n10.png").stat().st_size,
++        preview_bytes=(_data_input(OUT / "preview_n10.png")).stat().st_size,
+         artifact_sha256={name: sha(OUT / name) for name in ("manifest.json", "grouping.json", "input_sha256.json",
+                          "comparisons.jsonl", "summary.json", "plan.json", "preview_n10.png")},
+         source_sha256={path: sha(REPO / path) for path in SOURCE_PATHS},
+--- a/scripts/harvest/montage_pilot.py
++++ b/scripts/harvest/montage_pilot.py
+@@ -19,6 +19,7 @@
+ 
+ REPO = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(REPO))
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ from greekocr.harvest.montage import (assign_lines, assign_symbols, build_montages,
+     compare_nfd, response_lines, response_symbols, summarise)
+@@ -30,7 +31,7 @@
+ 
+ 
+ def sha(path):
+-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(Path(path)).read_bytes()).hexdigest()
+ 
+ 
+ def select(records):
+@@ -103,7 +104,7 @@
+     for result in comparisons:
+         by_id[result["id"]].append(result)
+     # Reuse the pilot typography, source headers, flags, native crop cards and filters.
+-    pilot = (REPO / "docs/harvest/pilot_review.html").read_text()
++    pilot = (_data_input(REPO / "docs/harvest/pilot_review.html")).read_text()
+     style = pilot.split("<style>", 1)[1].split("</style>", 1)[0]
+     style += ".comparisons{width:100%;border-collapse:collapse;table-layout:fixed}.comparisons th,.comparisons td{text-align:left;vertical-align:top;padding:10px;border-top:1px solid var(--rule);overflow-wrap:anywhere}.comparisons td.text{font:20px/1.6 Georgia,serif;white-space:pre-wrap}.crop-scroll{overflow:auto}.crop-scroll img{max-width:none}th.meta{width:15%}@media(max-width:600px){.comparisons td.text{font-size:16px}.comparisons th,.comparisons td{padding:5px}.crop-scroll img{max-width:100%}}"
+     cards = []
+--- a/scripts/harvest/openarchives.py
++++ b/scripts/harvest/openarchives.py
+@@ -4,6 +4,7 @@
+ public bitstream hosts / Google. Per-candidate and per-page receipts allow resume.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter
+ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+@@ -79,7 +80,7 @@
+     for n,v in [('candidates',pool),('pool_summary',summary),('selection',draw)]:atomic(OUT/(n+'.json'),v)
+     result=dict(schema='t24c-selection-1',inputs=inputs,seed=SEED,holdout_seed=20261015,cap_used=cap,
+         target_documents=130,target_overdraw=173,overdraw=len(draw),pool_size=len(pool),
+-        quality_limits=json.loads((round1.OUT/'selection.json').read_text())['quality_limits'],
++        quality_limits=json.loads((_data_input(round1.OUT/'selection.json')).read_text())['quality_limits'],
+         disk_free_bytes=disk_check(),admission_sha256=ADMISSION_SHA,gate_sha256=round1.GATE_SHA,
+         started_utc=datetime.now(timezone.utc).isoformat())
+     atomic(OUT/'selection_config.json',result)
+--- a/scripts/harvest/openarchives_outputs.py
++++ b/scripts/harvest/openarchives_outputs.py
+@@ -1,5 +1,6 @@
+ """Offline T24c records, unchanged T20 admission, crops, compilation and audit."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter,defaultdict
+ from concurrent.futures import ProcessPoolExecutor
+ from datetime import datetime
+@@ -132,7 +133,7 @@
+     book_rows=json.loads((OUT/'books.json').read_text())
+     per_repo={repo:{c:{s:sum(r['collection_slug']==repo and r['script_class']==c and r['split']==s for r in admitted)
+         for s in ('train','dev','test')} for c in admission.CLASSES} for repo in sorted({b['collection_slug'] for b in book_rows})}
+-    outcomes=Counter(r['outcome'] for r in json.loads((OUT/'acquisition_results.json').read_text()))
++    outcomes=Counter(r['outcome'] for r in json.loads((_data_input(OUT/'acquisition_results.json')).read_text()))
+     summary=dict(schema='t24c-admission-1',documents=len(book_rows),pages=len(plan['pages']),
+         documents_tried=sum(outcomes.values()),documents_downloaded=outcomes['downloaded'],dead_links=outcomes['dead_link'],skipped_size=outcomes['skipped_size'],
+         pages_rendered=plan['pages_rendered'],pages_accepted=plan['pages_accepted'],pages_read=reads['pages_read'],
+@@ -147,7 +148,7 @@
+     for name,rows in [('admitted',admitted),('rejected',rejected),('prior_train_exclusions',exclusions)]:write_jsonl(OUT/(name+'.jsonl'),rows)
+     atomic(OUT/'admission_summary.json',summary)
+     # Preserve existing source-cap policies and add reverse O5 exclusions.
+-    prior_pool=read_jsonl(REPO/'docs/harvest/cyrillic/train_pool.jsonl');excluded={r['id'] for r in exclusions}
++    prior_pool=read_jsonl(_data_input(REPO/'docs/harvest/cyrillic/train_pool.jsonl'));excluded={r['id'] for r in exclusions}
+     train=[r for r in prior_pool if r['id'] not in excluded]
+     fields=('id','source','script_class','label','crop_path','crop_sha256','book_key','read_batch','licence','split')
+     train.extend(dict({k:r[k] for k in fields},admission_record_file='docs/harvest/openarchives/admitted.jsonl') for r in admitted if r['split']=='train')
+@@ -158,7 +159,7 @@
+         for i,entry in enumerate(pool.map(compile_task,tasks,chunksize=1),1):
+             entries.append(entry)
+             if i%100==0:print(f'compiled {i}/{len(tasks)}',flush=True)
+-    atomic(BULK/'compiled/compile_receipt.json',dict(schema='t24c-compiled-1',pages=entries,page_count=len(entries),builder_sha256=sha(Path(__file__)),base_builder_sha256=sha(Path(compiler.__file__)),records_sha256=sha(OUT/'records.jsonl')))
++    atomic(BULK/'compiled/compile_receipt.json',dict(schema='t24c-compiled-1',pages=entries,page_count=len(entries),builder_sha256=sha(Path(__file__)),base_builder_sha256=sha(Path(compiler.__file__)),records_sha256=sha(_data_input(OUT/'records.jsonl'))))
+     (BULK/'compiled/README.txt').write_text(compiler.README+'Red headings identify bad_page admission exclusions. Repository and title/year are pipeline metadata, not independently verified PDF identity.\n')
+     print(json.dumps(dict(lines=len(records),admitted=len(admitted),compiled=len(entries))),flush=True)
+ 
+@@ -194,10 +195,10 @@
+         flags,ratio=round1.quality_flags(g['features'],Counter(g['suppression_reasons']),g['lines'],plan['quality_limits'])
+         assert flags==g['supplemental_quality_flags'] and ratio==g['faint_suppression_share']
+         assert p['harvest_accepted']==(g['pilot_gate']['accepted'] and not flags)
+-    records,reads=read_records(plan);assert records==read_jsonl(OUT/'records.jsonl') and reads==json.loads((OUT/'read_summary.json').read_text())
++    records,reads=read_records(plan);assert records==read_jsonl(_data_input(OUT/'records.jsonl')) and reads==json.loads((OUT/'read_summary.json').read_text())
+     old=old_records();expected,rejected,quality,before,exclusions=admit_records(records,held,old)
+     expected,crej,failures,geometry=previous.plan_crops(records,expected,{p['id']:(p['width'],p['height']) for p in plan['pages']})
+-    actual=read_jsonl(OUT/'admitted.jsonl');amap={r['id']:r for r in actual}
++    actual=read_jsonl(_data_input(OUT/'admitted.jsonl'));amap={r['id']:r for r in actual}
+     assert sorted(rejected+crej,key=lambda r:r['id'])==read_jsonl(OUT/'rejected.jsonl')
+     assert exclusions==read_jsonl(OUT/'prior_train_exclusions.jsonl')
+     assert {r['id'] for r in expected}==set(amap) and len(actual)+len(rejected)+len(crej)==len(records)
+@@ -218,7 +219,7 @@
+                 checked+=1
+     summary=json.loads((OUT/'admission_summary.json').read_text());assert checked==summary['crops']==summary['admitted']==len(actual)
+     labels={admission.normalize_label(r['label']) for r in old+actual if r['split'] in ('dev','test')}
+-    assert not any(admission.normalize_label(r['label']) in labels for r in read_jsonl(OUT/'train_pool.jsonl'))
++    assert not any(admission.normalize_label(r['label']) in labels for r in read_jsonl(_data_input(OUT/'train_pool.jsonl')))
+     entries=json.loads((BULK/'compiled/compile_receipt.json').read_text());assert entries['page_count']==len(plan['pages'])
+     emap={e['page_id']:e for e in entries['pages']}
+     tasks=[(p,groups[p['id']],quality.get(p['id'],{}),emap[p['id']]) for p in plan['pages']]
+@@ -255,7 +256,7 @@
+ 
+ 
+ def final_line(plan,s,tests,cost):
+-    results=json.loads((OUT/'acquisition_results.json').read_text());read=json.loads((OUT/'read_summary.json').read_text())
++    results=json.loads((_data_input(OUT/'acquisition_results.json')).read_text());read=json.loads((OUT/'read_summary.json').read_text())
+     return (f"T24c: done | docs: {s['documents']}/{len(results)} | pages: {plan['pages_rendered']}/{plan['pages_accepted']}/{read['pages_read']} | lines: {s['input_lines']} | admitted: {s['admitted']} | mono: {s['per_class']['greek_mono']} | cs: {s['per_class']['greek_latin_cs']} | train: {s['per_split']['train']} | dev: {s['per_split']['dev']} | test: {s['per_split']['test']} | usd: {cost:.2f} | tests: {tests} passed")
+ 
+ 
+@@ -263,7 +264,7 @@
+     validation=json.loads((OUT/'validation.json').read_text());assert validation['passed']
+     s=json.loads((OUT/'admission_summary.json').read_text());pool=json.loads((OUT/'pool_summary.json').read_text());config=json.loads((OUT/'selection_config.json').read_text())
+     reads=json.loads((OUT/'read_summary.json').read_text())
+-    results=json.loads((OUT/'acquisition_results.json').read_text());cost=json.loads((OUT/'cost_receipt.json').read_text());tests=test_count();line=final_line(plan,s,tests,cost['cost_usd'])
++    results=json.loads((_data_input(OUT/'acquisition_results.json')).read_text());cost=json.loads((OUT/'cost_receipt.json').read_text());tests=test_count();line=final_line(plan,s,tests,cost['cost_usd'])
+     atomic(OUT/'preflight.json',dict(schema='t24c-preflight-1',status='complete' if s['documents']==130 else 'available_scope_complete',
+         pool_size=config['pool_size'],overdraw=config['overdraw'],cap_used=config['cap_used'],
+         target_documents=130,downloaded=s['documents'],document_shortfall=max(0,130-s['documents']),
+@@ -317,6 +318,6 @@
+ 
+ def abort_report():
+     abort=json.loads((OUT/'disk_abort.json').read_text())
+-    results=json.loads((OUT/'acquisition_results.json').read_text()) if (OUT/'acquisition_results.json').exists() else []
++    results=json.loads((_data_input(OUT/'acquisition_results.json')).read_text()) if (_data_input(OUT/'acquisition_results.json')).exists() else []
+     pages=json.loads((OUT/'manifest.json').read_text()) if (OUT/'manifest.json').exists() else []
+     (OUT/'READS.md').write_text('# T24c — gracefully aborted for disk space\n\n'+json.dumps(abort,ensure_ascii=False,indent=2)+f"\n\n{len(results)} completed candidate receipts; {len(pages)} rendered pages. Per-candidate checkpoints and Google reservations retained. Harvest incomplete.\n")
+--- a/scripts/harvest/openarchives_preflight.py
++++ b/scripts/harvest/openarchives_preflight.py
+@@ -1,5 +1,6 @@
+ """Offline T24b feasibility evidence. No fallback changes the approved join."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ from collections import Counter, defaultdict
+ from datetime import datetime, timezone
+@@ -65,8 +66,8 @@
+     pool,wave5,summary=build_pool(BULK/'external_pdfs.parquet',BULK/'doc_metadata.jsonl')
+     actual=json.loads((OUT/'pool_summary.json').read_text())
+     assert all(actual[k]==v for k,v in summary.items())
+-    assert pool==json.loads((OUT/'candidates.json').read_text())
+-    assert wave5==json.loads((OUT/'wave5_candidates.json').read_text())
++    assert pool==json.loads((_data_input(OUT/'candidates.json')).read_text())
++    assert wave5==json.loads((_data_input(OUT/'wave5_candidates.json')).read_text())
+     draw=stratified_draw(pool)
+     assert draw==json.loads((OUT/'selection.json').read_text())
+     assert len(draw)<130 and pre['status']=='blocked' and pre['null_scores_waived']
+--- a/scripts/harvest/page_reads.py
++++ b/scripts/harvest/page_reads.py
+@@ -23,6 +23,7 @@
+ 
+ REPO = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(REPO))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.harvest.montage import compare_nfd, response_lines, response_symbols
+ from greekocr.harvest.montage_controls import letters_marks
+ from greekocr.harvest.page_reads import assign_page_lines, assign_page_symbols, page_summary, build_blind_review, _response_geometry
+@@ -42,7 +43,7 @@
+ 
+ 
+ def sha(path):
+-    with Path(path).open('rb') as stream:
++    with _data_input(Path(path)).open('rb') as stream:
+         return hashlib.file_digest(stream, 'sha256').hexdigest()
+ 
+ 
+--- a/scripts/harvest/parliament.py
++++ b/scripts/harvest/parliament.py
+@@ -4,6 +4,7 @@
+ respectively. build/validate/publish are offline. Never writes Git metadata.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ from collections import Counter
+@@ -119,7 +120,7 @@
+     catalogue=read_jsonl(CATALOGUE)
+     slots=candidate_slots(catalogue)
+     missing=[y for y in YEARS if not any(s['candidates'] for s in slots if s['year']==y)]
+-    limits=json.loads((round1.OUT/'selection.json').read_text())['quality_limits']
++    limits=json.loads((_data_input(round1.OUT/'selection.json')).read_text())['quality_limits']
+     client=ParliamentHTTP(BULK/'http_t23')
+     skips,books,manifest,page_slots=[],[],[],[]
+     completed=OUT/'volumes'
+--- a/scripts/harvest/parliament_outputs.py
++++ b/scripts/harvest/parliament_outputs.py
+@@ -1,5 +1,6 @@
+ """T23 offline records, unchanged T20 admission, native crops and evidence."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ from collections import Counter, defaultdict
+ from concurrent.futures import ProcessPoolExecutor
+@@ -259,7 +260,7 @@
+             compiled.append(result)
+             if i%100==0: print(f'compiled {i}/{len(tasks)}',flush=True)
+     atomic(BULK/'compiled/compile_receipt.json',dict(schema='t23-compiled-1',pages=compiled,page_count=len(compiled),
+-        records_sha256=sha(OUT/'records.jsonl'),base_builder_sha256=sha(Path(compiler.__file__)),
++        records_sha256=sha(_data_input(OUT/'records.jsonl')),base_builder_sha256=sha(Path(compiler.__file__)),
+         builder_sha256=sha(Path(__file__)),jpeg_quality=85,pad=40,gap=40))
+     (BULK/'compiled/README.txt').write_text(compiler.README.replace(' (the weakest 5%)','')+
+         'Bad pages remain compiled, with a red REJECTED: bad_page heading and their triggers. All their lines are excluded from admission.\n'
+@@ -287,7 +288,7 @@
+     from greekocr.harvest.parliament_http import ParliamentHTTP
+     from scripts.harvest.parliament import CATALOGUE, SOURCE as expected_source
+     books=json.loads((OUT/'books.json').read_text())
+-    manifest=json.loads((OUT/'manifest.json').read_text())
++    manifest=json.loads((_data_input(OUT/'manifest.json')).read_text())
+     slots=json.loads((OUT/'slots.json').read_text())
+     held=json.loads((OUT/'holdout_books.json').read_text())
+     selection=json.loads((OUT/'selection_summary.json').read_text())
+@@ -369,19 +370,19 @@
+     cost=json.loads((OUT/'cost_receipt.json').read_text())
+     assert cost['calls_reserved']==len(budget) and cost['cost_usd']==len(budget)*.0015
+     records,reads=read_records(plan)
+-    assert records==read_jsonl(OUT/'records.jsonl') and reads==json.loads((OUT/'read_summary.json').read_text())
++    assert records==read_jsonl(_data_input(OUT/'records.jsonl')) and reads==json.loads((OUT/'read_summary.json').read_text())
+     assert len(records)==len({r['id'] for r in records})
+     assert all(r['source']==SOURCE and r['licence']=='CC-BY-4.0' and r['read_batch']=='parliament_modern' for r in records)
+     old=[r for name in OLD_FILES for r in read_jsonl(REPO/name)]
+     expected,rejected,quality,before,exclusions=admit_records(records,held,old)
+     expected,crop_rejected,crop_failures,geometries=previous.plan_crops(records,expected,{p['id']:(p['width'],p['height']) for p in plan['pages']})
+-    actual=read_jsonl(OUT/'admitted.jsonl');summary=json.loads((OUT/'admission_summary.json').read_text())
+-    assert sorted(rejected+crop_rejected,key=lambda r:r['id'])==read_jsonl(OUT/'rejected.jsonl')
++    actual=read_jsonl(_data_input(OUT/'admitted.jsonl'));summary=json.loads((OUT/'admission_summary.json').read_text())
++    assert sorted(rejected+crop_rejected,key=lambda r:r['id'])==read_jsonl(_data_input(OUT/'rejected.jsonl'))
+     assert len(actual)+len(rejected)+len(crop_rejected)==len(records)
+     assert [r['id'] for r in actual]==[r['id'] for r in expected]
+     assert all(all(a[k]==v for k,v in e.items() if k!='docai_text') for a,e in zip(actual,expected))
+     pool,cap_exclusions,cap=training_pool(old,actual,exclusions)
+-    assert pool==read_jsonl(OUT/'train_pool.jsonl') and exclusions+cap_exclusions==read_jsonl(OUT/'train_pool_exclusions.jsonl')
++    assert pool==read_jsonl(_data_input(OUT/'train_pool.jsonl')) and exclusions+cap_exclusions==read_jsonl(OUT/'train_pool_exclusions.jsonl')
+     labels={admission.normalize_label(r['label']) for r in old+actual if r['split'] in ('dev','test')}
+     assert not labels&{r['label'] for r in pool} and cap['passed']
+     amap={r['id']:r for r in actual};groups=defaultdict(list)
+@@ -461,10 +462,10 @@
+     books=json.loads((OUT/'books.json').read_text())
+     selection=json.loads((OUT/'selection_summary.json').read_text())
+     api=json.loads((OUT/'api_politeness.json').read_text())
+-    manifest=json.loads((OUT/'manifest.json').read_text())
++    manifest=json.loads((_data_input(OUT/'manifest.json')).read_text())
+     held={b['book_key']:b['split'] for b in json.loads((OUT/'holdout_books.json').read_text())}
+     zero_gate_volumes=[b['key'] for b in books if not any(p['key']==b['key'] and p['harvest_accepted'] for p in manifest)]
+-    records=read_jsonl(OUT/'records.jsonl');admitted=read_jsonl(OUT/'admitted.jsonl')
++    records=read_jsonl(_data_input(OUT/'records.jsonl'));admitted=read_jsonl(_data_input(OUT/'admitted.jsonl'))
+     splits=summary['per_split'];classes=summary['per_class']
+     before=json.loads((OUT/'git_before.json').read_text());after=round1.git_snapshot()
+     main_paths=('HEAD','index','refs/heads/main','packed-refs','logs/HEAD','logs/refs/heads/main','config')
+--- a/scripts/harvest/parliament_retention.py
++++ b/scripts/harvest/parliament_retention.py
+@@ -7,6 +7,7 @@
+ No Google calls or requested line/crop/compiled artifacts are removed.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ from collections import Counter
+@@ -48,7 +49,7 @@
+ 
+ 
+ def prepare():
+-    pages=json.loads((OUT/'manifest.json').read_text())
++    pages=json.loads((_data_input(OUT/'manifest.json')).read_text())
+     visual=json.loads((OUT/'fetch_visual_qa.json').read_text())
+     keep=keep_examples(pages,[p['page_id'] for p in visual['samples']])
+     path=OUT/'page_image_retention.json'
+@@ -78,7 +79,7 @@
+ 
+ def restore(page_id):
+     from greekocr.harvest.parliament_http import ParliamentHTTP
+-    page=next(p for p in json.loads((OUT/'manifest.json').read_text()) if p['id']==page_id)
++    page=next(p for p in json.loads((_data_input(OUT/'manifest.json')).read_text()) if p['id']==page_id)
+     target=REPO/page['image']
+     if target.exists():
+         if sha(target)!=page['image_sha256']:raise ValueError('existing PNG changed')
+--- a/scripts/harvest/reissue_census2.py
++++ b/scripts/harvest/reissue_census2.py
+@@ -1,4 +1,5 @@
+ """Offline CENSUS2 reissue; read-only source checkouts, assert local import."""
++from greekocr.ops.data_root import input_path as _data_input
+ from pathlib import Path
+ import greekocr
+ ROOT = Path(__file__).resolve().parents[2]
+@@ -62,7 +63,7 @@
+ assert old_receipt['serbian_extension_sha256'] == receipt['serbian_extension_sha256']
+ old = [json.loads(l) for l in old_raw.splitlines()]
+ new_path = OUT / 'ADMISSION_CENSUS_20261018_admission.jsonl'
+-new = [json.loads(l) for l in new_path.read_text().splitlines()]
++new = [json.loads(l) for l in _data_input(new_path).read_text().splitlines()]
+ changes, details = Counter(), []
+ wave = defaultdict(lambda: {'old': Counter(), 'new': Counter()})
+ for index, (r, before, after) in enumerate(zip_longest(rows, old, new), 1):
+@@ -91,7 +92,7 @@
+                   changed_decisions=sum(changes.values()), changed_output_rows=len(details),
+                   no_non_serbian_changes=True, unknown_or_ambiguous_documents=[],
+                   serbian_rows=sum(v['rows'] for v in languages.values() if v['serbian']),
+-                  admission_sha256=sha(new_path.read_bytes()),
++                  admission_sha256=sha(_data_input(new_path).read_bytes()),
+                   old_admission_sha256=sha(old_raw), network_requests=0)
+ write(OUT / 'census2_comparison.json', comparison)
+ receipt.update(admission_sha256=comparison['admission_sha256'],
+--- a/scripts/harvest/reissue_census3.py
++++ b/scripts/harvest/reissue_census3.py
+@@ -1,4 +1,5 @@
+ """Offline CENSUS3 census, full ordered CENSUS2 comparison and input readback."""
++from greekocr.ops.data_root import input_path as _data_input
+ from pathlib import Path
+ import greekocr
+ ROOT = Path(__file__).resolve().parents[2]
+@@ -16,7 +17,7 @@
+ PREFIX = OUT / 'ADMISSION_CENSUS_20261018b'
+ 
+ def sha(path):
+-    return hashlib.sha256(path.read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
+ 
+ def write(path, value):
+     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + '\n')
+--- a/scripts/harvest/round1.py
++++ b/scripts/harvest/round1.py
+@@ -25,6 +25,7 @@
+ sys.dont_write_bytecode = True
+ ROOT = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.harvest.round1 import (allocate, positions, replacement_candidates, book_signals,
+     pair_page_lines, quintile, type_reasons, title_flag)
+ import numpy as np
+@@ -40,10 +41,10 @@
+ 
+ 
+ def sha(path):
+-    with Path(path).open('rb') as f: return hashlib.file_digest(f, 'sha256').hexdigest()
+-
+-
+-def read(path): return json.loads(Path(path).read_text())
++    with _data_input(Path(path)).open('rb') as f: return hashlib.file_digest(f, 'sha256').hexdigest()
++
++
++def read(path): return json.loads(_data_input(Path(path)).read_text())
+ 
+ 
+ def atomic(path, data):
+@@ -54,7 +55,7 @@
+ 
+ 
+ def rows(path):
+-    return [json.loads(l) for l in Path(path).open() if l.strip()]
++    return [json.loads(l) for l in _data_input(Path(path)).open() if l.strip()]
+ 
+ 
+ def git_snapshot():
+--- a/scripts/harvest/round1_reads.py
++++ b/scripts/harvest/round1_reads.py
+@@ -18,6 +18,7 @@
+ 
+ REPO = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(REPO))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.harvest.readers import Readers, atomic, read_jsonl
+ from scripts.harvest.montage_controls import git_state, audit_git
+ 
+@@ -30,7 +31,7 @@
+ 
+ 
+ def sha(path):
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         return hashlib.file_digest(f, 'sha256').hexdigest()
+ 
+ 
+@@ -54,7 +55,7 @@
+     OUT.mkdir(parents=True, exist_ok=True)
+     if not (OUT / 'git_before.json').exists():
+         atomic(OUT / 'git_before.json', git_state())
+-    selection = json.loads((ROOT / 'selection.json').read_text())
++    selection = json.loads((_data_input(ROOT / 'selection.json')).read_text())
+     manifest = json.loads((ROOT / 'manifest.json').read_text())
+     if manifest['selection_sha256'] != sha(ROOT / 'selection.json'):
+         raise ValueError('selection/manifest binding changed')
+--- a/scripts/harvest/round1_reads_rest.py
++++ b/scripts/harvest/round1_reads_rest.py
+@@ -17,6 +17,7 @@
+ 
+ REPO = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(REPO))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.harvest.readers import Budget, Readers, atomic, read_jsonl
+ from greekocr.readers.services.google_docai import DocAIReader
+ from scripts.harvest.round1_reads import sha, frozen, ROOT, BULK, GOOGLE
+@@ -62,7 +63,7 @@
+                 raise ValueError('conflicting book metadata')
+             books[b['book']] = b
+     pages = []
+-    for p in select_pages(json.loads((ROOT / 'manifest_all.json').read_text()), books, read_jsonl(D1)):
++    for p in select_pages(json.loads((_data_input(ROOT / 'manifest_all.json')).read_text()), books, read_jsonl(D1)):
+         path = REPO / p['image']
+         digest = sha(path)
+         if digest != p['gate']['image_sha256'] or p['gate']['dpi'] != 200 or not p['gate']['grayscale']:
+--- a/scripts/harvest/round1_rescue.py
++++ b/scripts/harvest/round1_rescue.py
+@@ -22,6 +22,7 @@
+ sys.dont_write_bytecode = True
+ ROOT = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.harvest.round1_rescue import rescue_selection, combined_manifest, look_relative
+ 
+ BASE = ROOT / 'docs/harvest/round1'
+@@ -65,7 +66,7 @@
+ def prepare():
+     OUT.mkdir(parents=True, exist_ok=True)
+     BIG.mkdir(parents=True, exist_ok=True)
+-    rescues, selection = read(BASE / 'rescues.json'), read(BASE / 'selection.json')
++    rescues, selection = read(BASE / 'rescues.json'), read(_data_input(BASE / 'selection.json'))
+     if len(rescues['rescued']) != 51:
+         raise ValueError('T18 requires exactly 51 explicit owner rescues')
+     data = rescue_selection(selection, rescues)
+--- a/scripts/harvest/round2.py
++++ b/scripts/harvest/round2.py
+@@ -4,6 +4,7 @@
+ The T16 acquisition adapter retains upstream transport, login and page receipts.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ from collections import Counter, defaultdict
+@@ -143,7 +144,7 @@
+     rows = read_jsonl(CATALOGUE)
+     if len(rows) != 7841 or sum(bool(r.get('download_url')) for r in rows) != 6531:
+         raise ValueError('catalogue scope changed')
+-    prior = json.loads((round1.OUT / 'selection.json').read_text())
++    prior = json.loads((_data_input(round1.OUT / 'selection.json')).read_text())
+     early, early_inputs = early_exclusions()
+     old_ids = {b['book'] for b in prior['books']}
+     if len(old_ids) != 150:
+@@ -185,7 +186,7 @@
+         pos = positions(b['pages'], 13, seed=SEED, book=b['book'])
+         reserved = {p['page'] for p in pos}
+         b['positions'] = [dict(p, candidates=replacement_candidates(p['page'], b['pages'], reserved=reserved - {p['page']})) for p in pos]
+-    inputs = {str(CATALOGUE): sha(CATALOGUE), relative(round1.OUT / 'selection.json'): sha(round1.OUT / 'selection.json'), **early_inputs}
++    inputs = {str(CATALOGUE): sha(CATALOGUE), relative(round1.OUT / 'selection.json'): sha(_data_input(round1.OUT / 'selection.json')), **early_inputs}
+     result = dict(schema='t22-selection-1', seed=SEED, books=books, quotas=quotas,
+         eligible_per_decade=dict(Counter(b['decade'] for b in candidates)), excluded_round1=sorted(old_ids),
+         excluded_early=sorted(early), excluded_early_basis='57 source-bound saved-page receipt files in archived E2 assets',
+--- a/scripts/harvest/round2_outputs.py
++++ b/scripts/harvest/round2_outputs.py
+@@ -1,5 +1,6 @@
+ """T22 offline records, unchanged T20 admission, native crops and evidence."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ from collections import Counter, defaultdict
+ from concurrent.futures import ProcessPoolExecutor
+@@ -204,7 +205,7 @@
+             compiled.append(result)
+             if i%100==0: print(f'compiled {i}/{len(tasks)}',flush=True)
+     atomic(BULK/'compiled/compile_receipt.json',dict(schema='t22-compiled-1',pages=compiled,page_count=len(compiled),
+-        records_sha256=sha(OUT/'records.jsonl'),base_builder_sha256=sha(Path(compiler.__file__)),
++        records_sha256=sha(_data_input(OUT/'records.jsonl')),base_builder_sha256=sha(Path(compiler.__file__)),
+         builder_sha256=sha(Path(__file__)),jpeg_quality=85,pad=40,gap=40))
+     (BULK/'compiled/README.txt').write_text(compiler.README.replace(' (the weakest 5%)','')+
+         'Bad pages remain compiled, with a red REJECTED: bad_page heading and their triggers. All their lines are excluded from admission.\n')
+@@ -275,19 +276,19 @@
+     cost=json.loads((OUT/'cost_receipt.json').read_text())
+     assert cost['calls_reserved']==len(budget) and cost['cost_usd']==len(budget)*.0015
+     records,reads=read_records(plan)
+-    assert records==read_jsonl(OUT/'records.jsonl') and reads==json.loads((OUT/'read_summary.json').read_text())
++    assert records==read_jsonl(_data_input(OUT/'records.jsonl')) and reads==json.loads((OUT/'read_summary.json').read_text())
+     assert len(records)==len({r['id'] for r in records})
+     assert all(r['source']==SOURCE and r['licence']=='anemi-research-internal' and r['read_batch']=='round2' for r in records)
+     old=[r for name in OLD_FILES for r in read_jsonl(REPO/name)]
+     expected,rejected,quality,before,exclusions=admit_records(records,held,old)
+     expected,crop_rejected,crop_failures,geometries=previous.plan_crops(records,expected,{p['id']:(p['width'],p['height']) for p in plan['pages']})
+-    actual=read_jsonl(OUT/'admitted.jsonl');summary=json.loads((OUT/'admission_summary.json').read_text())
++    actual=read_jsonl(_data_input(OUT/'admitted.jsonl'));summary=json.loads((OUT/'admission_summary.json').read_text())
+     assert sorted(rejected+crop_rejected,key=lambda r:r['id'])==read_jsonl(OUT/'rejected.jsonl')
+     assert len(actual)+len(rejected)+len(crop_rejected)==len(records)
+     assert [r['id'] for r in actual]==[r['id'] for r in expected]
+     assert all(all(a[k]==v for k,v in e.items() if k!='docai_text') for a,e in zip(actual,expected))
+     pool,cap_exclusions,cap=training_pool(old,actual,exclusions)
+-    assert pool==read_jsonl(OUT/'train_pool.jsonl') and exclusions+cap_exclusions==read_jsonl(OUT/'train_pool_exclusions.jsonl')
++    assert pool==read_jsonl(_data_input(OUT/'train_pool.jsonl')) and exclusions+cap_exclusions==read_jsonl(OUT/'train_pool_exclusions.jsonl')
+     labels={r['label'] for r in old+actual if r['split'] in ('dev','test')}
+     assert not labels&{r['label'] for r in pool} and cap['passed']
+     amap={r['id']:r for r in actual};groups=defaultdict(list)
+@@ -364,7 +365,7 @@
+     fetched_books=len({p['book'] for p in manifest})
+     read_books=len({p['book'] for p in plan['pages']})
+     held={r['book_key']:r['split'] for r in json.loads((OUT/'holdout_books.json').read_text())}
+-    records=read_jsonl(OUT/'records.jsonl');admitted=read_jsonl(OUT/'admitted.jsonl');splits=s['per_split']
++    records=read_jsonl(_data_input(OUT/'records.jsonl'));admitted=read_jsonl(_data_input(OUT/'admitted.jsonl'));splits=s['per_split']
+     last=(f"T22: done | books: {len(books)} | pages: {fetch['fetched']}/{fetch['accepted']}/{plan['page_count']} | "
+         f"lines: {len(records)} | admitted: {s['admitted']} | poly: {s['per_class']['greek_poly']} | "
+         f"train: {splits.get('train',0)} | dev: {splits.get('dev',0)} | test: {splits.get('test',0)} | "
+--- a/scripts/harvest/validate_montage_flush.py
++++ b/scripts/harvest/validate_montage_flush.py
+@@ -13,6 +13,7 @@
+ 
+ REPO = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(REPO))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.harvest.montage import (assign_lines, assign_symbols, build_montages,
+     response_lines, response_symbols)
+ from greekocr.harvest.montage_controls import compare_control, summarise_controls
+@@ -168,7 +169,7 @@
+             assert call["raw_sha256"] == entry["raw_sha256"] == sha(call["raw_json_path"])
+     first = next(m for m in manifest if m["experiment_layout"] == "flush" and m["n"] == 10)
+     assert sha(OUT / "preview_n10.png") == first["image_sha256"]
+-    assert (OUT / "preview_n10.png").stat().st_size == receipt["preview_bytes"] < 1_000_000
++    assert (_data_input(OUT / "preview_n10.png")).stat().st_size == receipt["preview_bytes"] < 1_000_000
+     suites = ET.parse(OUT / "tests.xml").getroot().findall("testsuite")
+     assert suites and all(int(s.attrib[k]) == 0 for s in suites for k in ("failures", "errors", "skipped"))
+     tests = sum(int(s.attrib["tests"]) for s in suites)
+--- a/scripts/harvest/validate_page_reads.py
++++ b/scripts/harvest/validate_page_reads.py
+@@ -15,6 +15,7 @@
+ 
+ REPO = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(REPO))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.harvest.page_reads import build_blind_review, _response_geometry
+ from greekocr.harvest.readers import atomic, read_jsonl
+ from scripts.harvest.montage_controls import git_state, audit_git
+@@ -120,7 +121,7 @@
+             assert len(matching) == 1 and matching[0]['raw_sha256'] == response['raw_sha256']
+     assert converted_docai_pages == 1
+     page, key = build_blind_review(comparisons, all_rows, manifest)
+-    assert page == (OUT / 'blind_review.html').read_text()
++    assert page == (_data_input(OUT / 'blind_review.html')).read_text()
+     assert key == json.loads((OUT / 'blind_key.json').read_text())
+     parser = ReviewParser()
+     parser.feed(page)
+--- a/scripts/harvest/validate_round1_reads_rest.py
++++ b/scripts/harvest/validate_round1_reads_rest.py
+@@ -12,6 +12,7 @@
+ 
+ REPO = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(REPO))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.harvest.readers import atomic, read_jsonl
+ from scripts.harvest.round1_reads import sha
+ from scripts.harvest.round1_reads_rest import ROOT, OUT, BULK, GOOGLE, D1, select_pages
+@@ -130,7 +131,7 @@
+     books = {}
+     for path in (ROOT / 'selection.json', ROOT / 'rescue/selection.json'):
+         books.update({b['book']: b for b in json.loads(path.read_text())['books']})
+-    selected = select_pages(json.loads((ROOT / 'manifest_all.json').read_text()), books, read_jsonl(D1))
++    selected = select_pages(json.loads((_data_input(ROOT / 'manifest_all.json')).read_text()), books, read_jsonl(D1))
+     assert [p['id'] for p in selected] == [p['id'] for p in plan['pages']]
+     reservations = read_jsonl(GOOGLE / 'budget_rest.jsonl')
+     keys = {p['image_sha256'] for p in plan['pages']}
+--- a/scripts/harvest/verify_filter_parity.py
++++ b/scripts/harvest/verify_filter_parity.py
+@@ -1,4 +1,5 @@
+ """Bounded saved-metadata parity check. Never opens images or runs a detector."""
++from greekocr.ops.data_root import input_path as _data_input
+ from pathlib import Path
+ import argparse
+ import gzip
+@@ -10,7 +11,7 @@
+ ASSETS=ROOT/'greekocr/harvest/filtering_assets'
+ 
+ 
+-def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++def sha(path):return hashlib.sha256(_data_input(Path(path)).read_bytes()).hexdigest()
+ 
+ 
+ def main():
+--- a/scripts/harvest/vouli.py
++++ b/scripts/harvest/vouli.py
+@@ -5,6 +5,7 @@
+ make interruption safe; neither retries nor Vision readers are used.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ from collections import Counter, defaultdict
+@@ -46,7 +47,7 @@
+ 
+ 
+ def sha(path):
+-    with Path(path).open('rb') as stream:
++    with _data_input(Path(path)).open('rb') as stream:
+         return hashlib.file_digest(stream, 'sha256').hexdigest()
+ 
+ 
+@@ -188,7 +189,7 @@
+                           licence=b['licence'], source=SOURCE, origin='vouli'))
+     frozen(OUT / 'books.json', books)
+     frozen(OUT / 'holdout_books.json', select_holdout(books))
+-    limits = json.loads((round1.OUT / 'selection.json').read_text())['quality_limits']
++    limits = json.loads((_data_input(round1.OUT / 'selection.json')).read_text())['quality_limits']
+     manifest, index = [], 0
+     total = sum(b['page_count'] for b in books)
+     with ProcessPoolExecutor(max_workers=3, mp_context=multiprocessing.get_context('spawn'),
+--- a/scripts/harvest/vouli_outputs.py
++++ b/scripts/harvest/vouli_outputs.py
+@@ -1,5 +1,6 @@
+ """Offline records, admission/crops, complete validation and publication for T21."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ from collections import Counter, defaultdict
+ from concurrent.futures import ProcessPoolExecutor
+@@ -316,7 +317,7 @@
+     assert cost['calls_reserved'] == len(budget) and cost['cost_usd'] == len(budget) * .0015
+     assert json.loads((GOOGLE / 'budget.state.json').read_text())['calls'] == len(budget)
+     records, read_summary = read_records(plan)
+-    assert records == read_jsonl(OUT / 'records.jsonl')
++    assert records == read_jsonl(_data_input(OUT / 'records.jsonl'))
+     assert read_summary == json.loads((OUT / 'read_summary.json').read_text())
+     old = read_jsonl(round1.OUT / 'admitted.jsonl')
+     expected, rejected, quality, before, old_exclusions = admit_records(records, held, old)
+@@ -326,15 +327,15 @@
+     # JSON encodes tuples as lists; canonical round-trip reconciles the receipt.
+     assert json.loads(json.dumps(crop_failures)) == json.loads((OUT / 'crop_failures.json').read_text())
+     cap_exclusions, cap = apply_source_cap(expected, old, old_exclusions)
+-    actual = read_jsonl(OUT / 'admitted.jsonl')
+-    assert rejected == read_jsonl(OUT / 'rejected.jsonl')
++    actual = read_jsonl(_data_input(OUT / 'admitted.jsonl'))
++    assert rejected == read_jsonl(_data_input(OUT / 'rejected.jsonl'))
+     assert len(actual) + len(rejected) == len(records)
+     assert len({r['id'] for r in records}) == len(records)
+     assert [r['id'] for r in actual] == [r['id'] for r in expected]
+     actual_map = {r['id']: r for r in actual}
+     for a, e in zip(actual, expected):
+         assert all(a[k] == v for k, v in e.items() if k != 'docai_text')
+-    pool = read_jsonl(OUT / 'train_pool.jsonl')
++    pool = read_jsonl(_data_input(OUT / 'train_pool.jsonl'))
+     exclusions = old_exclusions + cap_exclusions
+     assert exclusions == read_jsonl(OUT / 'train_pool_exclusions.jsonl')
+     excluded_ids = {r['id'] for r in exclusions}
+@@ -426,11 +427,11 @@
+     cost = json.loads((OUT / 'cost_receipt.json').read_text())
+     books = json.loads((OUT / 'books.json').read_text())
+     manifest = json.loads((OUT / 'manifest.json').read_text())
+-    records = read_jsonl(OUT / 'records.jsonl')
++    records = read_jsonl(_data_input(OUT / 'records.jsonl'))
+     bybook = defaultdict(list)
+     for r in records:
+         bybook[r['book_key']].append(r)
+-    admitted = read_jsonl(OUT / 'admitted.jsonl')
++    admitted = read_jsonl(_data_input(OUT / 'admitted.jsonl'))
+     admitted_books = Counter(r['book_key'] for r in admitted)
+     held = {r['book_key']: r['split'] for r in json.loads((OUT / 'holdout_books.json').read_text())}
+     gate_reasons = Counter(f for p in manifest for f in p['gate']['flags'])
+--- a/scripts/labelfix/agreement_mode_historical.py
++++ b/scripts/labelfix/agreement_mode_historical.py
+@@ -4,6 +4,7 @@
+ The original diagnostic is retained for historical arithmetic only. Its flags
+ and disagreements now abstain. New consumers must use decide with real inputs.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.labelfix.release_gate import decide
+ 
+ def main():
+@@ -18,7 +19,7 @@
+             for f in q['constraint_flags']:
+                 if f.get('action') == 'flag' and f.get('reason') == 'impossible_by_rule': FLAGS.add((q['line_id'], f['start']))
+     def kinds(m): return {k for k, _ in m}
+-    s6 = {json.loads(l)['line_id']: json.loads(l) for l in gzip.open('docs/labelfix/spellcheck/S6_lines.jsonl.gz', 'rt')}
++    s6 = {json.loads(l)['line_id']: json.loads(l) for l in gzip.open(_data_input('docs/labelfix/spellcheck/S6_lines.jsonl.gz'), 'rt')}
+     c = Counter(); lines = Counter(); by_type = Counter(); rows = []
+     for l in gzip.open(R1, 'rt'):
+         r = json.loads(l)
+--- a/scripts/labelfix/clariden/l1c_census.py
++++ b/scripts/labelfix/clariden/l1c_census.py
+@@ -4,6 +4,7 @@
+ Exact reasons are overlay hold_slots[].detail, never the lossy .reason alias.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ from collections import Counter, defaultdict
+@@ -41,14 +42,14 @@
+ 
+ def sha256(path):
+     h = hashlib.sha256()
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         for block in iter(lambda: f.read(4 * 1024 * 1024), b''):
+             h.update(block)
+     return h.hexdigest()
+ 
+ 
+ def load(path):
+-    return json.loads(Path(path).read_text(encoding='utf-8'))
++    return json.loads(_data_input(Path(path)).read_text(encoding='utf-8'))
+ 
+ 
+ def atomic_json(path, value):
+--- a/scripts/labelfix/clariden/l1r_recompose_ext.py
++++ b/scripts/labelfix/clariden/l1r_recompose_ext.py
+@@ -4,6 +4,7 @@
+ atomic receipts and support exact-input reuse after a timeout.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter
+ from concurrent.futures import ThreadPoolExecutor
+@@ -196,7 +197,7 @@
+ 
+ 
+ def load(path):
+-    return json.loads(Path(path).read_text())
++    return json.loads(_data_input(Path(path)).read_text())
+ 
+ 
+ def digest(value):
+--- a/scripts/labelfix/clariden/r1_common.py
++++ b/scripts/labelfix/clariden/r1_common.py
+@@ -1,5 +1,6 @@
+ """R1 science contract and text-only helpers. Never imports ink/SciPy."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import gzip
+ import json
+@@ -25,7 +26,7 @@
+ 
+ 
+ def rows(path):
+-    with (gzip.open if str(path).endswith('.gz') else open)(path, 'rt', encoding='utf8') as f:
++    with (gzip.open if str(path).endswith('.gz') else open)(_data_input(path), 'rt', encoding='utf8') as f:
+         yield from (json.loads(x) for x in f if x.strip())
+ 
+ 
+--- a/scripts/labelfix/cn1_measure.py
++++ b/scripts/labelfix/cn1_measure.py
+@@ -4,6 +4,7 @@
+ builds first (commands are retained in CN1_REPORT.md), then run this module.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter
+ from copy import deepcopy
+ import hashlib
+@@ -178,8 +179,8 @@
+     if a.evidence_dir is not None:E=a.evidence_dir
+     started=time.monotonic()
+     cfg=load_configuration(E/'combined_config.json')
+-    combined_page=json.loads((E/'combined_boxes.json').read_text())
+-    control_page=json.loads((E/'s6_control_boxes.json').read_text())
++    combined_page=json.loads((_data_input(E/'combined_boxes.json')).read_text())
++    control_page=json.loads((_data_input(E/'s6_control_boxes.json')).read_text())
+     for page, html in [(combined_page,'combined.html'),(control_page,'s6_control.html')]:
+         assert page['page_sha256']==digest(E/html)
+     assert combined_page['reading_configuration']==cfg
+--- a/scripts/labelfix/cn1_report.py
++++ b/scripts/labelfix/cn1_report.py
+@@ -1,4 +1,5 @@
+ """Package CN1 score and box receipts into the final report and audit JSONL."""
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter
+ from pathlib import Path
+ import json
+@@ -10,7 +11,7 @@
+ O=Path('docs/labelfix/spellcheck');E=O/'CN1_evidence'
+ s=json.loads((E/'summary.json').read_text());summary=s['summary'];groups=['review_v16','examples_v10','old59','old33','old56']
+ checks=read(O/'CN1_checks.jsonl');notes=[r for r in checks if r['type']=='note'];diffs=[r for r in checks if r['type']=='note_difference'];holds=[r for r in checks if r['type']=='hold_slot']
+-a=json.loads((E/'combined_boxes.json').read_text());b=json.loads((E/'s6_control_boxes.json').read_text());saved={r['line_id']:r for r in read(E/'S6_scoring_lines.jsonl')};combined={r['line_id']:r for r in read(E/'combined_scoring_lines.jsonl')}
++a=json.loads((_data_input(E/'combined_boxes.json')).read_text());b=json.loads((_data_input(E/'s6_control_boxes.json')).read_text());saved={r['line_id']:r for r in read(E/'S6_scoring_lines.jsonl')};combined={r['line_id']:r for r in read(E/'combined_scoring_lines.jsonl')}
+ configs={p:load_configuration(E/p) for p in ['combined_config.json','s6_config.json']}
+ assert a['reading_configuration']==configs['combined_config.json']
+ counts=Counter()
+--- a/scripts/labelfix/k1_validate.py
++++ b/scripts/labelfix/k1_validate.py
+@@ -30,13 +30,14 @@
+ ROOT=Path(__file__).resolve().parents[2]
+ OUT=ROOT/'docs/labelfix/spellcheck'
+ sys.path.insert(0,str(ROOT/'scripts/labelfix'))
++from greekocr.ops.data_root import input_path as _data_input
+ from s6_validate import detected
+ from s6_notes import clause, current_review_specs
+ from s5_notes import specs
+ 
+ 
+ def read(path):
+-    with (gzip.open if str(path).endswith('.gz') else open)(path,'rt') as f:
++    with (gzip.open if str(path).endswith('.gz') else open)(_data_input(path),'rt') as f:
+         return [json.loads(x) for x in f]
+ 
+ 
+--- a/scripts/labelfix/l1a2_cards.py
++++ b/scripts/labelfix/l1a2_cards.py
+@@ -2,6 +2,7 @@
+ 
+ Uses saved overlay evidence only; never imports or runs gates, detectors or readers.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter
+ import gzip
+@@ -29,7 +30,7 @@
+ 
+ 
+ def load(p):
+-    return json.loads(Path(p).read_text())
++    return json.loads(_data_input(Path(p)).read_text())
+ 
+ 
+ def dump(p, data):
+@@ -38,7 +39,7 @@
+ 
+ 
+ def sha(p):
+-    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(Path(p)).read_bytes()).hexdigest()
+ 
+ 
+ def digest(data):
+@@ -71,7 +72,7 @@
+             if r['id'] in wanted:
+                 assert r['id'] not in originals
+                 originals[r['id']] = r
+-    saved = json.loads(gzip.decompress((PRIVATE/'selected_overlays.json.gz').read_bytes()))
++    saved = json.loads(gzip.decompress((_data_input(PRIVATE/'selected_overlays.json.gz')).read_bytes()))
+     overlays = {r['line_id']: r for r in saved['records']}
+     assert set(originals) == set(overlays) == set(wanted)
+     return wanted, originals, overlays
+--- a/scripts/labelfix/m2_run.py
++++ b/scripts/labelfix/m2_run.py
+@@ -4,6 +4,7 @@
+ checkpoint/crop-bound; no existing alignment cache or production code is edited.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ from collections import Counter
+@@ -47,14 +48,14 @@
+ 
+ def sha(path):
+     h = hashlib.sha256()
+-    with open(path, 'rb') as f:
++    with open(_data_input(path), 'rb') as f:
+         for b in iter(lambda: f.read(1024*1024), b''):
+             h.update(b)
+     return h.hexdigest()
+ 
+ 
+ def rows(path):
+-    with (gzip.open if str(path).endswith('.gz') else open)(path, 'rt') as f:
++    with (gzip.open if str(path).endswith('.gz') else open)(_data_input(path), 'rt') as f:
+         return [json.loads(s) for s in f if s.strip()]
+ 
+ 
+--- a/scripts/labelfix/r0_finish.py
++++ b/scripts/labelfix/r0_finish.py
+@@ -1,5 +1,6 @@
+ """Assemble the R0a handoff. No adjudication, tuning, network, or model forward."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter,defaultdict
+ import base64
+ import html
+@@ -225,7 +226,7 @@
+     changed=[p for p,h in bind['files'].items() if sha(ROOT/p)!=h]
+     assert not changed,changed
+     assert sha(CKPT[0])==bind['checkpoint_sha256']
+-    assert (OUT/'R0_review_positions.html').read_text().count('<article ')==60
++    assert (_data_input(OUT/'R0_review_positions.html')).read_text().count('<article ')==60
+     viewer=(OUT/'R0_cards/index.html').read_text()
+     assert 'items_key' not in viewer and 'http://' not in viewer and 'https://' not in viewer
+     assert all(set(x)=={'id','reader_1','reader_2','adjudicated'} for x in json.loads((OUT/'R0_expected_truth.json').read_text()))
+--- a/scripts/labelfix/r0_prepare.py
++++ b/scripts/labelfix/r0_prepare.py
+@@ -4,6 +4,7 @@
+ Run stages explicitly; new CTC inference requires an already frozen local list.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ import base64
+ from collections import Counter, defaultdict
+@@ -44,12 +45,12 @@
+ 
+ def sha(path):
+     h = hashlib.sha256()
+-    with open(path, 'rb') as f:
++    with open(_data_input(path), 'rb') as f:
+         for b in iter(lambda: f.read(1024*1024), b''): h.update(b)
+     return h.hexdigest()
+ 
+ def read(path):
+-    with (gzip.open if str(path).endswith('.gz') else open)(path, 'rt') as f:
++    with (gzip.open if str(path).endswith('.gz') else open)(_data_input(path), 'rt') as f:
+         return [json.loads(s) for s in f if s.strip()]
+ 
+ def dump(path, obj):
+--- a/scripts/labelfix/r0_score.py
++++ b/scripts/labelfix/r0_score.py
+@@ -4,6 +4,7 @@
+ Run with the R0 Python, PYTHONPATH=$PWD, and PYTHONDONTWRITEBYTECODE=1.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import base64
+ from collections import Counter, defaultdict
+@@ -34,7 +35,7 @@
+ 
+ 
+ def read(p):
+-    with (gzip.open if str(p).endswith('.gz') else open)(p, 'rt') as f:
++    with (gzip.open if str(p).endswith('.gz') else open)(_data_input(p), 'rt') as f:
+         return [json.loads(s) for s in f if s.strip()]
+ 
+ 
+@@ -50,7 +51,7 @@
+ 
+ def sha(p):
+     h = hashlib.sha256()
+-    with open(p, 'rb') as f:
++    with open(_data_input(p), 'rb') as f:
+         for block in iter(lambda: f.read(1024 * 1024), b''):
+             h.update(block)
+     return h.hexdigest()
+@@ -123,20 +124,20 @@
+     # Only this explicitly requested DEV witness; no other worktree traversal.
+     l = next(r for r in read(OUT / 'R0_evidence/owner_letter_punctuation_evidence.jsonl')
+              if r.get('recorded_model') and 'ξa' in r['recorded_model'])
+-    k = next(r for r in json.loads((OUT/'R0_adjudication_private/items_key.json').read_text())
++    k = next(r for r in json.loads((_data_input(OUT/'R0_adjudication_private/items_key.json')).read_text())
+              if 'owner_Latin_a_witness' in r['kinds'])
+     # Full-line pixels and references already bound in the blind deck / word census.
+     lines[l['line_id']] = dict(line_id=l['line_id'], stratum='owner_DEV_supplement',
+         doc='wikisource:02a3a2a6', model=U.normalize('NFD', l['recorded_model']),
+         google=None, human=None, crop=str(OUT/'R0_cards'/k['line_img']))
+-    previous=(OUT/'R0_review_positions.html').read_text()
++    previous=(_data_input(OUT/'R0_review_positions.html')).read_text()
+     article=re.search(r'<article data-line="'+re.escape(l['line_id'])+r'".*?</article>',previous,re.S).group()
+     lines[l['line_id']]['google']=html.unescape(re.search(r'<p>Google</p><div class="text">(.*?)</div>',article,re.S).group(1))
+     cards = []
+     for suffix, keypath in [('', 'R0_adjudication_private/items_key.json'),
+                             ('_ia', 'R0_adjudication_private/ia/items_key.json')]:
+-        ks = json.loads((OUT/keypath).read_text())
+-        ts = {r['id']:r for r in json.loads((OUT/f'R0_expected_truth{suffix}.json').read_text())}
++        ks = json.loads((_data_input(OUT/keypath)).read_text())
++        ts = {r['id']:r for r in json.loads((_data_input(OUT/f'R0_expected_truth{suffix}.json')).read_text())}
+         assert len(ts) == len(ks) and set(ts) == {r['id'] for r in ks}
+         for k in ks:
+             t = ts[k['id']]; a = t['adjudicated']
+--- a/scripts/labelfix/r0_score_report.py
++++ b/scripts/labelfix/r0_score_report.py
+@@ -1,4 +1,5 @@
+ """Render R0c report from scored receipts; no measurement or source mutation."""
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter, defaultdict
+ import json
+ from pathlib import Path
+@@ -7,7 +8,7 @@
+ OUT=ROOT/'docs/labelfix/spellcheck'
+ EV=OUT/'R0_evidence/scoring'
+ d=json.loads((OUT/'R0_metrics.json').read_text())
+-fs=[json.loads(s) for s in (OUT/'R0_failures.jsonl').read_text().splitlines()]
++fs=[json.loads(s) for s in (_data_input(OUT/'R0_failures.jsonl')).read_text().splitlines()]
+ labels=d['stratum_labels']; strata=list(labels)[:3]
+ short={'continuity_666':'666 continuity instrument','newsource':'(ii) mark-enriched, not a population estimate',
+        'wikisource_ia':'(i-a) selection-exposed (v2 val)',
+--- a/scripts/labelfix/r2_cards_prepare.py
++++ b/scripts/labelfix/r2_cards_prepare.py
+@@ -3,6 +3,7 @@
+ Card conventions copied in spirit from S8 l1a2_cards.py: full-height word
+ context, uniform <=3x zoom, native line, separate private joins and controls.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import sys
+ sys.dont_write_bytecode = True
+ import argparse
+@@ -45,7 +46,7 @@
+ @lru_cache(maxsize=16384)
+ def sha(path):
+     h = hashlib.sha256()
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         for b in iter(lambda: f.read(1024 * 1024), b''):
+             h.update(b)
+     return h.hexdigest()
+@@ -58,7 +59,7 @@
+ 
+ 
+ def load(path):
+-    return json.loads(bind(path).read_text())
++    return json.loads(_data_input(bind(path)).read_text())
+ 
+ 
+ def rows(path):
+--- a/scripts/labelfix/r2_cards_resolve.py
++++ b/scripts/labelfix/r2_cards_resolve.py
+@@ -6,6 +6,7 @@
+ must first pixel-verify every private controls_proposed.json entry. No proposed
+ selection text is ever admitted as truth. Repeated views count once.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import sys
+ sys.dont_write_bytecode=True
+ import argparse
+@@ -25,7 +26,7 @@
+ 
+ 
+ def read(path):
+-    return [json.loads(s) for s in Path(path).read_text().splitlines() if s.strip()]
++    return [json.loads(s) for s in _data_input(Path(path)).read_text().splitlines() if s.strip()]
+ 
+ 
+ def dump(path,obj):
+--- a/scripts/labelfix/r2_finalize_manifest.py
++++ b/scripts/labelfix/r2_finalize_manifest.py
+@@ -1,4 +1,5 @@
+ """Offline B6c finalization; R2a admission helpers. Never invokes network or git."""
++from greekocr.ops.data_root import input_path as _data_input
+ import json
+ import hashlib
+ from pathlib import Path
+@@ -9,7 +10,7 @@
+ TOKENS = {'T2': [157076, 160476], 'T4': [169280, 161761]}
+ 
+ def sha(path):
+-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(Path(path)).read_bytes()).hexdigest()
+ 
+ def unique(rows):
+     out = {}
+--- a/scripts/labelfix/r2_job1_digest.py
++++ b/scripts/labelfix/r2_job1_digest.py
+@@ -1,4 +1,5 @@
+ """Local, inference-free digest of receipt-verified job 3681404."""
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter, defaultdict
+ from copy import deepcopy
+ import json
+@@ -82,7 +83,7 @@
+ def bind_population(inv):
+     path=Path('artifacts/labelfix_r2/population/population.jsonl')
+     binding=json.loads((ROOT/'B/teacher_receipt.json').read_text())['binding']
+-    assert sha256(path)==binding['line_list_sha256']
++    assert sha256(_data_input(path))==binding['line_list_sha256']
+     population=list(rows(path));rr=defaultdict(list);ss=defaultdict(list)
+     for r in population:
+         rr[r['role']].append(r);ss[r['role']+' / '+r['source']].append(r)
+@@ -92,7 +93,7 @@
+             b=groups[key];b.setdefault('lines_with_exported_slots',b['lines']);b['lines']=len(ll)
+             b['zero_slot_lines']=b['lines']-b['lines_with_exported_slots']
+             b['teacher_seen_document_lines']=dict(Counter(str(r.get('teacher_seen_document',False)) for r in ll))
+-    inv['population_binding']=dict(path=str(path),sha256=sha256(path),lines=len(population))
++    inv['population_binding']=dict(path=str(path),sha256=sha256(_data_input(path)),lines=len(population))
+     return inv
+ 
+ 
+@@ -109,7 +110,7 @@
+ 
+ 
+ def evaluate():
+-    lines=[l for l in r2_score.truth_lines('docs/labelfix/spellcheck/S4_lines.jsonl.gz') if not l['dev']]
++    lines=[l for l in r2_score.truth_lines(_data_input('docs/labelfix/spellcheck/S4_lines.jsonl.gz')) if not l['dev']]
+     assert len(lines)==666
+     binding=json.loads((FIX/'binding.json').read_text())['sha256']
+     for name in ('heldout_lines.jsonl.gz','A_predictions.jsonl.gz'):assert sha256(FIX/name)==binding[name]
+--- a/scripts/labelfix/r2_readback_verify.py
++++ b/scripts/labelfix/r2_readback_verify.py
+@@ -1,4 +1,5 @@
+ """Verify selected R2 readback payloads and explicitly separate envelope hashes."""
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from datetime import datetime, timezone
+ import hashlib
+@@ -8,7 +9,7 @@
+ 
+ def sha(path):
+     h=hashlib.sha256()
+-    with path.open('rb') as f:
++    with _data_input(path).open('rb') as f:
+         for block in iter(lambda:f.read(1024*1024), b''): h.update(block)
+     return h.hexdigest()
+ 
+--- a/scripts/labelfix/r2a_digest.py
++++ b/scripts/labelfix/r2a_digest.py
+@@ -1,4 +1,5 @@
+ """Local CPU readback digest. No inference, network, submission or git mutation."""
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter, defaultdict
+ import json
+ from pathlib import Path
+@@ -120,7 +121,7 @@
+     scoring=json.loads((ROOT/'D/scoring_receipt.json').read_text());assert scoring['heldout_overlay_sha256']==sha256(OUT/'truth_overlay_v1_1.json')
+     data={a:{c:list(rows(ROOT/'D'/a/(c+'_ledger.jsonl.gz'))) for c in ['heldout','witness','dev']} for a in ARMS}
+     # Independently rescore saved held-out predictions, including symmetric overlay.
+-    truth=[l for l in r2_score.truth_lines('docs/labelfix/spellcheck/S4_lines.jsonl.gz') if not l['dev']]
++    truth=[l for l in r2_score.truth_lines(_data_input('docs/labelfix/spellcheck/S4_lines.jsonl.gz')) if not l['dev']]
+     assert len(truth)==666
+     truth,overlay_result=r2_score.apply_overlay(truth,overlay)
+     metadata={r['id']:r for r in rows('tests/labelfix/fixtures/r2/heldout_lines.jsonl.gz')}
+--- a/scripts/labelfix/s2_crops.py
++++ b/scripts/labelfix/s2_crops.py
+@@ -1,9 +1,10 @@
+ """Draw before/after native-pixel detector witnesses; no OCR masks changed."""
++from greekocr.ops.data_root import input_path as _data_input
+ import json,gzip
+ from pathlib import Path
+ from PIL import Image,ImageDraw,ImageFont
+ O=Path('docs/labelfix/spellcheck');D=O/'crops_S2';D.mkdir(exist_ok=True)
+-ls={l['line_id']:l for x in gzip.open(O/'S2_lines.jsonl.gz','rt') if (l:=json.loads(x))}
++ls={l['line_id']:l for x in gzip.open(_data_input(O/'S2_lines.jsonl.gz'),'rt') if (l:=json.loads(x))}
+ notes=[json.loads(x) for x in open(O/'owner_notes_db_20261016.jsonl')]
+ font=ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc',12)
+ thumbs=[]
+--- a/scripts/labelfix/s2_report.py
++++ b/scripts/labelfix/s2_report.py
+@@ -3,6 +3,7 @@
+ from pathlib import Path
+ from collections import Counter
+ ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.labelfix.validate import load_three_way,DEV_BOOKS,lb95
+ from greekocr.labelfix.text import nfc
+ from greekocr.labelfix.linemetric import printed_words,score_slots,pooled
+@@ -102,7 +103,7 @@
+ 
+ 
+ def main():
+-    metrics=json.loads((O/'S2_metrics.json').read_text());ll=read(O/'S2_lines.jsonl.gz');by={l['line_id']:l for l in ll}
++    metrics=json.loads((O/'S2_metrics.json').read_text());ll=read(_data_input(O/'S2_lines.jsonl.gz'));by={l['line_id']:l for l in ll}
+     notes=read(O/'owner_notes_db_20261016.jsonl');ee=expectations(by,notes);write(O/'owner_slot_expectations.jsonl',ee)
+     truth=json.loads((O/'print_truth_s0.json').read_text())
+     old=[];new=[]
+--- a/scripts/labelfix/s2_validate.py
++++ b/scripts/labelfix/s2_validate.py
+@@ -9,6 +9,7 @@
+ from pathlib import Path
+ ROOT=Path(__file__).resolve().parents[2]
+ sys.path.insert(0,str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ import gzip,json,subprocess,time,types,random,hashlib
+ from collections import Counter,defaultdict
+ import numpy as np
+@@ -146,7 +147,7 @@
+     write(OUT/'S2_sheet_lines.jsonl',[dict(line_id=x) for x in selected[:140]])
+     (OUT/'S2_sheet_overflow.txt').write_text('\n'.join(selected[140:])+'\n')
+     # Old stored samples include labels/classes filtered by the old min-class policy.
+-    with gzip.open(ROOT/'docs/labelfix/markshape_samples.jsonl.gz','rt') as f:old_samples=[json.loads(x) for x in f]
++    with gzip.open(_data_input(ROOT/'docs/labelfix/markshape_samples.jsonl.gz'),'rt') as f:old_samples=[json.loads(x) for x in f]
+     og=defaultdict(list);ng=defaultdict(list)
+     for s in old_samples:og[(s['line_id'],s['word'],s['base'],s['label'])].append(s)
+     for s in samples:ng[(s['line_id'],s['word'],s['base'],s['label'])].append(s)
+--- a/scripts/labelfix/s3_pin_slots.py
++++ b/scripts/labelfix/s3_pin_slots.py
+@@ -2,6 +2,7 @@
+ 
+ Both old modules are imported from a package outside greekocr. No git writes.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import importlib, json, subprocess, sys, tempfile
+ from pathlib import Path
+ from PIL import Image
+@@ -16,7 +17,7 @@
+     notes=[json.loads(x) for x in (OUT/'owner_notes_db_20261016.jsonl').read_text().splitlines()]
+     expectations=[json.loads(x) for x in (OUT/'owner_slot_expectations.jsonl').read_text().splitlines()]
+     import gzip
+-    with gzip.open(OUT/'S2_lines.jsonl.gz','rt') as f:
++    with gzip.open(_data_input(OUT/'S2_lines.jsonl.gz'),'rt') as f:
+         lines={l['line_id']:l for x in f if (l:=json.loads(x))}
+     recovered={}
+     with tempfile.TemporaryDirectory(prefix='spellcheck-v8-') as tmp:
+--- a/scripts/labelfix/s3_report.py
++++ b/scripts/labelfix/s3_report.py
+@@ -1,4 +1,5 @@
+ """S3 print-based report, v8 owner accounting, regression list and sheet selection."""
++from greekocr.ops.data_root import input_path as _data_input
+ import gzip, json
+ from collections import Counter
+ from pathlib import Path
+@@ -9,7 +10,7 @@
+ 
+ 
+ def read(p):
+-    with (gzip.open if str(p).endswith('.gz') else open)(p,'rt') as f:return [json.loads(x) for x in f]
++    with (gzip.open if str(p).endswith('.gz') else open)(_data_input(p),'rt') as f:return [json.loads(x) for x in f]
+ 
+ 
+ def write(p,rs):p.write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in rs))
+--- a/scripts/labelfix/s3_validate.py
++++ b/scripts/labelfix/s3_validate.py
+@@ -2,6 +2,7 @@
+ 
+ No recognizer is imported or constructed. Original S2 artifacts are read-only.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import os
+ for key in ('VECLIB_MAXIMUM_THREADS','OPENBLAS_NUM_THREADS','OMP_NUM_THREADS'):
+     os.environ[key]='1'
+@@ -25,7 +26,7 @@
+ 
+ 
+ def read(p):
+-    with (gzip.open if str(p).endswith('.gz') else open)(p,'rt') as f:
++    with (gzip.open if str(p).endswith('.gz') else open)(_data_input(p),'rt') as f:
+         return [json.loads(x) for x in f]
+ 
+ 
+--- a/scripts/labelfix/s4_report.py
++++ b/scripts/labelfix/s4_report.py
+@@ -1,4 +1,5 @@
+ """Build S4 receipts and owner-note expectations; never build/publish a sheet."""
++from greekocr.ops.data_root import input_path as _data_input
+ import gzip
+ import json
+ from pathlib import Path
+@@ -13,7 +14,7 @@
+ 
+ 
+ def read(p):
+-    with (gzip.open if str(p).endswith('.gz') else open)(p,'rt') as f:
++    with (gzip.open if str(p).endswith('.gz') else open)(_data_input(p),'rt') as f:
+         return [json.loads(x) for x in f]
+ 
+ 
+--- a/scripts/labelfix/s4_train.py
++++ b/scripts/labelfix/s4_train.py
+@@ -2,6 +2,7 @@
+ 
+ No recogniser is constructed. The crop cap is enforced before decoding images.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import os
+ for k in ('VECLIB_MAXIMUM_THREADS', 'OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS'):
+     os.environ[k] = '1'
+@@ -26,7 +27,7 @@
+ 
+ 
+ def read(path):
+-    with (gzip.open if str(path).endswith('.gz') else open)(path, 'rt') as f:
++    with (gzip.open if str(path).endswith('.gz') else open)(_data_input(path), 'rt') as f:
+         return [json.loads(x) for x in f]
+ 
+ 
+--- a/scripts/labelfix/s4_validate.py
++++ b/scripts/labelfix/s4_validate.py
+@@ -3,6 +3,7 @@
+ Detection consumes recogniser text, pixels and alignment. Google/human labels
+ are read only by the frozen evaluation instruments, never by reading.py.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import os
+ for k in ('VECLIB_MAXIMUM_THREADS', 'OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS'):
+     os.environ[k] = '1'
+@@ -25,7 +26,7 @@
+ 
+ 
+ def read(path):
+-    with (gzip.open if str(path).endswith('.gz') else open)(path, 'rt') as f:
++    with (gzip.open if str(path).endswith('.gz') else open)(_data_input(path), 'rt') as f:
+         return [json.loads(x) for x in f]
+ 
+ 
+--- a/scripts/labelfix/s5_report.py
++++ b/scripts/labelfix/s5_report.py
+@@ -1,4 +1,5 @@
+ """S5 evaluation-only accounting. Never builds or publishes owner pages."""
++from greekocr.ops.data_root import input_path as _data_input
+ import os
+ for k in ('VECLIB_MAXIMUM_THREADS','OPENBLAS_NUM_THREADS','OMP_NUM_THREADS'):os.environ[k]='1'
+ import json,gzip,hashlib
+@@ -13,7 +14,7 @@
+ from greekocr.labelfix.markshape import load_model
+ O=Path('docs/labelfix/spellcheck')
+ def main():
+- rows=read(O/'S5_lines.jsonl.gz');before=read(O/'S4_lines.jsonl.gz');bb={l['line_id']:l for l in before};m=json.loads((O/'S5_metrics.json').read_text());sources={l['line_id']:l for l in load_three_way(0)}
++ rows=read(_data_input(O/'S5_lines.jsonl.gz'));before=read(_data_input(O/'S4_lines.jsonl.gz'));bb={l['line_id']:l for l in before};m=json.loads((O/'S5_metrics.json').read_text());sources={l['line_id']:l for l in load_three_way(0)}
+  assert [l['line_id'] for l in rows]==[l['line_id'] for l in before]
+  checks=evaluate(rows,before)
+  for key,name in [('examples','owner_examples_expectations.jsonl'),('review','S5_review_expectations.jsonl'),('earlier','S5_owner_expectations.jsonl')]:
+@@ -49,7 +50,7 @@
+  bands=[dict(line_id=l['line_id'],slot=s['slot'],base=s.get('recogniser_base'),case=s.get('case_class'),band=s.get('height_band'),old_meanline=s['before_evidence']['meanline'],meanline=s['evidence']['meanline'],band_source=s['evidence'].get('band_source')) for l in rows if l['line_id'] in ownerids for s in l['slots']]
+  (O/'S5_owner_bands.jsonl').write_text(''.join(json.dumps(e,ensure_ascii=False)+'\n' for e in bands))
+  # Supplementary C1 diagnostic is explicitly in-sample for S4 mark naming.
+- samples=read(O/'S4_training_samples.jsonl.gz');dia=[s for s in samples if s['source']=='C1' and 'dialytika' in s['label']]
++ samples=read(_data_input(O/'S4_training_samples.jsonl.gz'));dia=[s for s in samples if s['source']=='C1' and 'dialytika' in s['label']]
+  model=load_model(Path('docs/labelfix/markshape_model_S4.json'));pred=model.probs([s['x'] for s in dia]).argmax(1)
+  m['dialytika_C1_training_diagnostic']=dict(n=len(dia),correct=sum(model.classes[p]==s['label'] for p,s in zip(pred,dia)),independent=False)
+  regress=[]
+--- a/scripts/labelfix/s5_validate.py
++++ b/scripts/labelfix/s5_validate.py
+@@ -3,6 +3,7 @@
+ Detection consumes recogniser text, pixels and alignment. Google/human labels
+ are read only by the frozen evaluation instruments, never by reading.py.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import os
+ for k in ('VECLIB_MAXIMUM_THREADS', 'OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS'):
+     os.environ[k] = '1'
+@@ -25,7 +26,7 @@
+ 
+ 
+ def read(path):
+-    with (gzip.open if str(path).endswith('.gz') else open)(path, 'rt') as f:
++    with (gzip.open if str(path).endswith('.gz') else open)(_data_input(path), 'rt') as f:
+         return [json.loads(x) for x in f]
+ 
+ 
+--- a/scripts/labelfix/s6_report.py
++++ b/scripts/labelfix/s6_report.py
+@@ -1,4 +1,5 @@
+ """Build the S6 Markdown report and exhaustive regression receipts, never pages."""
++from greekocr.ops.data_root import input_path as _data_input
+ import json,hashlib,subprocess,sys
+ from collections import Counter
+ from pathlib import Path
+@@ -13,7 +14,7 @@
+ def flag(x):return 'pass' if x else 'open'
+ 
+ def main():
+- m=json.loads((O/'S6_metrics.json').read_text());rows=read(O/'S6_lines.jsonl.gz');by={l['line_id']:l for l in rows}
++ m=json.loads((O/'S6_metrics.json').read_text());rows=read(_data_input(O/'S6_lines.jsonl.gz'));by={l['line_id']:l for l in rows}
+  old={k:{l['line_id']:l for l in read(O/f'{k}_lines.jsonl.gz')} for k in ('S4','S5')}
+  notes=json.loads((O/'S6_owner_summary.json').read_text())
+  legacy={k:json.loads((O/f'S6_old_checks_{k}.json').read_text()) for k in ('S4','S5','S6')}
+--- a/scripts/labelfix/s7_report.py
++++ b/scripts/labelfix/s7_report.py
+@@ -1,4 +1,5 @@
+ """Build S7's negative qualification report from versioned evidence only."""
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter
+ import json
+ from pathlib import Path
+@@ -63,7 +64,7 @@
+   elif variant=='S2':
+    guide_rows=[];witnesses={}
+    import gzip
+-   with gzip.open(E/'S2_lines.jsonl.gz','rt') as f:
++   with gzip.open(_data_input(E/'S2_lines.jsonl.gz'),'rt') as f:
+     for raw in f:
+      l=json.loads(raw);g=l['shared_guides'];r=dict(line_id=l['line_id'],**g['decision'],provenance=g['provenance'])
+      guide_rows.append(r)
+--- a/scripts/labelfix/s7_validate.py
++++ b/scripts/labelfix/s7_validate.py
+@@ -1,4 +1,5 @@
+ """S7 fixed-cohort geometry qualification; offline, cached alignment only."""
++from greekocr.ops.data_root import input_path as _data_input
+ import os
+ for k in ('VECLIB_MAXIMUM_THREADS','OPENBLAS_NUM_THREADS','OMP_NUM_THREADS'):
+     os.environ[k]='1'
+@@ -107,7 +108,7 @@
+     frozen={'S4':s4,'S6':{l['line_id']:l for l in saved}}
+     source={l['line_id']:l for l in load_three_way(0)}
+     truth=json.loads((O/'print_truth_s0.json').read_text())
+-    owner_ids=set(json.loads((O/'CN1_evidence/combined_boxes.json').read_text())['lines'])
++    owner_ids=set(json.loads((_data_input(O/'CN1_evidence/combined_boxes.json')).read_text())['lines'])
+     (E/'saved_S6_boxes.json').write_text(json.dumps(dict(lines={l['line_id']:box_page(l) for l in saved if l['line_id'] in owner_ids}),ensure_ascii=False)+'\n')
+     cfg=json.loads((O/'CN1_evidence/combined_config.json').read_text())
+     for p,d in cfg['r1_predictions'].items():
+--- a/scripts/labelfix/s7_verify.py
++++ b/scripts/labelfix/s7_verify.py
+@@ -1,4 +1,5 @@
+ """Verify S7 evidence, unchanged instruments, negative qualification and scope."""
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter
+ import gzip
+ import hashlib
+@@ -27,7 +28,7 @@
+     assert metrics['accepted']==metrics['baseline']
+     # Full line equality, not just equal aggregate scores.
+     count=0
+-    with gzip.open(E/'baseline_lines.jsonl.gz','rt') as a,gzip.open(E/'accepted_lines.jsonl.gz','rt') as b:
++    with gzip.open(_data_input(E/'baseline_lines.jsonl.gz'),'rt') as a,gzip.open(_data_input(E/'accepted_lines.jsonl.gz'),'rt') as b:
+         for x,y in zip(a,b,strict=True):
+             assert x==y
+             count+=1
+--- a/scripts/labelfix/s8_fetch_job.py
++++ b/scripts/labelfix/s8_fetch_job.py
+@@ -3,6 +3,7 @@
+ No submission, inference, network access, or login-node extraction. Python 3.6+.
+ The local `mock` subcommand invokes the same run/merge/checkpoint entry point.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ import fcntl
+ import gzip
+@@ -29,11 +30,11 @@
+ 
+ 
+ def sha(path):
+-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(Path(path)).read_bytes()).hexdigest()
+ 
+ 
+ def read_gzip(path):
+-    return json.loads(gzip.decompress(Path(path).read_bytes()))
++    return json.loads(gzip.decompress(_data_input(Path(path)).read_bytes()))
+ 
+ 
+ def atomic_json(path, value, compressed=False):
+--- a/scripts/labelfix/s8_fetch_l1m.py
++++ b/scripts/labelfix/s8_fetch_l1m.py
+@@ -3,6 +3,7 @@
+ Only the dedicated s8_dev_extract directory is writable remotely. Each shard
+ checkpoint survives a failed attempt; the partial payload is pulled in finally.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import base64
+ import gzip
+ import hashlib
+@@ -156,7 +157,7 @@
+     ids=(E.parent/'S8_DEV_ids.txt').read_text().split()
+     assert len(ids)==len(set(ids))==600
+     sources=json.loads((E/'sources.json').read_text())
+-    local=json.loads(gzip.decompress((E/'dev_c1_alignments.json.gz').read_bytes()))
++    local=json.loads(gzip.decompress((_data_input(E/'dev_c1_alignments.json.gz')).read_bytes()))
+     request=dict(ids=sorted(ids),missing_alignment_ids=sorted(set(ids)-set(local)),
+         crop_to_id={sources[k]['crop']:k for k in ids})
+     logpath=E/'fetch_log.json';logs=json.loads(logpath.read_text())
+@@ -172,8 +173,8 @@
+         logpath.write_text(json.dumps(logs,indent=2)+'\n')
+         if stop.exists():stop.rename(E/'extraction_stop_S8a_superseded.json')
+     dest=E/'remote.json.gz'
+-    if dest.exists():
+-        data=json.loads(gzip.decompress(dest.read_bytes()))
++    if _data_input(dest).exists():
++        data=json.loads(gzip.decompress(_data_input(dest).read_bytes()))
+         assert data['complete'] and set(data['ids'])==set(ids)
+         return
+     if (E/'extraction_stop.json').exists():
+@@ -210,7 +211,7 @@
+             data['alignments'].update(local);data['ids']=sorted(ids)
+             assert set(data['alignments'])==set(data['runtime'])==set(ids)
+             data['local_alignment_custody']=dict(path=str(E/'dev_c1_alignments.json.gz'),
+-                sha256=hashlib.sha256((E/'dev_c1_alignments.json.gz').read_bytes()).hexdigest())
++                sha256=hashlib.sha256((_data_input(E/'dev_c1_alignments.json.gz')).read_bytes()).hexdigest())
+             dest.write_bytes(gzip.compress(json.dumps(data,ensure_ascii=False).encode()))
+             print('COMPLETE: 600 DEV runtimes, 600 alignments; no SF4 overlays fetched',flush=True)
+             return
+--- a/scripts/labelfix/s8_fetch_stage.py
++++ b/scripts/labelfix/s8_fetch_stage.py
+@@ -3,6 +3,7 @@
+ Coordination only: never submits a job, runs extraction, or refreshes a cert.
+ Only the clariden SSH alias is reachable through this helper.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ import base64
+ import hashlib
+@@ -26,7 +27,7 @@
+ 
+ 
+ def digest(path):
+-    return hashlib.sha256(path.read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
+ 
+ 
+ def build(destination):
+--- a/scripts/labelfix/s8_prepare.py
++++ b/scripts/labelfix/s8_prepare.py
+@@ -4,6 +4,7 @@
+ --masked: incorporate the sourcing handoff without any reader inference.
+ Audit all 48 released L1M lines, using their locally saved original/masked evidence.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import os
+ import sys
+ for name in ('OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','VECLIB_MAXIMUM_THREADS'):
+@@ -52,17 +53,17 @@
+ 
+ def sha(p):
+     h=hashlib.sha256()
+-    with Path(p).open('rb') as f:
++    with _data_input(Path(p)).open('rb') as f:
+         for b in iter(lambda:f.read(1024*1024),b''):h.update(b)
+     return h.hexdigest()
+ 
+ def digest(obj):return hashlib.sha256(json.dumps(obj,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+-def load(p):return json.loads(Path(p).read_text())
++def load(p):return json.loads(_data_input(Path(p)).read_text())
+ def dump(p,obj):
+     p=Path(p);p.parent.mkdir(parents=True,exist_ok=True)
+     p.write_text(json.dumps(obj,ensure_ascii=False,indent=2,allow_nan=False)+'\n')
+ def rows(p):
+-    with (gzip.open if str(p).endswith('.gz') else open)(p,'rt') as f:
++    with (gzip.open if str(p).endswith('.gz') else open)(_data_input(p),'rt') as f:
+         return [json.loads(s) for s in f if s.strip()]
+ def write(p,data):
+     p=Path(p)
+@@ -229,7 +230,7 @@
+     dump(E/'audit_selection.json',selected);dump(E/'audit_input_custody.json',custody)
+     dump(E/'sources.json',sources)
+     saved=E/'audit_remote_selected.json.gz'
+-    if not saved.exists() or json.loads(gzip.decompress(saved.read_bytes()))!=remote:
++    if not _data_input(saved).exists() or json.loads(gzip.decompress(_data_input(saved).read_bytes()))!=remote:
+         saved.write_bytes(gzip.compress(json.dumps(remote,ensure_ascii=False).encode(),mtime=0))
+     return selected,remote,details
+ 
+@@ -521,7 +522,7 @@
+     ids=(OUT/'S8_DEV_ids.txt').read_text().split();assert len(ids)==len(set(ids))==600
+     audit_rows,audit_remote,details=audit_inputs(sources)
+     parity_audit(sources,audit_remote,details,audit_rows)
+-    if not (E/'remote.json.gz').exists():
++    if not (_data_input(E/'remote.json.gz')).exists():
+         # The audit needs only permitted local L1M evidence; no remote access here.
+         audit,audit_controls=audit_plan(sources,audit_remote,audit_rows,details)
+         control_preview(audit_controls,sources,audit_remote,'audit_')
+--- a/scripts/labelfix/s8_score_truth.py
++++ b/scripts/labelfix/s8_score_truth.py
+@@ -1,5 +1,6 @@
+ """Offline S8a6 analysis of the frozen DEV deck; no runtime imports or inference."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import collections as C
+ import gzip
+@@ -27,11 +28,11 @@
+ 
+ 
+ def sha(p):
+-    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(Path(p)).read_bytes()).hexdigest()
+ 
+ 
+ def read(p):
+-    return json.loads(Path(p).read_text())
++    return json.loads(_data_input(Path(p)).read_text())
+ 
+ 
+ def lines(p):
+--- a/scripts/labelfix/s8_validate_audit.py
++++ b/scripts/labelfix/s8_validate_audit.py
+@@ -1,4 +1,5 @@
+ """Validate all 48 S8a2 audit lines against their blind cards and native pixels."""
++from greekocr.ops.data_root import input_path as _data_input
+ import ast
+ from collections import Counter
+ import gzip
+@@ -41,7 +42,7 @@
+         got=[x for x in data if x['line_id']==r['id']]
+         assert {x['uid'] for x in got}=={x['uid'] for x in disputed+expected}
+         for x in pool:assert x['inclusion_probability']==len(expected)/len(pool)
+-    sources=load(E/'sources.json');remote=json.loads(gzip.decompress((E/'audit_remote_selected.json.gz').read_bytes()))
++    sources=load(E/'sources.json');remote=json.loads(gzip.decompress((_data_input(E/'audit_remote_selected.json.gz')).read_bytes()))
+     lookup={b['id']:b for b in blind};bound=load(E/'frozen_binding.json')
+     for k in key:
+         assert k['options']==lookup[k['id']]['options']
+--- a/scripts/labelfix/s8_validate_truth.py
++++ b/scripts/labelfix/s8_validate_truth.py
+@@ -1,4 +1,5 @@
+ """Independent S8a6 normalization/estimand examples and evidence reaggregation."""
++from greekocr.ops.data_root import input_path as _data_input
+ import collections
+ import gzip
+ import hashlib
+@@ -25,7 +26,7 @@
+ e = s.estimate(h, lambda r: r['v'], lambda r: 1, 42)
+ assert e['value'] == .25 and math.isclose(e['effective_event_n'], 1.6)
+ f = s.DEV/'evidence/dev_truth.jsonl.gz'
+-rr = [json.loads(x) for x in gzip.decompress(f.read_bytes()).splitlines()]
++rr = [json.loads(x) for x in gzip.decompress(_data_input(f).read_bytes()).splitlines()]
+ meta, summary, data = rr[0], rr[-1], rr[1:-1]
+ assert len(data) == len({r['id'] for r in data}) == 1793
+ assert meta['protected_files_sha256'] == s.frozen()
+--- a/scripts/labelfix/s8_verify_evidence.py
++++ b/scripts/labelfix/s8_verify_evidence.py
+@@ -1,4 +1,5 @@
+ """Offline S8a3 payload acceptance, bound to the exact extraction request."""
++from greekocr.ops.data_root import input_path as _data_input
+ import gzip
+ import hashlib
+ import json
+@@ -11,15 +12,15 @@
+ 
+ 
+ def sha(path):
+-    return hashlib.sha256(path.read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
+ 
+ 
+ def verify():
+     request = json.loads((E / 'S8a3/request.json').read_text())
+     receipt = json.loads((E / 'S8a3/remote_receipt.json').read_text())
+     config = json.loads((E / 'S8a3/job_config.json').read_text())
+-    remote = json.loads(gzip.decompress((E / 'remote.json.gz').read_bytes()))
+-    local = json.loads(gzip.decompress((E / 'dev_c1_alignments.json.gz').read_bytes()))
++    remote = json.loads(gzip.decompress((_data_input(E / 'remote.json.gz')).read_bytes()))
++    local = json.loads(gzip.decompress((_data_input(E / 'dev_c1_alignments.json.gz')).read_bytes()))
+     fingerprint = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
+     assert fingerprint == receipt['request_sha256'] == config['request_sha256'] == remote['request_sha256']
+     assert sha(E / 'remote.json.gz') == receipt['remote_sha256'] == EXPECTED
+--- a/scripts/labelfix/s8b_report.py
++++ b/scripts/labelfix/s8b_report.py
+@@ -1,4 +1,5 @@
+ """Render the bounded S8b result from saved measurement receipts only."""
++from greekocr.ops.data_root import input_path as _data_input
+ import collections as C
+ import gzip
+ import json
+@@ -8,8 +9,8 @@
+ D=t.DEV/'s8b'
+ 
+ 
+-def read(name):return json.loads((D/name).read_text())
+-def rows(name):return [json.loads(x) for x in (D/name).read_text().splitlines()]
++def read(name):return json.loads((_data_input(D/name)).read_text())
++def rows(name):return [json.loads(x) for x in (_data_input(D/name)).read_text().splitlines()]
+ def pc(v):return '—' if v is None else f'{100*v:.2f}'
+ def pr(c):return pc(c['precision'])+'/'+pc(c['recall'])
+ def cell(c):return t.display(c['precision'])+' / '+t.display(c['recall'])
+--- a/scripts/labelfix/s8b_split.py
++++ b/scripts/labelfix/s8b_split.py
+@@ -1,4 +1,5 @@
+ """Freeze S8b document membership without inspecting labels or detector errors."""
++from greekocr.ops.data_root import input_path as _data_input
+ import collections
+ import gzip
+ import hashlib
+@@ -14,7 +15,7 @@
+ 
+ 
+ def main():
+-    rows = [json.loads(x) for x in gzip.decompress((DEV/'evidence/dev_truth.jsonl.gz').read_bytes()).decode().splitlines()]
++    rows = [json.loads(x) for x in gzip.decompress((_data_input(DEV/'evidence/dev_truth.jsonl.gz')).read_bytes()).decode().splitlines()]
+     cut = [r for r in rows if r.get('type') == 'item' and not r['control'] and r['in_cut']]
+     membership, counts = {}, {}
+     for wave in WAVES:
+@@ -28,7 +29,7 @@
+             cards=sum(membership[r['line_id'].split('-p')[0]]['half'] == half for r in rr))
+             for half in ('TUNE', 'JUDGE')}
+     result = dict(seed=SEED, method='sorted documents; Python Random(seed + colon + wave).shuffle; first floor(n/2) TUNE',
+-        truth_sha256=hashlib.sha256((DEV/'evidence/dev_truth.jsonl.gz').read_bytes()).hexdigest(),
++        truth_sha256=hashlib.sha256((_data_input(DEV/'evidence/dev_truth.jsonl.gz')).read_bytes()).hexdigest(),
+         documents=membership, counts=counts)
+     OUT.mkdir(exist_ok=True)
+     path = OUT/'split.json'
+--- a/scripts/labelfix/sf4_r1_compatibility.py
++++ b/scripts/labelfix/sf4_r1_compatibility.py
+@@ -4,6 +4,7 @@
+ as a new score. Regenerates every saved raw/normalised reading from frozen S4
+ slots and saved predictions, including K1 flags/removals and serialization.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ from copy import deepcopy
+ import importlib.util
+ import json
+@@ -27,7 +28,7 @@
+     spec=importlib.util.spec_from_file_location('greekocr.labelfix._sf3_serialize',baseline)
+     old=importlib.util.module_from_spec(spec);spec.loader.exec_module(old)
+     frozen={l['line_id']:l for l in rows('docs/labelfix/spellcheck/S4_lines.jsonl.gz')}
+-    inputs={str(receipt_path):sha256(receipt_path),'docs/labelfix/spellcheck/S4_lines.jsonl.gz':sha256('docs/labelfix/spellcheck/S4_lines.jsonl.gz')}
++    inputs={str(receipt_path):sha256(receipt_path),'docs/labelfix/spellcheck/S4_lines.jsonl.gz':sha256(_data_input('docs/labelfix/spellcheck/S4_lines.jsonl.gz'))}
+     checks={}
+     for arm in 'ABCDE':
+         pred={}
+--- a/scripts/labelfix/sf6_verify.py
++++ b/scripts/labelfix/sf6_verify.py
+@@ -1,4 +1,5 @@
+ """Verify SF6 scope, source/evidence custody and regression outcomes offline."""
++from greekocr.ops.data_root import input_path as _data_input
+ import ast
+ from collections import Counter
+ import json
+@@ -48,7 +49,7 @@
+             assert r['script_sha256']==sha256('scripts/labelfix/sf6_measure.py')
+             assert r['policy']==gate.policy_binding()
+     wi=json.loads((EV/'witness_inputs_receipt.json').read_text())
+-    assert wi['output_sha256']==sha256(EV/'witness_inputs.jsonl.gz')
++    assert wi['output_sha256']==sha256(_data_input(EV/'witness_inputs.jsonl.gz'))
+     witnesses=list(rows(EV/'witness_results.jsonl.gz'))
+     for c,n in [('sf5',56),('l1a',48),('quote_probe',64)]:assert sum(r['cohort']==c for r in witnesses)==n
+     assert next(r['after']['status'] for r in witnesses if r['id']==KERAIA)=='hold'
+--- a/scripts/labelfix/sf6b_measure.py
++++ b/scripts/labelfix/sf6b_measure.py
+@@ -3,6 +3,7 @@
+ Original SF6 evidence is read-only. Each phase retains the instrument's SF5
+ reference; the comparison/report uses each phase's AFTER (SF6 versus SF6b).
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ import ast
+ from collections import Counter
+@@ -27,7 +28,7 @@
+ CAPITALS={'32aae9fec147d3b483deb96e-p000060-l0057','a963b33d02c23d4127f5ec26-p000012-l0029'}
+ 
+ 
+-def read(path):return json.loads(path.read_text())
++def read(path):return json.loads(_data_input(path).read_text())
+ 
+ 
+ def measure(phase=None):
+--- a/scripts/labelfix/sf6c_report.py
++++ b/scripts/labelfix/sf6c_report.py
+@@ -1,4 +1,5 @@
+ """Append SF6c from verified saved replay receipts; preserve SF6/SF6b verbatim."""
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter,defaultdict
+ import json
+ import re
+@@ -9,7 +10,7 @@
+ from scripts.labelfix.sf6b_measure import table,arrow,vector
+ 
+ 
+-def read(p):return json.loads(p.read_text())
++def read(p):return json.loads(_data_input(p).read_text())
+ 
+ 
+ def report():
+--- a/scripts/labelfix/sf7_final_score.py
++++ b/scripts/labelfix/sf7_final_score.py
+@@ -10,6 +10,7 @@
+ ROOT=Path(__file__).resolve().parents[2];A=ROOT/'artifacts/sf7_rc1/audit';K=A/'opus_keys'
+ sys.path.insert(0,str(Path(__file__).parent));import r2_cards_resolve as R2
+ sys.path.insert(0,str(K/'vendor'));import numpy as np
++from greekocr.ops.data_root import input_path as _data_input
+ from adjudicate.deck import leak_scan
+ 
+ def cluster_score(rows,numer,denom,replicates=10000):
+@@ -26,8 +27,8 @@
+  rates=totals[:,0]/totals[:,1]
+  return dict(value=float(matrix[:,0].sum()/matrix[:,1].sum()),document_clusters=len(docs),document_bootstrap95=np.quantile(rates,[.025,.975]).tolist(),replicates=replicates,seed=20261019,method='document-cluster percentile bootstrap; each audit line weight 1',degenerate=bool(np.ptp(rates)<1e-12))
+ 
+-def load(p):return json.loads(Path(p).read_text())
+-def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
++def load(p):return json.loads(_data_input(Path(p)).read_text())
++def sha(p):return hashlib.sha256(_data_input(Path(p)).read_bytes()).hexdigest()
+ def verify():
+  for path,expected in load(K/'sources.json').items():
+   # Upstream files are bound for provenance; execution only needs the sealed local copies.
+--- a/scripts/labelfix/sf7_measure.py
++++ b/scripts/labelfix/sf7_measure.py
+@@ -1,4 +1,5 @@
+ """Offline SF7 replay. Inputs and outputs are individually SHA-bound."""
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import defaultdict
+ from copy import deepcopy
+ import gzip
+@@ -20,7 +21,7 @@
+     overlays=DOC/'S8_DEV/private/audit100/selected_overlays.json.gz'
+     truth=DOC/'S8_DEV/audit100_private/audit100_final.json'
+     inv={r['line_id']:r for r in json.loads(inventory.read_text())};truths=json.loads(truth.read_text())
+-    data=json.load(gzip.open(overlays,'rt'))['records']
++    data=json.load(gzip.open(_data_input(overlays),'rt'))['records']
+     assert len(data)==len(inv)==len(truths)==100
+     result=[]
+     for o in data:
+@@ -96,12 +97,12 @@
+     receipt(EV/'cards39_receipt.json',dict(inputs=ci,cards=39,variants=2,policy=gate.policy_binding(),
+         outputs={n:sha256(EV/n) for n in ('cards39_inputs.jsonl.gz','cards39_replay.jsonl.gz')},
+         evidence='saved heldout detector, A/B/E predictions, extractor metadata, native header recovery; no inference'))
+-    prior=json.loads((EV/'sf6_before.json').read_text());assert sf6.policy_binding()==prior['policy']
++    prior=json.loads((_data_input(EV/'sf6_before.json')).read_text());assert sf6.policy_binding()==prior['policy']
+     witnesses=list(rows(DOC/'SF6c_evidence/after/witness_inputs.jsonl.gz'))
+     after=[sf6_overlay(w['record'],w['runtime'],w.get('mode','ENSEMBLE_AB'),BINDING) for w in witnesses]
+     assert json.loads(json.dumps(after,ensure_ascii=False,sort_keys=True))==prior['outputs']
+     receipt(EV/'sf6_reproduction.json',dict(identical=True,fixtures=len(after),policy=sf6.policy_binding(),
+-        before_sha256=sha256(EV/'sf6_before.json'),canonical_output_sha256=__import__('hashlib').sha256(json.dumps(after,ensure_ascii=False,sort_keys=True).encode()).hexdigest()))
++        before_sha256=sha256(_data_input(EV/'sf6_before.json')),canonical_output_sha256=__import__('hashlib').sha256(json.dumps(after,ensure_ascii=False,sort_keys=True).encode()).hexdigest()))
+     print(json.dumps(summary))
+ 
+ 
+--- a/scripts/labelfix/sf7_opus_prepare.py
++++ b/scripts/labelfix/sf7_opus_prepare.py
+@@ -8,12 +8,13 @@
+ ROOT=Path(__file__).resolve().parents[2]
+ A=ROOT/'artifacts/sf7_rc1/audit'; K=A/'opus_keys'
+ sys.path.insert(0,str(K/'vendor'))
++from greekocr.ops.data_root import input_path as _data_input
+ from adjudicate.deck import leak_scan
+ PACK=Path('/private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/b1155dbd-56e0-4e2f-8bf5-349babd21b48/scratchpad/sf7_audit_opus')
+ R2=ROOT.parent/'greek-ocr-toolkit-spellcheck-r2cards/docs/labelfix/spellcheck/R2/decks'
+-def sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+-def load(p): return json.loads(Path(p).read_text())
+-def rows(p): return [json.loads(s) for s in Path(p).read_text().splitlines() if s.strip()]
++def sha(p): return hashlib.sha256(_data_input(Path(p)).read_bytes()).hexdigest()
++def load(p): return json.loads(_data_input(Path(p)).read_text())
++def rows(p): return [json.loads(s) for s in _data_input(Path(p)).read_text().splitlines() if s.strip()]
+ def dump(p,x): Path(p).write_text(json.dumps(x,ensure_ascii=False,indent=2)+'\n')
+ def write(p,x): Path(p).write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in x))
+ def bare(x): return ''.join(c for c in U.normalize('NFD',x) if not U.combining(c))
+--- a/scripts/lqb/build_v2.py
++++ b/scripts/lqb/build_v2.py
+@@ -9,13 +9,14 @@
+ sys.dont_write_bytecode=True
+ ROOT=Path(__file__).resolve().parents[2]
+ sys.path.insert(0,str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.labelfix import lqb
+ OUT=lqb.DEFAULT
+ COLLECT=lqb.PROJECTS/'greek-ocr-toolkit-sol-collect/docs/harvest/collect_v3'
+ SX=lqb.PROJECTS/'greek-ocr-toolkit-spellcheck/artifacts/sx1'
+ 
+ 
+-def read(p):return json.loads(Path(p).read_text())
++def read(p):return json.loads(_data_input(Path(p)).read_text())
+ def bind(p,inputs):
+     p=Path(p);inputs[str(p)]=lqb.sha256(p);return p
+ 
+@@ -78,9 +79,9 @@
+             note='SX1 binds the earlier frozen truth revision; later i-a scopes remain uncovered by sf6.')
+         sx_status='scored'
+     registry['versions']['google_raw']['supplemental_sources']=supplemental
+-    cards=read(bind(ROOT/'artifacts/n1/owner_sheet/cards.json',inputs))
++    cards=read(bind(_data_input(ROOT/'artifacts/n1/owner_sheet/cards.json'),inputs))
+     bind(ROOT/'artifacts/n1/n1t3/combined_decisions.json',inputs)
+-    bind(ROOT/'artifacts/n1/n1t2/slots.jsonl',inputs)
++    bind(_data_input(ROOT/'artifacts/n1/n1t2/slots.jsonl'),inputs)
+     bind(ROOT/'greekocr/numerics/owner_v2.py',inputs)
+     from greekocr.numerics.combine_v2 import GLYPHS
+     decisions={r['slot_id']:r for r in read(ROOT/'artifacts/n1/n1t3/combined_decisions.json')['decisions']}
+--- a/scripts/lqb/build_v2_1.py
++++ b/scripts/lqb/build_v2_1.py
+@@ -10,6 +10,7 @@
+ sys.dont_write_bytecode=True
+ ROOT=Path(__file__).resolve().parents[2]
+ sys.path.insert(0,str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.labelfix import lqb
+ import build_v2 as v2
+ from build_truth import Builder, deduplicate
+@@ -18,7 +19,7 @@
+ DEV=lqb.PROJECTS/'greek-ocr-toolkit-spellcheck-s8/docs/labelfix/spellcheck/S8_DEV'
+ SX=v2.SX
+ 
+-def read(p):return json.loads(Path(p).read_text())
++def read(p):return json.loads(_data_input(Path(p)).read_text())
+ def write_rows(p,rs):Path(p).write_text(''.join(json.dumps(r,ensure_ascii=False,sort_keys=True)+'\n' for r in rs))
+ def bind(p,inputs):
+     p=Path(p);inputs[str(p)]=lqb.sha256(p);return p
+@@ -136,7 +137,7 @@
+     return new,dict(registered_classes=classes,dev_class='eval_only_dev',dev_class_authority='LQB4 user instruction',dev_ids=600,dev_in_current_class=len(dev_ids&dev_disk),dev_registry_sync_pending=len(dev_ids-dev_disk))
+ 
+ def build_truth(inputs,dev_tier):
+-    old=list(lqb.rows(bind(OUT/'truth_v1.jsonl',inputs)))
++    old=list(lqb.rows(bind(_data_input(OUT/'truth_v1.jsonl'),inputs)))
+     dev,dgoogle,dids,cards=dev_records(inputs,dev_tier);sub,sgoogle,unknown,sids=substitution_records(inputs)
+     truth,conflicts=deduplicate(old+dev+sub)
+     # Apply the frozen line-level training flags to the new snapshot only.
+--- a/scripts/lqb/validate_scoreboard.py
++++ b/scripts/lqb/validate_scoreboard.py
+@@ -1,4 +1,5 @@
+ """Offline HTML/image validation. Browser layout checks are optional (--browser)."""
++from greekocr.ops.data_root import input_path as _data_input
+ from pathlib import Path
+ import base64
+ from html.parser import HTMLParser
+@@ -22,7 +23,7 @@
+ 
+ def main():
+     out=OUT/'validation';out.mkdir(exist_ok=True)
+-    page=(OUT/'scoreboard.html').read_text();sheet=Sheet();sheet.feed(page)
++    page=(_data_input(OUT/'scoreboard.html')).read_text();sheet=Sheet();sheet.feed(page)
+     for src in sheet.images:
+         assert src.startswith('data:image/png;base64,')
+         with Image.open(BytesIO(base64.b64decode(src.split(',',1)[1]))) as im:im.verify()
+--- a/scripts/numerics/n1_prepare.py
++++ b/scripts/numerics/n1_prepare.py
+@@ -8,6 +8,7 @@
+ from pathlib import Path
+ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+ sys.path.insert(0,str(Path(__file__).resolve().parent))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.numerics.locks import load_locks
+ from greekocr.numerics.slots_geom import locate_slot
+ from greekocr.numerics.tokens import tokenize
+@@ -20,7 +21,7 @@
+ INPUTS={}
+ 
+ 
+-def sha(path): return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++def sha(path): return hashlib.sha256(_data_input(Path(path)).read_bytes()).hexdigest()
+ def bind(path):
+     path=Path(path)
+     if str(path) not in INPUTS: INPUTS[str(path)]=sha(path)
+--- a/scripts/numerics/n1_score.py
++++ b/scripts/numerics/n1_score.py
+@@ -2,6 +2,7 @@
+ 
+ Build with the collector Python and PYTHONPATH set to the cleanup worktree.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter, defaultdict
+ from pathlib import Path
+ import hashlib
+@@ -22,7 +23,7 @@
+ 
+ def sha(path):
+     h = hashlib.sha256()
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         for chunk in iter(lambda: f.read(1024*1024), b''): h.update(chunk)
+     return h.hexdigest()
+ 
+@@ -34,11 +35,11 @@
+ 
+ 
+ def rows(path):
+-    return [json.loads(s) for s in bind(path).read_text().splitlines() if s.strip()]
++    return [json.loads(s) for s in _data_input(bind(path)).read_text().splitlines() if s.strip()]
+ 
+ 
+ def load(path):
+-    return json.loads(bind(path).read_text())
++    return json.loads(_data_input(bind(path)).read_text())
+ 
+ 
+ def dump(path, value):
+@@ -251,12 +252,12 @@
+         'Please correct anything wrong in the note or Printed.')
+     spec=dict(title='N1 Numeric Separators',intro=intro,groups=[dict(id=g,heading=g) for g in GROUPS])
+     sheet=sheetdir/'n1_sheet.html'; sheet.write_text(owner_sheet.render(cards,spec))
+-    assert sheet.stat().st_size < 15_000_000
++    assert _data_input(sheet).stat().st_size < 15_000_000
+     dump(sheetdir/'cards.json',manifests)
+     dump(sheetdir/'spec.json',spec)
+     counts={g:sum(c['group']==g for c in cards) for g in GROUPS}
+     summary=dict(cards=len(cards),groups=counts,agreement_seed=SEED,agreement_slot_ids=[r['slot_id'] for r in sample],
+-        html_bytes=sheet.stat().st_size,html_MB=sheet.stat().st_size/1e6,
++        html_bytes=_data_input(sheet).stat().st_size,html_MB=_data_input(sheet).stat().st_size/1e6,
+         hashes={p.name:sha(p) for p in (sheet,sheetdir/'cards.json',sheetdir/'spec.json')},
+         renderer=str(renderer),renderer_sha256=sha(renderer),printed_prefilled=0,proposed_rows=sum(len(c['rows'])==3 for c in cards))
+     dump(sheetdir/'summary.json',summary)
+--- a/scripts/numerics/n1cb_prepare.py
++++ b/scripts/numerics/n1cb_prepare.py
+@@ -1,4 +1,5 @@
+ """Offline continuation of N1-C; never builds packs or classifies ink."""
++from greekocr.ops.data_root import input_path as _data_input
+ import hashlib
+ import json
+ import platform
+@@ -18,10 +19,10 @@
+ GROUPS = [('thousands_dot',24),('decimal_comma',24),('range_dash',24),('inner_dash',12),('empty',12)]
+ 
+ def sha(path):
+-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(Path(path)).read_bytes()).hexdigest()
+ 
+ def rows(path):
+-    return [json.loads(s) for s in Path(path).read_text().splitlines() if s.strip()]
++    return [json.loads(s) for s in _data_input(Path(path)).read_text().splitlines() if s.strip()]
+ 
+ def write(path, value, jsonl=False):
+     path = Path(path)
+--- a/scripts/numerics/n1g.py
++++ b/scripts/numerics/n1g.py
+@@ -1,4 +1,5 @@
+ """Offline N1-G audit, review sheets and explicitly authorized finalization."""
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter, defaultdict
+ import html
+@@ -173,7 +174,7 @@
+ 
+ 
+ def reference_pair():
+-    truth=rows(BASE/'n1r/truth.jsonl')
++    truth=rows(_data_input(BASE/'n1r/truth.jsonl'))
+     # Existing high-confidence development truth; neither reference is locked truth.
+     doc='elstat:GRESYE_01_0001_00046'
+     pair=[next(r for r in truth if r['document']==doc and r['truth']==t) for t in ('raised dot','baseline dot')]
+--- a/scripts/numerics/n1r_fit.py
++++ b/scripts/numerics/n1r_fit.py
+@@ -1,4 +1,5 @@
+ """Fit/freeze on development documents only. Never load locked measurements."""
++from greekocr.ops.data_root import input_path as _data_input
+ import hashlib
+ import json
+ from pathlib import Path
+@@ -33,7 +34,7 @@
+     for name in source:
+         expected=sealed.get('artifacts/n1/'+name)
+         if isinstance(expected,str) and sha(BASE/name)!=expected:raise ValueError('TS3 truth changed: '+name)
+-    slots={s['slot_id']:s for s in rows(BASE/'n1t2/slots.jsonl')}
++    slots={s['slot_id']:s for s in rows(_data_input(BASE/'n1t2/slots.jsonl'))}
+     ds=json.loads((BASE/'n1t3/combined_decisions.json').read_text())['decisions']
+     locks=load_locks(BASE)
+     # Assert ALL dev rows before touching their measured features, even unresolved.
+--- a/scripts/numerics/n1r_receipt.py
++++ b/scripts/numerics/n1r_receipt.py
+@@ -1,4 +1,5 @@
+ """Seal N1R preparation, actual metrics and test limitations; never run readers."""
++from greekocr.ops.data_root import input_path as _data_input
+ import json
+ from pathlib import Path
+ import sys
+@@ -34,7 +35,7 @@
+         if not r['ok']:raise ValueError('new locked pack closure changed: '+str(r['violations']))
+         if (rd/'answers.jsonl').exists():raise ValueError('unexpected locked answers')
+         closures.append(dict(context=c['context'],reader=c['reader'],manifest_sha256=r['manifest_sha256']))
+-    cfg=rule['config'];truth=rows(BASE/'n1r/truth.jsonl');train=[s for s in truth if s['split']=='fit']
++    cfg=rule['config'];truth=rows(_data_input(BASE/'n1r/truth.jsonl'));train=[s for s in truth if s['split']=='fit']
+     fit_stats=metrics([s['truth'] for s in train],[decide(s,rule) for s in train])
+     measurable=Counter(s['split'] for s in truth if s['truth']=='raised dot' and measurements(s)['candidate_count']==1 and not measurements(s)['hyphen_length_stroke'])
+     matrix=held['confusion_matrix']
+--- a/scripts/numerics/n1t_combine.py
++++ b/scripts/numerics/n1t_combine.py
+@@ -3,6 +3,7 @@
+ from pathlib import Path
+ import sys
+ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.numerics.combine_v2 import decode_and_gate, decide
+ from n1t_packs import rows, dump
+ ROOT=Path(__file__).resolve().parents[2];OUT=ROOT/'artifacts/n1/n1t2'
+@@ -32,7 +33,7 @@
+ 
+ 
+ def main():
+-    slots=rows(OUT/'slots.jsonl');reads,gates=load_reads()
++    slots=rows(_data_input(OUT/'slots.jsonl'));reads,gates=load_reads()
+     require_complete(slots,reads)
+     decisions=[decide(s,reads.get(s['slot_id'],[])) for s in slots]
+     dump(OUT/'decisions.json',dict(decisions=decisions,gates=gates))
+--- a/scripts/numerics/n1t_prepare.py
++++ b/scripts/numerics/n1t_prepare.py
+@@ -1,4 +1,5 @@
+ """Phase-A offline enumeration, exact geometry, v3 renders, unfitted dash controls."""
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter, defaultdict
+ import json
+ from pathlib import Path
+@@ -49,7 +50,7 @@
+     from PIL import Image
+     from greekocr.glyphs.components import line_glyphs
+     out=OUT/'n1t'
+-    if (out/'slots.jsonl').exists(): raise ValueError('refusing to overwrite phase A build')
++    if (_data_input(out/'slots.jsonl')).exists(): raise ValueError('refusing to overwrite phase A build')
+     prior={str(p):sha(p) for p in OUT.rglob('*') if p.is_file()}
+     for name in ('sep.md','sep2.md'):
+         p=ROOT/'docs/labelfix/secondary/prompts'/name;prior[str(p)]=sha(p)
+@@ -58,9 +59,9 @@
+         prior=json.loads(priorpath.read_text())
+         assert all(sha(p)==h for p,h in prior.items())
+     else: dump(priorpath,prior)
+-    locks=load_locks(OUT);frame=rows(OUT/'frame_step1.jsonl');cards=json.loads((OUT/'owner_sheet/cards.json').read_text())
++    locks=load_locks(OUT);frame=rows(OUT/'frame_step1.jsonl');cards=json.loads((_data_input(OUT/'owner_sheet/cards.json')).read_text())
+     summary=json.loads((OUT/'owner_sheet/summary.json').read_text())
+-    assert summary['cards']==len(cards) and sha(OUT/'owner_sheet/cards.json')==summary['hashes']['cards.json']
++    assert summary['cards']==len(cards) and sha(_data_input(OUT/'owner_sheet/cards.json'))==summary['hashes']['cards.json']
+     # r1 data is independently decoded and gates/provenance rechecked, not trusted by filename.
+     from n1_score import decode_and_gate
+     byslot={s['slot_id']:s for s in frame};valid=[];gates={}
+--- a/scripts/numerics/n1t_receipt.py
++++ b/scripts/numerics/n1t_receipt.py
+@@ -7,6 +7,7 @@
+ import sys
+ import xml.etree.ElementTree as ET
+ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.numerics.combine_v2 import MEANINGS
+ from n1_render import SCRATCH
+ from n1t_packs import rows,sha,dump
+@@ -15,7 +16,7 @@
+ 
+ 
+ def main():
+-    build=json.loads((OUT/'build.json').read_text());slots=rows(OUT/'slots.jsonl')
++    build=json.loads((OUT/'build.json').read_text());slots=rows(_data_input(OUT/'slots.jsonl'))
+     contexts=sorted((SCRATCH/'sol_packs/n1t').glob('ctx*'));closures=[];dry=[]
+     env=dict(os.environ,PATH=str(Path.home()/'Projects/greek-ocr-toolkit-sol-collect/.venv/bin')+':/usr/bin:/bin:/usr/sbin:/sbin')
+     for ctx in contexts:
+--- a/scripts/numerics/n1tb_prepare.py
++++ b/scripts/numerics/n1tb_prepare.py
+@@ -1,4 +1,5 @@
+ """Offline N1-Tb build and verification; never invokes a reader or probe."""
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import Counter
+ import json
+ import os
+@@ -40,7 +41,7 @@
+     jsonl(path, assignments)
+     (path.with_suffix('.jsonl.sha256')).write_text(sha(path)+'  dash_types.jsonl\n')
+     controls = typed_controls(rows(BASE/'controls/approved.jsonl'), assignments)
+-    slots = prune(rows(BASE/'n1t/slots.jsonl'))
++    slots = prune(rows(_data_input(BASE/'n1t/slots.jsonl')))
+     lines = rows(BASE/'n1t/lines.jsonl'); byline = {l['line_id']:l for l in lines}
+     locks = load_locks(BASE); locks.assert_fit_rows(s['line_id'] for s in slots)
+     for s in slots:
+@@ -68,12 +69,12 @@
+         dump(out/'pack_build.json',summaries[name])
+     assert all(sha(p)==h for p,h in old.items())
+     dump(OUT/'build.json',dict(counts=dict(Counter(s['read_reason'] for s in slots)),audit_seed=AUDIT_SEED,
+-        source_slots_sha256=sha(BASE/'n1t/slots.jsonl'),dash_types_sha256=sha(path),summaries=summaries))
++        source_slots_sha256=sha(_data_input(BASE/'n1t/slots.jsonl')),dash_types_sha256=sha(path),summaries=summaries))
+     print(json.dumps(dict(Counter(s['read_reason'] for s in slots))))
+ 
+ 
+ def verify():
+-    buildinfo=json.loads((OUT/'build.json').read_text()); slots=rows(OUT/'slots.jsonl')
++    buildinfo=json.loads((OUT/'build.json').read_text()); slots=rows(_data_input(OUT/'slots.jsonl'))
+     closures=[];dry=[]
+     env=dict(os.environ, PATH=str(Path.home()/'Projects/greek-ocr-toolkit-sol-collect/.venv/bin')+':/usr/bin:/bin:/usr/sbin:/sbin')
+     for name in ('n1t2','n1cal2'):
+--- a/scripts/numerics/n1tr.py
++++ b/scripts/numerics/n1tr.py
+@@ -1,4 +1,5 @@
+ """N1TR offline preparation and fail-closed two-read/lead finalisation."""
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter, defaultdict
+ from dataclasses import asdict
+@@ -25,10 +26,10 @@
+ ART=ROOT/'artifacts/n1/n1tr'; PACK=SCRATCH/'sol_packs/n1tr'; REVIEW=SCRATCH/'n1_review/n1tr'
+ REGISTRY=ROOT/'docs/labelfix/lqb/versions.json'
+ SCANNER_SHA='dd2fc59d6385601146f8cfb3f23ff48aec2e769188f65def282f4b72e489c547'
+-def rows(p):return [json.loads(s) for s in Path(p).read_text().splitlines() if s.strip()]
++def rows(p):return [json.loads(s) for s in _data_input(Path(p)).read_text().splitlines() if s.strip()]
+ def sha(p):
+     h=hashlib.sha256()
+-    with Path(p).open('rb') as f:
++    with _data_input(Path(p)).open('rb') as f:
+         for b in iter(lambda:f.read(1048576),b''):h.update(b)
+     return h.hexdigest()
+ def dump(p,v):
+--- a/scripts/numerics/n1tr_f2.py
++++ b/scripts/numerics/n1tr_f2.py
+@@ -9,6 +9,7 @@
+ import sys
+ 
+ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.labelfix.lqb import run, sha256
+ 
+ ROOT = Path(__file__).resolve().parents[2]
+@@ -29,7 +30,7 @@
+     counts = Counter()
+     meanings = Counter()
+     holds = Counter()
+-    with OUTPUT.open() as source, temporary.open('w') as target:
++    with _data_input(OUTPUT).open() as source, temporary.open('w') as target:
+         for line in source:
+             row = json.loads(line)
+             assert row['label'] == row['parent_label'] == row['new_label']
+--- a/scripts/numerics/n1ts.py
++++ b/scripts/numerics/n1ts.py
+@@ -10,6 +10,7 @@
+ 
+ ROOT = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.numerics.combine_v2 import decide, GLYPHS, DASHES, MEANINGS
+ from greekocr.numerics.locks import load_locks
+ from n1t_combine import load_reads, require_complete
+@@ -163,7 +164,7 @@
+         google_ours=[dict(google=g,ours=o,count=n) for (g,o),n in sorted(matrix.items())],
+         geometry_audit=audit,audit_agree=sum(a['raw_agree'] for a in audit),audit_decided=sum(a['decided_nothing'] for a in audit),
+         raised_cells=index['raised_cells'],review_cells=index['review_cells'],sheets=len(index['sheets']),
+-        deferred_by_reason=index['deferred_by_reason'],owner_sheet_sha256=sha(BASE/'owner_sheet/n1_sheet.html'),
++        deferred_by_reason=index['deferred_by_reason'],owner_sheet_sha256=sha(_data_input(BASE/'owner_sheet/n1_sheet.html')),
+         owner_products={p.name:sha(p) for p in (BASE/'owner_sheet').glob('*') if p.is_file()},
+         source_hashes={str(p.relative_to(ROOT)):sha(p) for p in [OUT/'slots.jsonl',OUT/'lines.jsonl',OUT/'decisions.json',BASE/'controls/approved.jsonl',BASE/'controls/dash_types.jsonl',*sorted((BASE/'answers/n1t2').glob('*.jsonl')),*sorted((BASE/'answers/n1t2').glob('*.run.json')),*sorted((BASE/'answers/n1t2').glob('*.scan.json')),*sorted((OUT/'keys').glob('*.json'))]})
+     dump(BASE/'N1TS_PHASE1.json',summary)
+@@ -225,7 +226,7 @@
+         unresolved=sum(d['truth_candidate'] is None for d in final),
+         boxes=dict(Counter(s['style'] for c in cards for s in c['slots'] if s['evidence'])),
+         unlocalized_slots=[s['slot_id'] for c in cards for s in c['slots'] if not s['evidence']],
+-        sheet_bytes=(BASE/'owner_sheet/n1_sheet.html').stat().st_size)
++        sheet_bytes=(_data_input(BASE/'owner_sheet/n1_sheet.html')).stat().st_size)
+     dump(OUT/'lead_decisions.json',dict(decisions=final,gates=gates))
+     dump(BASE/'N1TS_PHASE2.json',summary)
+     return summary
+--- a/scripts/numerics/n1w1.py
++++ b/scripts/numerics/n1w1.py
+@@ -1,4 +1,5 @@
+ """N1W1 offline preparation and fail-closed two-read/lead finalisation."""
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter, defaultdict
+ from dataclasses import asdict
+@@ -28,10 +29,10 @@
+ PROMPT=Path(__file__).with_name('n1w1_sep2.md')
+ REGISTRY=ROOT/'docs/labelfix/lqb/versions.json'
+ SCANNER_SHA='3bbe72cbc74c3fe58a70a4a143f3ea1b0c4e383ef47a32634e7e83f741dd49db'
+-def rows(p):return [json.loads(s) for s in Path(p).read_text().splitlines() if s.strip()]
++def rows(p):return [json.loads(s) for s in _data_input(Path(p)).read_text().splitlines() if s.strip()]
+ def sha(p):
+     h=hashlib.sha256()
+-    with Path(p).open('rb') as f:
++    with _data_input(Path(p)).open('rb') as f:
+         for b in iter(lambda:f.read(1048576),b''):h.update(b)
+     return h.hexdigest()
+ def dump(p,v):
+--- a/scripts/numerics/n1w1_f3.py
++++ b/scripts/numerics/n1w1_f3.py
+@@ -8,6 +8,7 @@
+ 
+ ROOT = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ ART = ROOT / 'artifacts/n1'
+ FINAL = ART / 'n1w1/r3/finalization'
+ RULING = ROOT / 'docs/labelfix/secondary/N1W1_LEAD_RAISED.md'
+@@ -15,14 +16,14 @@
+ 
+ def sha(path):
+     h = hashlib.sha256()
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         for block in iter(lambda: f.read(1048576), b''):
+             h.update(block)
+     return h.hexdigest()
+ 
+ 
+ def rows(path):
+-    return [json.loads(s) for s in Path(path).read_text().splitlines() if s.strip()]
++    return [json.loads(s) for s in _data_input(Path(path)).read_text().splitlines() if s.strip()]
+ 
+ 
+ def dump(path, data):
+--- a/scripts/pages/write_q3_receipt.py
++++ b/scripts/pages/write_q3_receipt.py
+@@ -11,11 +11,12 @@
+ 
+ ROOT = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ from scripts.pages.check_stage_equivalence import MODULES, normalise
+ 
+ 
+ def sha(path):
+-    return hashlib.sha256(path.read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
+ 
+ 
+ def main():
+--- a/scripts/pages/write_q3b_receipt.py
++++ b/scripts/pages/write_q3b_receipt.py
+@@ -10,11 +10,12 @@
+ 
+ ROOT = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(ROOT))
++from greekocr.ops.data_root import input_path as _data_input
+ from scripts.pages.check_q3b_equality import ALLOWLIST
+ 
+ 
+ def sha(path):
+-    return hashlib.sha256(path.read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
+ 
+ 
+ def main():
+--- a/scripts/review/build_owner_sheets_v2.py
++++ b/scripts/review/build_owner_sheets_v2.py
+@@ -15,6 +15,7 @@
+ from pathlib import Path
+ from PIL import Image, ImageDraw
+ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.adjudicate.owner_sheet import render, image_path
+ 
+ ROOT = Path(__file__).resolve().parents[2]
+@@ -26,8 +27,8 @@
+ OUT = ROOT / 'artifacts/owner_sheets/v2'
+ NAMES = ('failure_modes_per_class', 'segmentation_failures')
+ 
+-def read(p): return json.loads(Path(p).read_text())
+-def rows(p): return [json.loads(x) for x in Path(p).read_text().splitlines() if x.strip()]
++def read(p): return json.loads(_data_input(Path(p)).read_text())
++def rows(p): return [json.loads(x) for x in _data_input(Path(p)).read_text().splitlines() if x.strip()]
+ def dump(p, value):
+     p.parent.mkdir(parents=True, exist_ok=True)
+     p.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
+--- a/scripts/review/build_sheet1_demos.py
++++ b/scripts/review/build_sheet1_demos.py
+@@ -4,6 +4,7 @@
+ wording follow reference_scratch/build_gate_sheet.py; HTML uses only the package.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import collections
+ import hashlib
+@@ -27,7 +28,7 @@
+ 
+ 
+ def sha(path):
+-    return hashlib.sha256(path.read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
+ 
+ 
+ # Saved measurement coordinates -> saved crop coordinates, exactly as reference.
+--- a/scripts/review/prepare_os1_specs.py
++++ b/scripts/review/prepare_os1_specs.py
+@@ -1,5 +1,6 @@
+ """Offline source binding and deterministic OS1 selection. Never modifies inputs."""
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ import collections, hashlib, json, random, re
+ from pathlib import Path
+ from bs4 import BeautifulSoup
+@@ -18,13 +19,13 @@
+     p = Path(p)
+     if str(p) not in INPUTS:
+         h = hashlib.sha256()
+-        with p.open('rb') as f:
++        with _data_input(p).open('rb') as f:
+             for chunk in iter(lambda: f.read(1024 * 1024), b''): h.update(chunk)
+         INPUTS[str(p)] = h.hexdigest()
+     return p
+ 
+-def read(p): return json.loads(bind(p).read_text())
+-def rows(p): return [json.loads(l) for l in bind(p).read_text().splitlines() if l.strip()]
++def read(p): return json.loads(_data_input(bind(p)).read_text())
++def rows(p): return [json.loads(l) for l in _data_input(bind(p)).read_text().splitlines() if l.strip()]
+ def clean(s): return s.replace('?', '[uncertain]')
+ def dump(p, x):
+     p.parent.mkdir(parents=True, exist_ok=True)
+--- a/scripts/secondary/reading/common.py
++++ b/scripts/secondary/reading/common.py
+@@ -1,4 +1,5 @@
+ """Local SR-B1 paths and serialization. Never imports source-worktree code."""
++from greekocr.ops.data_root import input_path as _data_input
+ import hashlib
+ import json
+ from pathlib import Path
+@@ -12,8 +13,8 @@
+ PACK_ROOT = SCRATCH/'sol_packs/ru1'
+ R2 = PROJECTS/'greek-ocr-toolkit-spellcheck-r2cards/docs/labelfix/spellcheck/R2/decks'
+ FIELDS = {'bsb':{'card_id','crop','google_text','word_scripts'}, 'yer':{'item_id','crop','masked_text','slots'}, 'owner39':{'card_id','word_image','line_image','anchor_index','anchor_base','options','extra_options'}}
+-def sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+-def rows(p): return [json.loads(s) for s in Path(p).read_text().splitlines() if s.strip()]
++def sha(p): return hashlib.sha256(_data_input(Path(p)).read_bytes()).hexdigest()
++def rows(p): return [json.loads(s) for s in _data_input(Path(p)).read_text().splitlines() if s.strip()]
+ def dump(p, obj):
+     p=Path(p); p.parent.mkdir(parents=True,exist_ok=True)
+     p.write_text(json.dumps(obj,ensure_ascii=False,indent=2,allow_nan=False)+'\n')
+--- a/scripts/secondary/reading/n1w1_common.py
++++ b/scripts/secondary/reading/n1w1_common.py
+@@ -1,4 +1,5 @@
+ """Local SR-B1 paths and serialization. Never imports source-worktree code."""
++from greekocr.ops.data_root import input_path as _data_input
+ import hashlib
+ import json
+ from pathlib import Path
+@@ -12,8 +13,8 @@
+ PACK_ROOT = SCRATCH/'sol_packs/ru1'
+ R2 = PROJECTS/'greek-ocr-toolkit-spellcheck-r2cards/docs/labelfix/spellcheck/R2/decks'
+ FIELDS = {'bsb':{'card_id','crop','google_text','word_scripts'}, 'yer':{'item_id','crop','masked_text','slots'}, 'owner39':{'card_id','word_image','line_image','anchor_index','anchor_base','options','extra_options'}}
+-def sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+-def rows(p): return [json.loads(s) for s in Path(p).read_text().splitlines() if s.strip()]
++def sha(p): return hashlib.sha256(_data_input(Path(p)).read_bytes()).hexdigest()
++def rows(p): return [json.loads(s) for s in _data_input(Path(p)).read_text().splitlines() if s.strip()]
+ def dump(p, obj):
+     p=Path(p); p.parent.mkdir(parents=True,exist_ok=True)
+     p.write_text(json.dumps(obj,ensure_ascii=False,indent=2,allow_nan=False)+'\n')
+--- a/scripts/secondary/reading/n1w1_exclusions.py
++++ b/scripts/secondary/reading/n1w1_exclusions.py
+@@ -1,4 +1,5 @@
+ """RU1 text-only census. Never imports image libraries or modifies collector inputs."""
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter, defaultdict
+ import hashlib
+@@ -24,12 +25,12 @@
+ 
+ def sha(path):
+     h = hashlib.sha256()
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         for block in iter(lambda: f.read(1024*1024), b''): h.update(block)
+     return h.hexdigest()
+ 
+ def rows(path):
+-    with Path(path).open() as f:
++    with _data_input(Path(path)).open() as f:
+         for line in f:
+             if line.strip(): yield json.loads(line)
+ 
+--- a/scripts/secondary/reading/reference/build_packs.py
++++ b/scripts/secondary/reading/reference/build_packs.py
+@@ -2,6 +2,7 @@
+ """Deterministic offline build; sources read only, packs copied, never linked.
+ Run with the Python 3.11 / Pillow command documented in README_B1.md.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse, hashlib, io, json, math, random, re, shutil, unicodedata as U
+ from pathlib import Path
+ from PIL import Image, ImageDraw, ImageFont
+@@ -36,7 +37,7 @@
+ def bind(p):
+     p=Path(p); INPUTS[str(p.resolve())]=sha(p); return p
+ 
+-def read(p): return json.loads(bind(p).read_text())
++def read(p): return json.loads(_data_input(bind(p)).read_text())
+ def load(p): return rows(bind(p))
+ def stream(p):
+     with bind(p).open() as f:
+--- a/scripts/secondary/ru1_census.py
++++ b/scripts/secondary/ru1_census.py
+@@ -1,4 +1,5 @@
+ """RU1 text-only census. Never imports image libraries or modifies collector inputs."""
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter, defaultdict
+ import hashlib
+@@ -24,12 +25,12 @@
+ 
+ def sha(path):
+     h = hashlib.sha256()
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         for block in iter(lambda: f.read(1024*1024), b''): h.update(block)
+     return h.hexdigest()
+ 
+ def rows(path):
+-    with Path(path).open() as f:
++    with _data_input(Path(path)).open() as f:
+         for line in f:
+             if line.strip(): yield json.loads(line)
+ 
+--- a/scripts/secondary/ru3td_bind_probe.py
++++ b/scripts/secondary/ru3td_bind_probe.py
+@@ -1,9 +1,10 @@
+ """Read-only pool decoding and import comparison; writes local audit ledger only."""
++from greekocr.ops.data_root import input_path as _data_input
+ from ru3td_edits import guard
+ import json,gzip,re,unicodedata as u,collections,difflib,pathlib
+ R=pathlib.Path('/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr-wave1c')
+ a={r['id']:r for r in map(json.loads,open('/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/docs/harvest/collection/v2/import_real_v2_train.jsonl'))}
+-b={r['id']:r for r in map(json.loads,open('artifacts/ru1/ru1_v3_train.jsonl'))}
++b={r['id']:r for r in map(json.loads,open(_data_input('artifacts/ru1/ru1_v3_train.jsonl')))}
+ s=json.load(open(R/'out/e4/wave1c_reg/bind_final/substitution.json'));changed={r['row_id'] for r in s['changes']}
+ codec=json.load(open(R/'codec/v2.json'));atoms={x['id']:x['ch'] for x in codec['atoms']};added={x['ch'] for x in codec['atoms'][247:]}
+ source=(R/'factory/src/codec.rs').read_text();block=re.search(r'let c = match c \{(.*?)other => other,',source,re.S)[1];folds={}
+--- a/scripts/secondary/ru3td_edits.py
++++ b/scripts/secondary/ru3td_edits.py
+@@ -1,4 +1,5 @@
+ """RU3T-D offline issuance from frozen decision ledgers; no glyph readers."""
++from greekocr.ops.data_root import input_path as _data_input
+ import collections
+ import copy
+ import hashlib
+@@ -26,9 +27,9 @@
+ sys.addaudithook(guard)
+ 
+ def sha(p):
+-    with open(p,'rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
++    with open(_data_input(p),'rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
+ def rows(p):
+-    with open(p) as f:return [json.loads(line) for line in f if line.strip()]
++    with open(_data_input(p)) as f:return [json.loads(line) for line in f if line.strip()]
+ def dump(p,x):p.write_text(json.dumps(x,ensure_ascii=False,indent=2)+'\n')
+ def jsonl(p,x):p.write_text(''.join(json.dumps(r,ensure_ascii=False,separators=(',',':'))+'\n' for r in x))
+ 
+--- a/scripts/secondary/ru4e2_bound/common.py
++++ b/scripts/secondary/ru4e2_bound/common.py
+@@ -1,4 +1,5 @@
+ """Local SR-B1 paths and serialization. Never imports source-worktree code."""
++from greekocr.ops.data_root import input_path as _data_input
+ import hashlib
+ import json
+ from pathlib import Path
+@@ -12,8 +13,8 @@
+ PACK_ROOT = SCRATCH/'sol_packs/ru1'
+ R2 = PROJECTS/'greek-ocr-toolkit-spellcheck-r2cards/docs/labelfix/spellcheck/R2/decks'
+ FIELDS = {'bsb':{'card_id','crop','google_text','word_scripts'}, 'yer':{'item_id','crop','masked_text','slots'}, 'owner39':{'card_id','word_image','line_image','anchor_index','anchor_base','options','extra_options'}}
+-def sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+-def rows(p): return [json.loads(s) for s in Path(p).read_text().splitlines() if s.strip()]
++def sha(p): return hashlib.sha256(_data_input(Path(p)).read_bytes()).hexdigest()
++def rows(p): return [json.loads(s) for s in _data_input(Path(p)).read_text().splitlines() if s.strip()]
+ def dump(p, obj):
+     p=Path(p); p.parent.mkdir(parents=True,exist_ok=True)
+     p.write_text(json.dumps(obj,ensure_ascii=False,indent=2,allow_nan=False)+'\n')
+--- a/scripts/secondary/ru4e2_bound/ru1_census.py
++++ b/scripts/secondary/ru4e2_bound/ru1_census.py
+@@ -1,4 +1,5 @@
+ """RU1 text-only census. Never imports image libraries or modifies collector inputs."""
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter, defaultdict
+ import hashlib
+@@ -24,12 +25,12 @@
+ 
+ def sha(path):
+     h = hashlib.sha256()
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         for block in iter(lambda: f.read(1024*1024), b''): h.update(block)
+     return h.hexdigest()
+ 
+ def rows(path):
+-    with Path(path).open() as f:
++    with _data_input(Path(path)).open() as f:
+         for line in f:
+             if line.strip(): yield json.loads(line)
+ 
+--- a/scripts/secondary/ru4e_bound/common.py
++++ b/scripts/secondary/ru4e_bound/common.py
+@@ -1,4 +1,5 @@
+ """Local SR-B1 paths and serialization. Never imports source-worktree code."""
++from greekocr.ops.data_root import input_path as _data_input
+ import hashlib
+ import json
+ from pathlib import Path
+@@ -12,8 +13,8 @@
+ PACK_ROOT = SCRATCH/'sol_packs/ru1'
+ R2 = PROJECTS/'greek-ocr-toolkit-spellcheck-r2cards/docs/labelfix/spellcheck/R2/decks'
+ FIELDS = {'bsb':{'card_id','crop','google_text','word_scripts'}, 'yer':{'item_id','crop','masked_text','slots'}, 'owner39':{'card_id','word_image','line_image','anchor_index','anchor_base','options','extra_options'}}
+-def sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+-def rows(p): return [json.loads(s) for s in Path(p).read_text().splitlines() if s.strip()]
++def sha(p): return hashlib.sha256(_data_input(Path(p)).read_bytes()).hexdigest()
++def rows(p): return [json.loads(s) for s in _data_input(Path(p)).read_text().splitlines() if s.strip()]
+ def dump(p, obj):
+     p=Path(p); p.parent.mkdir(parents=True,exist_ok=True)
+     p.write_text(json.dumps(obj,ensure_ascii=False,indent=2,allow_nan=False)+'\n')
+--- a/scripts/secondary/ru4e_bound/ru1_census.py
++++ b/scripts/secondary/ru4e_bound/ru1_census.py
+@@ -1,4 +1,5 @@
+ """RU1 text-only census. Never imports image libraries or modifies collector inputs."""
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter, defaultdict
+ import hashlib
+@@ -24,12 +25,12 @@
+ 
+ def sha(path):
+     h = hashlib.sha256()
+-    with Path(path).open('rb') as f:
++    with _data_input(Path(path)).open('rb') as f:
+         for block in iter(lambda: f.read(1024*1024), b''): h.update(block)
+     return h.hexdigest()
+ 
+ def rows(path):
+-    with Path(path).open() as f:
++    with _data_input(Path(path)).open() as f:
+         for line in f:
+             if line.strip(): yield json.loads(line)
+ 
+--- a/scripts/secondary/ru4ef3.py
++++ b/scripts/secondary/ru4ef3.py
+@@ -4,6 +4,7 @@
+ The 30 sampled cells are confirmed; other edits inherit the accepted audit policy,
+ not a claim of individual pixel adjudication. Unruled review cells remain holds.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ import copy
+ import hashlib
+ import json
+@@ -33,11 +34,11 @@
+ 
+ 
+ def sha(p):
+-    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
++    return hashlib.sha256(_data_input(Path(p)).read_bytes()).hexdigest()
+ 
+ 
+ def rows(p):
+-    return [json.loads(s) for s in Path(p).read_text().splitlines() if s.strip()]
++    return [json.loads(s) for s in _data_input(Path(p)).read_text().splitlines() if s.strip()]
+ 
+ 
+ def dump(p, obj):
+@@ -49,7 +50,7 @@
+ 
+ 
+ def main():
+-    assert not OUT.exists(), 'refuse issued overlay overwrite'
++    assert not _data_input(OUT).exists(), 'refuse issued overlay overwrite'
+     combine = json.loads((ART/'RU4EF2_COMBINE.json').read_text())
+     assert sha(ART/'decisions.jsonl') == combine['decisions_sha256']
+     for p, h in combine['evidence'].items():
+--- a/greekocr/ops/__init__.py
++++ b/greekocr/ops/__init__.py
+@@ -1,7 +1,21 @@
+ """Provenance, bounded liveness, rate locking and environment secrets."""
+-from .receipts import file_sha256, verify_files, write_receipt
++from importlib import import_module
+ from .secrets import require_env
+-from .rate_limit import rate_limited_client
+ from .watch import Observation, WatchResult, watch, bounded_ssh
++
+ __all__ = ['file_sha256', 'verify_files', 'write_receipt', 'require_env', 'rate_limited_client',
+            'Observation', 'WatchResult', 'watch', 'bounded_ssh']
++
++
++def __getattr__(name):
++    # data_root must import without a receipt/vendor cycle or optional OCR
++    # dependencies. Preserve the existing public helpers on first access.
++    modules = {'file_sha256': 'receipts', 'verify_files': 'receipts',
++               'write_receipt': 'receipts', 'rate_limited_client': 'rate_limit'}
++    if name not in modules:
++        raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
++    module = import_module(f'{__name__}.{modules[name]}')
++    for public, source in modules.items():
++        if source == modules[name]:
++            globals()[public] = getattr(module, public)
++    return globals()[name]
+--- a/prototypes/fast_lines/features_geometry/test_native_font_contract.py
++++ b/prototypes/fast_lines/features_geometry/test_native_font_contract.py
+@@ -3,6 +3,7 @@
+ The live i2 consumer failed final raster qualification and is not installed.
+ These tests validate its compatible inputs, not a default font/crop gain.
+ """
++from greekocr.ops.data_root import input_path as _data_input
+ from pathlib import Path
+ import json
+ import cv2
+@@ -14,7 +15,7 @@
+ 
+ def actual(index):
+     meta=json.loads(Path(__file__).with_name('font_guides_native.json').read_text())
+-    case=meta['cases'][index];z=np.load(Path(__file__).with_name('font_guides_native.npz'))
++    case=meta['cases'][index];z=np.load(_data_input(Path(__file__).with_name('font_guides_native.npz')))
+     k=case['fixture'];gray=z[f'gray{k}'];item=dict(polygon=z[f'polygon{k}'].tolist())
+     ctx={};record=rows.native(gray,item,float(z[f'height{k}']),prepared=ctx)
+     return ctx,record
+--- a/scripts/labelfix/l1a2_fetch.py
++++ b/scripts/labelfix/l1a2_fetch.py
+@@ -1,4 +1,5 @@
+ """Bounded, read-only extraction of exactly the L1A2 overlay selection."""
++from greekocr.ops.data_root import input_path as _data_input
+ import base64
+ import gzip
+ import hashlib
+@@ -16,7 +17,7 @@
+ def main():
+     OUT.mkdir(parents=True, exist_ok=True)
+     dest = OUT / 'selected_overlays.json.gz'
+-    if dest.exists():
++    if _data_input(dest).exists():
+         raise SystemExit('Existing extraction retained; no SSH repeated.')
+     if (OUT / 'extraction_stop.json').exists():
+         raise SystemExit('STOP: prior extraction stopped; no SSH repeated.')
+--- a/scripts/labelfix/s8_fetch.py
++++ b/scripts/labelfix/s8_fetch.py
+@@ -1,4 +1,5 @@
+ """S8a: bounded read-only Clariden saved-evidence extraction; never infer."""
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ import base64
+ import gzip
+@@ -75,14 +76,14 @@
+ def fetch(sources):
+     dest = OUT / 'evidence/remote.json.gz'
+     ids = sorted(sources)
+-    if dest.exists():
+-        data = json.loads(gzip.decompress(dest.read_bytes()))
++    if _data_input(dest).exists():
++        data = json.loads(gzip.decompress(_data_input(dest).read_bytes()))
+         assert data['complete'] and set(data['ids']) == set(ids)
+         return data
+     if (dest.parent/'extraction_stop.json').exists():
+         raise SystemExit('STOP: prior bounded extraction exhausted; no further SSH in S8a. See extraction_stop.json.')
+     local_path=OUT/'evidence/local_alignments.json.gz'
+-    local=json.loads(gzip.decompress(local_path.read_bytes())) if local_path.exists() else {}
++    local=json.loads(gzip.decompress(_data_input(local_path).read_bytes())) if _data_input(local_path).exists() else {}
+     req = dict(ids=ids, missing_alignment_ids=sorted(set(ids)-set(local)),crop_to_id={r['crop']:k for k,r in sources.items()})
+     code = REMOTE.replace('REQUEST',base64.b64encode(json.dumps(req).encode()).decode())
+     logpath=dest.parent/'fetch_log.json'
+@@ -105,7 +106,7 @@
+             assert data['complete'] and set(data['ids'])==set(ids)
+             data['alignments'].update(local)
+             assert set(data['alignments'])==set(ids)
+-            data['local_alignment_custody']=dict(path=str(local_path),sha256=hashlib.sha256(local_path.read_bytes()).hexdigest(),
++            data['local_alignment_custody']=dict(path=str(local_path),sha256=hashlib.sha256(_data_input(local_path).read_bytes()).hexdigest(),
+                 source='.cache/labelfix/clariden/C1_alignments.jsonl.gz',lines=len(local))
+             dest.write_bytes(gzip.compress(json.dumps(data,ensure_ascii=False).encode()))
+             print(json.dumps(dict(lines=len(ids),bytes=len(p.stdout),remote_seconds=data['elapsed_seconds'])),flush=True)
+--- a/scripts/labelfix/sf2_replay.py
++++ b/scripts/labelfix/sf2_replay.py
+@@ -1,4 +1,5 @@
+ """Offline SF2 measurements in a new scratch directory; saved R1 only."""
++from greekocr.ops.data_root import input_path as _data_input
+ import argparse
+ from collections import Counter,defaultdict
+ from copy import deepcopy
+@@ -80,7 +81,7 @@
+     from scripts.labelfix.box_regression import compare_pages
+     new=json.loads((out/'combined_boxes.json').read_text())['lines']
+     oldboxes=json.loads((old/'saved_s6_boxes.json').read_text())['lines']
+-    for label,baseline in [('saved_s6',oldboxes),('s6_page',json.loads((old/'s6_control_boxes.json').read_text())['lines'])]:
++    for label,baseline in [('saved_s6',oldboxes),('s6_page',json.loads((_data_input(old/'s6_control_boxes.json')).read_text())['lines'])]:
+         diff=compare_pages(baseline,new,.3)
+         dump(out/f'box_regression_{label}.json',dict(summary={k:sum(len(v[k]) for v in diff.values()) for k in
+             ('lost','added','moved','owner_changed','pixels_changed','status_changed','pixels_unknown','owner_unknown','status_unknown')},lines=diff))
+--- a/scripts/labelfix/sf5_verify.py
++++ b/scripts/labelfix/sf5_verify.py
+@@ -1,4 +1,5 @@
+ """Verify SF5 artifact custody and change scope without Git mutation."""
++from greekocr.ops.data_root import input_path as _data_input
+ import ast
+ import json
+ from pathlib import Path
+@@ -36,7 +37,7 @@
+             assert r['script_sha256']==sha256('scripts/labelfix/sf5_measure.py')
+             assert r['policy']==gate.policy_binding()
+     wi=json.loads((ev/'witness_inputs_receipt.json').read_text())
+-    assert wi['runtime_sha256']==sha256(ev/'witness_inputs.jsonl.gz')
++    assert wi['runtime_sha256']==sha256(_data_input(ev/'witness_inputs.jsonl.gz'))
+     w=list(rows(ev/'witness_results.jsonl.gz'))
+     assert len(w)==56 and sum(x['consensus_kept'] for x in w)==sum(x['consensus'] for x in w)==59
+     assert not any(x['consensus_deleted'] or x['combining_marks_changed'] for x in w)
+--- a/scripts/labelfix/sf6_measure.py
++++ b/scripts/labelfix/sf6_measure.py
+@@ -4,6 +4,7 @@
+ missing extraction coverage. M2 is filtered to DEV before JSON decoding.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ from collections import Counter
+@@ -84,7 +85,7 @@
+     paths=[DOC/'SF5_evidence/witness_inputs.jsonl.gz',audit,l1/'remote_200.json.gz',
+            l1/'200/details.jsonl.gz',l1/'remote_vouli.json.gz',l1/'vouli/details.jsonl.gz',Path('docs/harvest/collection/v2/import_real_v2_train.jsonl'),PROBE]
+     write_json(EV/'witness_inputs_receipt.json',dict(inputs={str(p):sha256(p) for p in paths},
+-        output_sha256=sha256(dest),cohorts=dict(Counter(r['cohort'] for r in inputs)),
++        output_sha256=sha256(_data_input(dest)),cohorts=dict(Counter(r['cohort'] for r in inputs)),
+         l1a_full_slot_parity=48,detector_runs=0,r1_runs=0,ctc_runs=0,network=False))
+ 
+ 
+--- a/scripts/lqb/build_scoreboard.py
++++ b/scripts/lqb/build_scoreboard.py
+@@ -3,6 +3,7 @@
+ Run with collector .venv Python and PYTHONPATH=cleanup. All writes stay here.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ from collections import defaultdict
+ import html
+ import json
+@@ -101,9 +102,9 @@
+     page=page[:start]+'<script>document.querySelectorAll("input,textarea").forEach(x=>x.readOnly=true);document.querySelectorAll(".status").forEach(x=>x.textContent="frozen adjudicated truth");</script>'+page[end+9:]
+     page=page.replace('</style>',' .lqb-intro table{width:100%;border-collapse:collapse}.lqb-intro td,.lqb-intro th{padding:6px;border-bottom:1px solid #ddd;text-align:left}.lqb-intro{line-height:1.5}</style>',1)
+     target=DEFAULT/'scoreboard.html';target.write_text(page)
+-    if target.stat().st_size>=14_000_000:raise ValueError('scoreboard exceeds 14 MB')
++    if _data_input(target).stat().st_size>=14_000_000:raise ValueError('scoreboard exceeds 14 MB')
+     dump(DEFAULT/'scoreboard_cards.json',ledger)
+-    dump(DEFAULT/'scoreboard_build.json',dict(cards=len(cards),bytes=target.stat().st_size,sha256=sha256(target),renderer='greekocr.adjudicate.owner_sheet.render',renderer_sha256=sha256(PROJECTS/'greek-ocr-toolkit-cleanup/greekocr/adjudicate/owner_sheet.py'),python=sys.executable,network=False,notes='frozen read-only; remote database disabled'))
+-    print('scoreboard',len(cards),'cards',target.stat().st_size/1e6,'MB')
++    dump(DEFAULT/'scoreboard_build.json',dict(cards=len(cards),bytes=_data_input(target).stat().st_size,sha256=sha256(target),renderer='greekocr.adjudicate.owner_sheet.render',renderer_sha256=sha256(PROJECTS/'greek-ocr-toolkit-cleanup/greekocr/adjudicate/owner_sheet.py'),python=sys.executable,network=False,notes='frozen read-only; remote database disabled'))
++    print('scoreboard',len(cards),'cards',_data_input(target).stat().st_size/1e6,'MB')
+ 
+ if __name__=='__main__':main()
+--- a/scripts/numerics/n1t_packs.py
++++ b/scripts/numerics/n1t_packs.py
+@@ -7,6 +7,7 @@
+ import shutil
+ import sys
+ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
++from greekocr.ops.data_root import input_path as _data_input
+ from greekocr.numerics.combine_v2 import MEANINGS, DASHES
+ from n1_pack_closure import scan
+ 
+@@ -121,7 +122,7 @@
+         controls=typed_controls(approved,rows(base/'controls/dash_types.jsonl'));bed=[];name='n1cal2'
+     else:
+         controls=[c for c in approved if c['truth']!='hyphen or dash']
+-        bed=[s for s in rows(base/'n1t/slots.jsonl') if s['geometry']['geom_status']=='ok'];name='n1t'
++        bed=[s for s in rows(_data_input(base/'n1t/slots.jsonl')) if s['geometry']['geom_status']=='ok'];name='n1t'
+     out=base/name
+     controlpath=out/'controls/approved.jsonl';controlpath.parent.mkdir(parents=True,exist_ok=True)
+     with controlpath.open('x') as f: f.write(''.join(json.dumps(c,ensure_ascii=False)+'\n' for c in controls))
+--- a/scripts/numerics/n1w1_packs.py
++++ b/scripts/numerics/n1w1_packs.py
+@@ -7,6 +7,7 @@
+ import shutil
+ import sys
+ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
++from greekocr.ops.data_root import input_path as _data_input
+ from n1w1_combine import MEANINGS, DASHES
+ from n1w1_closure import scan
+ 
+@@ -121,7 +122,7 @@
+         controls=typed_controls(approved,rows(base/'controls/dash_types.jsonl'));bed=[];name='n1cal2'
+     else:
+         controls=[c for c in approved if c['truth']!='hyphen or dash']
+-        bed=[s for s in rows(base/'n1t/slots.jsonl') if s['geometry']['geom_status']=='ok'];name='n1t'
++        bed=[s for s in rows(_data_input(base/'n1t/slots.jsonl')) if s['geometry']['geom_status']=='ok'];name='n1t'
+     out=base/name
+     controlpath=out/'controls/approved.jsonl';controlpath.parent.mkdir(parents=True,exist_ok=True)
+     with controlpath.open('x') as f: f.write(''.join(json.dumps(c,ensure_ascii=False)+'\n' for c in controls))
+--- a/scripts/pages/check_q5_default.py
++++ b/scripts/pages/check_q5_default.py
+@@ -6,6 +6,7 @@
+ No prototype, float tolerance or extra metadata exclusion enters this gate.
+ """
+ from __future__ import annotations
++from greekocr.ops.data_root import input_path as _data_input
+ 
+ import argparse
+ import gzip
+@@ -26,7 +27,7 @@
+     args.out = args.out.resolve()
+     args.out.mkdir(parents=True, exist_ok=True)
+     reference_path = ROOT/"docs/reviews/q4-speed-evidence/current-equality.json.gz"
+-    with gzip.open(reference_path, "rt") as stream:
++    with gzip.open(_data_input(reference_path), "rt") as stream:
+         reference = json.load(stream)
+     mismatches = [name for name, expected in reference["source_manifest"].items()
+                   if hashlib.sha256((ROOT/name).read_bytes()).hexdigest() != expected]
+@@ -41,7 +42,7 @@
+     left, right, comparison = (args.out/name for name in ("q4", "current", "comparison"))
+     left.mkdir(parents=True, exist_ok=True)
+     (left/"summary.json").write_text(json.dumps(reference))
+-    binding = dict(q4_receipt_sha256=hashlib.sha256(reference_path.read_bytes()).hexdigest(),
++    binding = dict(q4_receipt_sha256=hashlib.sha256(_data_input(reference_path).read_bytes()).hexdigest(),
+                    production_files_checked=len(reference["source_manifest"]), source_mismatches=mismatches,
+                    page_keys=keys)
+     (args.out/"binding.json").write_text(json.dumps(binding, indent=2))

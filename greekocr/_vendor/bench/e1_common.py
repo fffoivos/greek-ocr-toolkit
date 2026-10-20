@@ -8,6 +8,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from greekocr.ops.data_root import input_path as _data_input
 from greekocr._vendor.train.mix import sha256, shard_inventory
 
 FRACTIONS = (0, 25, 50, 75, 100)
@@ -16,7 +17,7 @@ CLASSES = ('greek_mono', 'greek_poly', 'greek_latin_cs', 'latin', 'cyrillic', 'c
 
 
 def read_json(path):
-    return json.loads(Path(path).read_text())
+    return json.loads(_data_input(Path(path)).read_text())
 
 
 def atomic_json(path, value):

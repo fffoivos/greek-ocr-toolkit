@@ -5,6 +5,62 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 CALLS={
+# Merged native masking API; caller-supplied observations.
+'greekocr.glyphs.foreign_ink.MaskPage': 'page = MaskPage(native_image, pixels, ink, component_labels, component_objects)',
+'greekocr.glyphs.foreign_ink.MaskedCrop': 'crop = MaskedCrop(native_image, foreign_mask, recorded_metadata)',
+'greekocr.glyphs.foreign_ink.prepare_mask_page': 'page = prepare_mask_page(native_image)',
+'greekocr.glyphs.foreign_ink.mask_foreign_ink': 'crop = mask_foreign_ink(page, detected_line, neighbour_lines, crop_box)',
+'greekocr.glyphs.foreign_ink.mask_detected_line': 'crop = mask_detected_line(page, detected_line, neighbour_lines, crop_box)',
+# CU4 examples are qualified to avoid changing pre-existing same-name entries.
+'greekocr.adjudicate.deck.build_deck': 'receipt = build_deck(deck_spec)',
+'greekocr.adjudicate.deck.crop_image': 'image, geometry = crop_image(native_image, "word", bbox=[20, 0, 80, 40])',
+'greekocr.adjudicate.deck.leak_scan': 'receipt = leak_scan("review/blind", forbidden=["private-source-id"])',
+'greekocr.adjudicate.owner_sheet.render': 'html = render(owner_cards, owner_spec)',
+'greekocr.adjudicate.owner_sheet.detection_image': 'overlay = detection_image(native_image, saved_slots)',
+'greekocr.adjudicate.protocol.adapt_answer': 'answer = adapt_answer(reader_answer, public_card, adapter="s8")',
+'greekocr.adjudicate.protocol.deal': 'reader_2 = deal(public_cards, reader=2)',
+'greekocr.adjudicate.protocol.tiebreak_deck': 'receipt = tiebreak_deck(public_cards, private_keys, disagreement_ids, image_root="review/blind", blind_dir="tiebreak/blind")',
+'greekocr.adjudicate.protocol.controls_gate': 'gate = controls_gate(normalized_batches, private_keys, gate_spec)',
+'greekocr.adjudicate.protocol.resolve': 'result = resolve(public_cards, private_keys, reader_1, reader_2)',
+'greekocr.adjudicate.protocol.write_truth': 'receipt = write_truth("review/truth.jsonl.gz", gated_resolution)',
+'greekocr.adjudicate.score.wilson': 'interval = wilson(.95, 100)',
+'greekocr.adjudicate.score.score': 'estimate = score(weighted_rows, lambda r: r["correct"], lambda r: r["events"])',
+'greekocr.adjudicate.score.clopper_pearson_lb95': 'lower = clopper_pearson_lb95(95, 100)',
+
+# Recogniser examples use caller-staged crops, records and local checkpoints.
+'run_shard':'alignments = run_shard(crop_paths, recogniser, "alignments.jsonl", bs=16)',
+'Recogniser':'recogniser = Recogniser("weights.pt", codec="codec/v1.json", device="cpu", threads=2)',
+'load':'recogniser = load("weights.pt", codec="codec/v1.json", device="cpu", threads=2)',
+'Recogniser.read':'readings = recogniser.read(crop_paths, profile="labelfix", bs=16)',
+'Recogniser.logits':'logits = recogniser.logits(crop_paths)',
+'as_reader':'reader = recogniser.as_reader(profile="eval")',
+'Alignment':'alignment = Alignment.from_record(recorded_alignment)',
+'slots':'slots = alignment.slots()',
+'evidence':'evidence = alignment.evidence(alignment.slots(), image_width=800)',
+'align':'alignment = align(reading)',
+'confidence_matches':'matches = confidence_matches(frame_confidences, recorded_confidence)',
+'AlignmentCache':'cache = AlignmentCache("alignments.jsonl", recogniser)',
+'get':'alignments = cache.get(crop_paths, bs=16)',
+'forbid_forward':'with forbid_forward(): alignment = Alignment.from_record(recorded_alignment)',
+'transfer':'alignment = transfer(recorded_alignment, "ἅλφα")',
+'logits':'logits = recogniser.logits(crop_paths)',
+'polygon_overlap':'overlap = polygon_overlap([0, 0, 100, 40], [[0, 0], [100, 2], [100, 42], [0, 40]])',
+'assign_page_lines':'assigned = assign_page_lines(engine_lines, sampled_page_records)',
+'assign_page_symbols':'assigned = assign_page_symbols(engine_symbols, sampled_page_records)',
+'page_summary':'summary = page_summary(paired_page_comparisons)',
+'build_blind_review':'html, key = build_blind_review(paired_page_comparisons, pilot_records, page_manifest)',
+'background_shade':'shade = background_shade("crop.png")',
+'group_flush_crops':'groups = group_flush_crops(cached_crop_records, 10)',
+'letters_marks':'text = letters_marks("* ν᾿ ἄλφα!")',
+'compare_control':'comparison = compare_control("ἅλφα", "* ἅλφα")',
+'summarise_controls':'summary = summarise_controls(control_comparisons)',
+'build_montages':'maps = build_montages(cached_crop_records, 20, "harvest_big/montages", "montage_maps")',
+'response_lines':'lines = response_lines("vision", cached_raw_response, (1268, 3900))',
+'assign_lines':'assigned = assign_lines(engine_lines, montage_box_map)',
+'response_symbols':'symbols = response_symbols("docai", cached_raw_response, (1268, 3900))',
+'assign_symbols':'assigned = assign_symbols(engine_symbols, montage_box_map)',
+'compare_nfd':'comparison = compare_nfd("ἅλφα", "ἅλφα")',
+'summarise':'summary = summarise(montage_comparisons, 5)',
 'TranskribusReader':'reader = TranskribusReader(model_id=148525, responses_dir="responses", mode="single_line")',
 'TranskribusError':'error = TranskribusError("retained processing refusal")',
 'CreditFloorError':'error = CreditFloorError("next image would breach the credit floor")',
@@ -280,6 +336,36 @@ CALLS={
 }
 
 
+# SR1 operational APIs
+CALLS.update({'greekocr.adjudicate.artifact_custody.copy_artifacts': 'receipt = copy_artifacts(source_root, '
+                                                        'new_destination, selected_relative_paths)',
+ 'greekocr.adjudicate.artifact_custody.verify': 'result = verify(destination, receipt["manifest"])',
+ 'greekocr.adjudicate.batch_check.batch_check': 'result = batch_check(folder, assignment, answers, '
+                                                'private_keys)',
+ 'greekocr.adjudicate.controls_review_sheets.controls_review_sheets': 'receipt = '
+                                                                      'controls_review_sheets(verified_controls, '
+                                                                      'private_review_dir)',
+ 'greekocr.adjudicate.deal_batches.deal_batches': 'receipt = deal_batches(blind_deck, isolated_assignments, '
+                                                  'batch_size=110)',
+ 'greekocr.adjudicate.edit_evidence_crosstab.edit_evidence_crosstab': 'table = '
+                                                                      'edit_evidence_crosstab(saved_release_records, '
+                                                                      'explicit_print_verdicts)',
+ 'greekocr.adjudicate.mark_profile.mark_views': 'views = mark_views(native_line_image, word_box, letter_box)',
+ 'greekocr.adjudicate.owner_notes_export.owner_notes_export': 'receipt = owner_notes_export(db_dump, cards, '
+                                                              'sheet_conventions, new_jsonl_path)',
+ 'greekocr.adjudicate.page_specs.load_spec': 'spec = load_spec(local_json_path)',
+ 'greekocr.adjudicate.page_specs.render_spec': 'html = render_spec(local_json_path)',
+ 'greekocr.adjudicate.release_census.evidence_dump': 'evidence = evidence_dump(local_release_rows, '
+                                                     'requested_line_id)',
+ 'greekocr.adjudicate.release_census.release_census': 'census = release_census(local_release_rows, '
+                                                      'selection_by_id, seed=20261017)',
+ 'greekocr.adjudicate.score.named_slices': 'slices = named_slices(truth_context_rows)',
+ 'greekocr.adjudicate.truth_overlay.add': 'receipt = add(parent_overlay, adjudicated_entry, version="v1.1", '
+                                          'evidence_paths=local_evidence, expected_parent="v1")',
+ 'greekocr.adjudicate.truth_overlay.symmetric_rescore': 'result = symmetric_rescore(frozen_lines, overlay, '
+                                                        'predictions_by_arm, local_scorer)'})
+
+
 def api_entries():
     for path in sorted((ROOT/'greekocr').rglob('*.py')):
         relative=path.relative_to(ROOT)
@@ -305,7 +391,13 @@ def api_entries():
 
 
 def generate():
-    lines=['# Public API', '', 'For the page entry point and examples, start with [PAGES_GUIDE.md](PAGES_GUIDE.md). Page stages now live in `greekocr.pages`; the corresponding `greekocr.glyphs` imports remain compatibility aliases. Crop APIs are unchanged.', '', 'The public surface is the typed functions/classes explicitly exported by the API modules below. `_vendor`, the discovery runner and recognizer internals are private. Re-exported functions are documented once at their defining module. The preserved Docling entry point is also documented.', '',
+    # Keep the authored appendix outside the generated callable inventory.
+    api_path = ROOT/'docs/API.md'
+    appendix_marker = '\n## Wave-0 harvest admission\n'
+    existing = api_path.read_text() if api_path.exists() else ''
+    appendix = (appendix_marker + existing.split(appendix_marker, 1)[1]
+                if appendix_marker in existing else '')
+    lines=['# Public API', '', 'For the page entry point and examples, start with [PAGES_GUIDE.md](A_ocr_development/reference/PAGES_GUIDE.md). Page stages now live in `greekocr.pages`; the corresponding `greekocr.glyphs` imports remain compatibility aliases. Crop APIs are unchanged.', '', 'The public surface is the typed functions/classes explicitly exported by the API modules below. `_vendor`, the discovery runner and recognizer internals are private. Re-exported functions are documented once at their defining module. The preserved Docling entry point is also documented.', '',
            'Every example has two lines. Lowercase names such as `candidate_rows`, `client`, `image`, `recorded_metadata`, and `donor_spec` denote caller-supplied, locally staged inputs; they do not acquire data. Operational examples are node-side invocations, not actions performed during this phase.', '',
            'Shared types: `PathLike = str | Path`, `Record = dict[str, Any]`; reader, batch-reader, native-reference and HTTP return values have structural protocols in `greekocr/types.py`.', '',
            'Recipe registry is immutable snapshot identity; mix custody additionally requires exact committed HEAD blobs in the explicit `repo`. Extraction page indices are zero-based. Word-tag absence returns `None` and must be disclosed. Native import document maps are TSV (`path`, `source_doc_id`).', '',
@@ -321,9 +413,10 @@ def generate():
         description=ast.get_docstring(node)
         if description:lines += [description.splitlines()[0],'']
         imported=owner or name
-        example=CALLS.get((owner+'.' if owner else '')+name,CALLS[name])
+        example=CALLS.get(qualified, CALLS.get((owner+'.' if owner else '')+name, CALLS.get(name)))
+        if example is None: raise KeyError('missing CALLS example: '+qualified)
         lines+=['```python','from '+module+' import '+imported,example,'```','']
-    (ROOT/'docs/API.md').write_text('\n'.join(lines))
+    api_path.write_text('\n'.join(lines) + appendix)
     print('documented',sum(1 for _ in api_entries()),'public callable entries')
 
 if __name__=='__main__':generate()

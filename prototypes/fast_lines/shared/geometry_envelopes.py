@@ -37,7 +37,7 @@ def analyze(gray,items,route='slow',version=1):
     return dict(height=h,lines=records,components=field['components'],seconds=perf_counter()-start,route=route,version=version)
 
 
-def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_labels=False,map_bands=None,envelope_indices=None):
+def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_labels=False,map_bands=None,envelope_indices=None,field_cache=None,skip_ambiguous=False):
     """Native contacts constrained by map ancestry, with competitors exposed.
 
     The map supplies identity inside its observed extent, not a glyph envelope.
@@ -46,7 +46,13 @@ def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_la
     from .geometry_feature_paths import bands
     from .geometry import line_axis
     start=perf_counter();h=height_proxy(original,(gray.shape[1],gray.shape[0]))
-    field=prepare(gray,h,12 if route=='heuristic' else None,fast_filter=route!='slow',with_labels=with_labels,with_density=route=='slow')
+    cached=(field_cache or {}).get('prepared')
+    if cached is not None and route=='explicit':
+        assert field_cache['height']==h and field_cache['shape']==gray.shape
+        assert not with_labels or 'labels' in cached
+        field=cached
+    else:
+        field=prepare(gray,h,12 if route=='heuristic' else None,fast_filter=route!='slow',with_labels=with_labels,with_density=route=='slow')
     bb=bands(pm,original,(gray.shape[1],gray.shape[0]),4) if map_bands is None else map_bands
     lookup={q['line']:q for q in bb['lines'] if q.get('path') and q.get('source_boxes')==1}
     records=[]
@@ -126,6 +132,12 @@ def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_la
         if len(inside)<4:continue
         # Only contact-backed ends grow; no padding out to an unobserved tangent.
         left=min(box[0],min(c['bbox'][0] for c in contacts)-.15*h);right=max(box[2],max(c['bbox'][2] for c in contacts)+.15*h)
+        r['owned']=len(contacts);r['extension_h']=[(box[0]-left)/h,(right-box[2])/h]
+        if skip_ambiguous and r['ambiguous']:
+            # The correction refuses these before examining an envelope. Keep
+            # the path/extension decision witness, skip only unused extrema.
+            r['polygon']=items[r['line']]['polygon'];r['envelope_skipped']='ambiguous contacts'
+            continue
         ix=(x>=left)&(x<=right)
         if version>=5:
             xx=np.unique(np.r_[left,x[ix],right]);y=np.interp(xx,x,y);x=xx
@@ -141,8 +153,12 @@ def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_la
             lo-=max(0,float(np.max(lo-top)));hi+=max(0,float(np.max(bot-hi)))
         else:
             # Local extremal envelopes: a remote accent must not widen an
-            # entire line. The quadratic shoulder has a physical two-height
-            # radius, independent of image resolution.
+            # entire line. y=d^2/(32h) has vertex radius 16h and slope
+            # 1/4 at d=4h (rise h/2); the earlier divisor 8h gives
+            # radius 4h and slope 1 there. R5 widened the shoulder to
+            # smooth per-glyph extrema. This is an explicit shape prior,
+            # not a measured page curvature or a two-height radius.
+            # Retention and neighboring-ink guards decide acceptability.
             lo=y-.7*h;hi=y+.7*h
             for c in contacts:
                 a,b,z,w=c['bbox'];distance=np.maximum(0,np.maximum(a-x,x-z))
@@ -155,7 +171,7 @@ def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_la
                 **({'_labels':field['labels']} if with_labels else {}))
 
 
-def correct(gray,pm,items,original,*,scout=None,forbidden_regions=(),detail=False,map_bands=None,column_evidence=None):
+def correct(gray,pm,items,original,*,scout=None,forbidden_regions=(),detail=False,map_bands=None,column_evidence=None,field_cache=None,universal=False):
     """Smooth contact-backed bands, conditional on the shared geometry scout.
 
     This never treats a deleted line as an ink owner. Initial-letter completions
@@ -163,30 +179,30 @@ def correct(gray,pm,items,original,*,scout=None,forbidden_regions=(),detail=Fals
     """
     from collections import Counter
     from .geometry_scout import sparse_fast
-    from .geometry_feature_correct import retention
+    from .geometry_feature_correct import retention_ink
     from .geometry import line_axis
     t=perf_counter();size=(gray.shape[1],gray.shape[0]);s=scout or sparse_fast(pm,original,size,3)
     new_rows=any(q.get('type_slot') is not None for q in items)
-    if not s['trigger'] and not new_rows:return dict(items=items,changes=[],decisions=[],seconds=perf_counter()-t,trigger=False)
+    if not universal and not s['trigger'] and not new_rows:return dict(items=items,changes=[],decisions=[],seconds=perf_counter()-t,trigger=False)
     counts=Counter(k for q in items for k in q.get('source_ids',[]))
     eligible=set();h=height_proxy(original,size)
     rules=[r['rule'] for r in (column_evidence or {}).get('rules',[]) if r['accepted']]
     for i,q in enumerate(items):
         b=bbox(q);cy=(b[1]+b[3])/2
-        if b[2]-b[0]<8*h or q.get('initial_completed') or any(counts[k]>1 for k in q.get('source_ids',[])):continue
+        if q.get('page_field') or b[2]-b[0]<8*h or q.get('initial_completed') or any(counts[k]>1 for k in q.get('source_ids',[])):continue
         blocked=False
         for r in rules:
             path=np.asarray(r['path']);cx=np.interp(cy,path[:,1],path[:,0])
             if r['y0']<=cy<=r['y1'] and b[0]-h<cx<b[2]+h:blocked=True;break
         if not blocked:eligible.add(i)
     if not eligible:return dict(items=items,changes=[],decisions=[],seconds=perf_counter()-t,trigger=True,eligible=[])
-    evidence=guided(gray,pm,items,original,route='explicit',version=5,with_labels=True,map_bands=map_bands,envelope_indices=eligible);labels=evidence.pop('_labels');h=evidence['height'];out=list(items);changes=[];decisions=[]
+    evidence=guided(gray,pm,items,original,route='explicit',version=5,with_labels=True,map_bands=map_bands,envelope_indices=eligible,field_cache=field_cache,skip_ambiguous=True);labels=evidence.pop('_labels');h=evidence['height'];out=list(items);changes=[];decisions=[]
     for r in evidence['lines']:
         i=r['line'];q=items[i];p=r.get('polygon');reason=None
         if not p or i not in eligible:continue
         x,y=np.array(r['path']).T;b=bbox(q);inbox=(x>=b[0])&(x<=b[2]);a,sl=line_axis(q)
         deviation=float(np.max(abs(y[inbox]-(a+sl*x[inbox])))/h) if inbox.any() else 0
-        if deviation<.3 and max(r.get('extension_h',[0]))<.5 and q.get('type_slot') is None:continue
+        if not universal and deviation<.3 and max(r.get('extension_h',[0]))<.5 and q.get('type_slot') is None:continue
         if q.get('initial_completed'):reason='completed initial shoulder retained'
         elif r['ambiguous']:reason='competing row contacts'
         elif any(counts[k]>1 for k in q.get('source_ids',[])):reason='separated source bounds retained'
@@ -195,16 +211,17 @@ def correct(gray,pm,items,original,*,scout=None,forbidden_regions=(),detail=Fals
         audit=None
         if reason is None:
             offrow=offrow_components(r,evidence['components'],h)
-            audit=owned_retention(gray,out,i,p,h,offrow,labels=labels)
+            prepared=retention_ink(gray,out[i],h)
+            audit=owned_retention(gray,out,i,p,h,offrow,labels=labels,prepared=prepared)
             if audit['lost_ink']:
                 # A small uniform margin preserves shape smoothness. Wider
                 # unexplained losses are identity uncertainty, not padding.
                 poly=np.array(p);n=len(poly)//2;poly[:n,1]-=.2*h;poly[n:,1]+=.2*h
-                widened=owned_retention(gray,out,i,poly.tolist(),h,offrow,labels=labels)
+                widened=owned_retention(gray,out,i,poly.tolist(),h,offrow,labels=labels,prepared=prepared)
                 if widened['lost_ink']:
-                    padded=pad_unique(gray,out,i,p,h,offrow,labels=labels)
+                    padded=pad_unique(gray,out,i,p,h,offrow,labels=labels,prepared=prepared)
                     if padded is None:reason='unassigned original ink outside smooth band'
-                    else:p=padded;audit=owned_retention(gray,out,i,p,h,offrow,labels=labels)
+                    else:p=padded;audit=owned_retention(gray,out,i,p,h,offrow,labels=labels,prepared=prepared)
                 else:p=poly.tolist();audit=widened
         if reason is None:
             pb=np.asarray(p);pb=np.clip(pb,[0,0],[gray.shape[1]-1,gray.shape[0]-1]);p=pb.tolist()
@@ -223,7 +240,7 @@ def correct(gray,pm,items,original,*,scout=None,forbidden_regions=(),detail=Fals
             for j,z in enumerate(out):
                 zb=bbox(z)
                 if j!=i and min(zb[2],xx1)>max(zb[0],xx0) and min(zb[3],yy1)>max(zb[1],yy0):cv2.fillPoly(other,[np.rint(np.array(z['polygon'])-origin).astype(np.int32)],1)
-            raw=gray[yy0:yy1,xx0:xx1];paper=cv2.boxFilter(raw,cv2.CV_32F,(quantize(3*h)|1,quantize(3*h)|1));ink=paper-raw>255*.06
+            raw=gray[yy0:yy1,xx0:xx1];paper=cv2.boxFilter(raw,cv2.CV_32F,(quantize(3*h)|1,quantize(3*h)|1));ink=paper-raw>np.maximum(paper,1)*.06
             mine=np.zeros(shape,np.uint8)
             for c in r['contacts']:
                 a,bb,z,w=c['bbox'];a=max(0,int(a-xx0-.2*h));bb=max(0,int(bb-yy0-.35*h));z=min(shape[1],int(np.ceil(z-xx0+.2*h)));w=min(shape[0],int(np.ceil(w-yy0+.2*h)))
@@ -241,10 +258,9 @@ def correct(gray,pm,items,original,*,scout=None,forbidden_regions=(),detail=Fals
                 **({'rendering':evidence} if detail else {}))
 
 
-def pad_unique(gray,items,index,polygon,h,offrow=(),*,labels=None):
+def pad_unique(gray,items,index,polygon,h,offrow=(),*,labels=None,prepared=None):
     """Smooth local padding for unexplained marks within half a body height."""
-    from .geometry_feature_correct import retention
-    audit,unique,new,origin=owned_retention(gray,items,index,polygon,h,offrow,True,labels=labels);lost=unique&(new==0)
+    audit,unique,new,origin=owned_retention(gray,items,index,polygon,h,offrow,True,labels=labels,prepared=prepared);lost=unique&(new==0)
     if not lost.any():return polygon
     dist=cv2.distanceTransform(1-new,cv2.DIST_L2,5)
     if float(dist[lost].max())>.5*h:return None
@@ -256,7 +272,7 @@ def pad_unique(gray,items,index,polygon,h,offrow=(),*,labels=None):
         left=cx+origin[0];right=left+w;top=cy+origin[1];bottom=top+hh;dx=np.maximum(0,np.maximum(left-x,x-right))
         low=np.minimum(low,top-.12*h+dx*dx/(32*h));high=np.maximum(high,bottom+.12*h-dx*dx/(32*h))
     result=np.vstack([np.c_[x,low],np.c_[x[::-1],high[::-1]]]).tolist()
-    return result if owned_retention(gray,items,index,result,h,offrow,labels=labels)['lost_ink']==0 else None
+    return result if owned_retention(gray,items,index,result,h,offrow,labels=labels,prepared=prepared)['lost_ink']==0 else None
 
 
 def offrow_components(record,components,h):
@@ -273,9 +289,9 @@ def offrow_components(record,components,h):
     return out
 
 
-def owned_retention(gray,items,index,polygon,h,offrow=(),detail=False,*,labels=None):
+def owned_retention(gray,items,index,polygon,h,offrow=(),detail=False,*,labels=None,prepared=None):
     from .geometry_feature_correct import retention
-    audit,unique,new,origin=retention(gray,items,index,polygon,h,True)
+    audit,unique,new,origin=retention(gray,items,index,polygon,h,True,prepared=prepared)
     before=unique.copy();H,W=unique.shape
     if offrow:
         if labels is None:raise ValueError('Native component labels required to exempt off-row ink')

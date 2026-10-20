@@ -1,5 +1,6 @@
 """Resumable page extraction and budget-aware stratified reader orchestration."""
 from __future__ import annotations
+from greekocr.ops.data_root import input_path as _data_input
 from pathlib import Path
 from collections import defaultdict
 from contextlib import closing
@@ -16,7 +17,7 @@ HOME=Path('/Users/foivoskarounos-zamparloukos/Projects')
 DEFAULT_SOURCE=HOME/'greek-page-ocr'
 
 def digest(path):
-    with Path(path).open('rb') as stream: return hashlib.file_digest(stream,'sha256').hexdigest()
+    with _data_input(Path(path)).open('rb') as stream: return hashlib.file_digest(stream,'sha256').hexdigest()
 
 def append(path,row):
     with Path(path).open('a') as f: f.write(json.dumps(row,ensure_ascii=False,allow_nan=False)+'\n'); f.flush()

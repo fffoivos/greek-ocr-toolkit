@@ -1,0 +1,158 @@
+diff --git a/prototypes/fast_lines/shared/geometry_envelopes.py b/prototypes/fast_lines/shared/geometry_envelopes.py
+index 525ae23..5b5d201 100644
+--- a/prototypes/fast_lines/shared/geometry_envelopes.py
++++ b/prototypes/fast_lines/shared/geometry_envelopes.py
+@@ -37,7 +37,7 @@ def analyze(gray,items,route='slow',version=1):
+     return dict(height=h,lines=records,components=field['components'],seconds=perf_counter()-start,route=route,version=version)
+ 
+ 
+-def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_labels=False,map_bands=None,envelope_indices=None,field_cache=None,skip_ambiguous=False):
++def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_labels=False,map_bands=None,envelope_indices=None,field_cache=None,skip_ambiguous=False,column_evidence=None):
+     """Native contacts constrained by map ancestry, with competitors exposed.
+ 
+     The map supplies identity inside its observed extent, not a glyph envelope.
+@@ -75,11 +75,17 @@ def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_la
+         anchor=anchor[(anchor[:,0]>=box[0])&(anchor[:,0]<=box[2])]
+         if len(anchor)<5:continue
+         x=np.arange(max(0,box[0]-6*h),min(gray.shape[1],box[2]+6*h),max(1,.25*h));ay=np.interp(x,*anchor.T)
+-        for right in (False,True):
+-            xx=anchor[:,0];idx=xx>xx[-1]-6*h if right else xx<xx[0]+6*h
+-            if idx.sum()<3:continue
+-            slope=np.clip(np.polyfit(xx[idx]-xx[idx].mean(),anchor[idx,1],1)[0],-.65,.65)
+-            ex,ey=anchor[-1 if right else 0];ix=x>ex if right else x<ex;ay[ix]=ey+slope*(x[ix]-ex)
++        from .geometry_page_field import continuation
++        shared=continuation(field_cache['evidence'],anchor,x,column_evidence=column_evidence) if (field_cache or {}).get('evidence') else None
++        if shared is not None:
++            supported=np.isfinite(shared['path'][:,1]);x=x[supported];ay=shared['path'][supported,1]
++            if len(x)<5:continue
++        else:
++            for right in (False,True):
++                xx=anchor[:,0];idx=xx>xx[-1]-6*h if right else xx<xx[0]+6*h
++                if idx.sum()<3:continue
++                slope=np.clip(np.polyfit(xx[idx]-xx[idx].mean(),anchor[idx,1],1)[0],-.65,.65)
++                ex,ey=anchor[-1 if right else 0];ix=x>ex if right else x<ex;ay[ix]=ey+slope*(x[ix]-ex)
+         if route=='slow':
+             r=trace(field,q,version=7);rx,ry=np.asarray(r['path']).T
+             raw=np.interp(x,rx,ry);seen=np.interp(x,rx,np.asarray(r['observed'],float))>.99
+@@ -89,14 +95,14 @@ def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_la
+         # A row switch inside the observed map extent is not an endpoint curve.
+         compatible=abs(raw-ay)<.65*h
+         y=np.where(compatible&seen,raw,ay)
+-        y=gaussian_filter1d(y,max(1,1.5*h/(x[1]-x[0])))
++        if shared is None:y=gaussian_filter1d(y,max(1,1.5*h/(x[1]-x[0])))
+         if version>=3:
+             # All routes keep the independently observed map identity. Native
+             # contacts provide extent; an uncorroborated tangent never does.
+-            y=gaussian_filter1d(ay,max(1,.75*h/(x[1]-x[0])))
++            y=ay.copy() if shared is not None else gaussian_filter1d(ay,max(1,.75*h/(x[1]-x[0])))
+         eligible=(centres[:,0]>=x[0])&(centres[:,0]<=x[-1])&(abs(centres[:,1]-np.interp(centres[:,0],x,y))<.65*h)
+         contacts=[field['components'][k] for k in np.flatnonzero(eligible)]
+-        records.append(dict(line=i,path=np.c_[x,y].tolist(),reference=np.c_[x,ay].tolist(),observed=seen.tolist(),contacts=contacts,bbox=box,
++        records.append(dict(line=i,path=np.c_[x,y].tolist(),reference=np.c_[x,ay].tolist(),observed=seen.tolist(),contacts=contacts,bbox=box,shared_continuation=None if shared is None else {k:v for k,v in shared.items() if k!='path'},
+             disagreement_h=float(np.max(abs(raw[inside]-ay[inside]))/h) if inside.any() else 0))
+     # The same physical glyph cannot independently belong to two row bands.
+     owners={};ambiguous=set()
+@@ -165,6 +171,26 @@ def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_la
+                 lo=np.minimum(lo,b-.22*h+distance**2/((32 if version>=4 else 8)*h))
+                 hi=np.maximum(hi,w+.22*h-distance**2/((32 if version>=4 else 8)*h))
+             lo=gaussian_filter1d(lo,1)-.05*h;hi=gaussian_filter1d(hi,1)+.05*h
++        if shared is not None:
++            from .geometry_page_field import invert_points
++            from .geometry_field_detector import displacement
++            f=field_cache['evidence']['fields'][shared['field']];phase=shared['phase']
++            # Same whole native contacts, expressed in the shared material
++            # frame. No local row curvature or independent continuation fit.
++            low=np.full(len(x),phase-.7*h);high=np.full(len(x),phase+.7*h)
++            supported=True
++            for c in contacts:
++                a,b,z,w=c['bbox']
++                corners=np.array([[a,b],[z,b],[a,w],[z,w]])
++                t=invert_points(np.asarray(f['xs']),np.asarray(f['knots']),np.asarray(f['mesh']),corners)
++                if not np.isfinite(t).all():supported=False;break
++                distance=np.maximum(0,np.maximum(a-x,x-z))
++                low=np.minimum(low,t.min()-.22*h+distance**2/(32*h))
++                high=np.maximum(high,t.max()+.22*h-distance**2/(32*h))
++            if not supported or low.min()<f['knots'][0] or high.max()>f['knots'][-1]:
++                r['polygon']=None;r['domain_unknown']=True;continue
++            low=gaussian_filter1d(low,1)-.05*h;high=gaussian_filter1d(high,1)+.05*h
++            lo=low+displacement(f,x,low);hi=high+displacement(f,x,high)
+         r['polygon']=np.vstack([np.c_[x,lo],np.c_[x[::-1],hi[::-1]]]).tolist()
+         r['owned']=len(contacts);r['extension_h']=[(box[0]-left)/h,(right-box[2])/h]
+     return dict(height=h,lines=records,components=field['components'],seconds=perf_counter()-start,route=route,version=version,
+@@ -196,7 +222,7 @@ def correct(gray,pm,items,original,*,scout=None,forbidden_regions=(),detail=Fals
+             if r['y0']<=cy<=r['y1'] and b[0]-h<cx<b[2]+h:blocked=True;break
+         if not blocked:eligible.add(i)
+     if not eligible:return dict(items=items,changes=[],decisions=[],seconds=perf_counter()-t,trigger=True,eligible=[])
+-    evidence=guided(gray,pm,items,original,route='explicit',version=5,with_labels=True,map_bands=map_bands,envelope_indices=eligible,field_cache=field_cache,skip_ambiguous=True);labels=evidence.pop('_labels');h=evidence['height'];out=list(items);changes=[];decisions=[]
++    evidence=guided(gray,pm,items,original,route='explicit',version=5,with_labels=True,map_bands=map_bands,envelope_indices=eligible,field_cache=field_cache,skip_ambiguous=True,column_evidence=column_evidence);labels=evidence.pop('_labels');h=evidence['height'];out=list(items);changes=[];decisions=[]
+     for r in evidence['lines']:
+         i=r['line'];q=items[i];p=r.get('polygon');reason=None
+         if not p or i not in eligible:continue
+@@ -249,7 +275,8 @@ def correct(gray,pm,items,original,*,scout=None,forbidden_regions=(),detail=Fals
+         if reason is None:
+             from .geometry_joinbarriers import inspect as rule_barriers
+             if rule_barriers(gray,p,h):reason='regional boundary remains unresolved'
+-        decision=dict(line=i,accepted=reason is None,reason=reason or 'smooth native contacts with unique ink retained',retention=audit,deviation_h=deviation)
++        decision=dict(line=i,accepted=reason is None,reason=reason or 'smooth native contacts with unique ink retained',retention=audit,deviation_h=deviation,
++                      **({'shared_continuation':r['shared_continuation']} if r.get('shared_continuation') else {}))
+         decisions.append(decision)
+         if reason is None:
+             out[i]=dict(q,polygon=p,baseline=None,provenance='smooth native contact envelope')
+diff --git a/prototypes/fast_lines/shared/geometry_field_detector.py b/prototypes/fast_lines/shared/geometry_field_detector.py
+index c21de75..89af039 100644
+--- a/prototypes/fast_lines/shared/geometry_field_detector.py
++++ b/prototypes/fast_lines/shared/geometry_field_detector.py
+@@ -29,6 +29,7 @@ def unbend(gray,f):
+ def run(gray,original,detector,*,column_evidence=None,evidence=None,excluded_regions=(),field_cache=None):
+     start=perf_counter();e=render(gray,original,column_evidence=column_evidence,route='slow',excluded_regions=excluded_regions,with_source=field_cache is not None) if evidence is None else evidence
+     source=e.pop('_source',None)
++    if field_cache is not None:field_cache['evidence']=e
+     if source is not None and not excluded_regions:
+         field_cache.update(height=e['height'],shape=gray.shape,prepared=source,native_full=True)
+     out=[];regions=[]
+diff --git a/prototypes/fast_lines/shared/geometry_page_field.py b/prototypes/fast_lines/shared/geometry_page_field.py
+index eae79b1..99bbd1c 100644
+--- a/prototypes/fast_lines/shared/geometry_page_field.py
++++ b/prototypes/fast_lines/shared/geometry_page_field.py
+@@ -217,3 +217,41 @@ def invert_points(xs,knots,mesh,points):
+             (points[:,1]>=warped[0])&(points[:,1]<=warped[-1])&
+             np.all(np.diff(warped,axis=0)>0,axis=0))
+     return np.where(inside,knots[idx]+fraction*(knots[idx+1]-knots[idx]),np.nan)
++
++
++def continuation(evidence, anchor, x, *, column_evidence=None):
++    """Locate one observed row in the existing finite correspondence.
++
++    The anchor supplies position, never a new bend fit. Unknown inverse phases,
++    folds, unsupported end certificates and finite printed rules abstain. The
++    caller still has to witness native extent and retain/exclude actual ink.
++    """
++    from .geometry_field_detector import displacement
++    anchor=np.asarray(anchor,float);x=np.asarray(x,float);h=evidence['height']
++    possible=[]
++    for fid,f in enumerate(evidence.get('fields',[])):
++        if not f.get('curved') or 'mesh' not in f:continue
++        xs=np.asarray(f['xs']);knots=np.asarray(f['knots']);mesh=np.asarray(f['mesh'])
++        phase=invert_points(xs,knots,mesh,anchor)
++        if not np.isfinite(phase).all():continue
++        t=float(np.median(phase));residual=phase-t
++        if np.quantile(abs(residual),.9)>.65*h:continue
++        records=[r for r in f.get('certificate',[]) if r.get('coherent') and
++                 abs(f['rows'][r['row']]['seed']-t)<8*h]
++        if not records:continue
++        inside=(x>=xs[0])&(x<=xs[-1]);y=t+displacement(f,x,t)
++        a,b,c,d=f['region'];inside&=(y>=b)&(y<=d)
++        # A full-height median-x cut is not a finite rule contract. Consume
++        # only the observed path and its stated native vertical span.
++        for r in (column_evidence or {}).get('rules',[]):
++            if not r.get('accepted'):continue
++            rule=r['rule'];path=np.asarray(rule['path']);cy=np.interp(anchor[:,1],path[:,1],path[:,0])
++            active=(anchor[:,1]>=rule['y0'])&(anchor[:,1]<=rule['y1'])
++            sides=np.sign(anchor[active,0]-cy[active])
++            if not len(sides):continue
++            if not np.all(sides==sides[0]) or sides[0]==0:inside[:]=False;break
++            at=(y>=rule['y0'])&(y<=rule['y1'])
++            edge=np.interp(y,path[:,1],path[:,0]);inside&=~at|((x-edge)*sides[0]>0)
++        possible.append(dict(field=fid,phase=t,path=np.c_[x,np.where(inside,y,np.nan)],
++                             residual_h=(residual/h).tolist(),sides=sorted({r['side'] for r in records})))
++    return possible[0] if len(possible)==1 else None

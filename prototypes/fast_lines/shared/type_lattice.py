@@ -10,7 +10,8 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 from .contracts import bbox,rect
 from .geometry import height_proxy,line_axis,roi
-from .type_profiles import mode,measure_line
+from .type_profiles import mode
+from . import observations as obs
 
 
 def blocks(items,size):
@@ -94,9 +95,9 @@ def inspect_slot(gray,slot,items,*,dense=False,version=1):
     mx=np.broadcast_to(xs,(len(offsets),len(xs))).copy()
     my=(y+slope*(xs[None,:]-xm)+offsets[:,None]).astype(np.float32)
     patch=cv2.remap(gray,mx,my,cv2.INTER_LINEAR,borderMode=cv2.BORDER_CONSTANT,borderValue=255)
-    k=max(1,int(3*h/step))|1;paper=cv2.morphologyEx(patch,cv2.MORPH_CLOSE,np.ones((k,k),np.uint8))
-    ink=((paper.astype(np.float32)-patch)/np.maximum(paper,1)>.18).astype(np.uint8)
-    n,labels,s,c=cv2.connectedComponentsWithStats(ink,8);s=s[1:];c=c[1:];bh=h/step
+    k=max(1,int(3*h/step))|1
+    ink=obs.ink(patch,k,method="closing",threshold=.18,arithmetic="relative")
+    n,labels,s,c=obs.components(ink);s=s[1:];c=c[1:];bh=h/step
     ii=np.flatnonzero((s[:,3]>.45*bh)&(s[:,3]<1.6*bh)&(s[:,2]>.1*bh)&(s[:,2]<3*bh)&(s[:,4]>.06*bh*bh))
     points=[];boxes=[]
     for i in ii:
@@ -132,4 +133,15 @@ def analyze(gray,items,*,route='heuristic',version=1):
 def point_ownership(points,items):
     """Geometric ownership at measured body centres; no photometric front claim."""
     polygons=[np.asarray(q['polygon'],np.float32) for q in items if not q.get('discounted')]
-    return [any(cv2.pointPolygonTest(p,tuple(map(float,xy)),False)>=0 for p in polygons) for xy in points]
+    pts=[tuple(map(float,xy)) for xy in points]
+    if not polygons:return [False for _ in pts]
+    if len(pts)<8:
+        return [any(cv2.pointPolygonTest(p,xy,False)>=0 for p in polygons) for xy in pts]
+    # Bounds are only an exact negative test. Batch the point census before
+    # asking the unchanged float32 OpenCV predicate about each possible hit.
+    xy=np.asarray(pts,np.float32);owned=np.zeros(len(pts),bool)
+    for p in polygons:
+        lo=p.min(0);hi=p.max(0)
+        ids=np.flatnonzero(~owned & (xy[:,0]>=lo[0]) & (xy[:,0]<=hi[0]) & (xy[:,1]>=lo[1]) & (xy[:,1]<=hi[1]))
+        for i in ids:owned[i]=cv2.pointPolygonTest(p,pts[i],False)>=0
+    return owned.tolist()

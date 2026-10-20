@@ -1,0 +1,81 @@
+# R8-GEOM-03 i3 — second-book whole-component extent, CLOSED PARTIAL
+
+**CLOSED PARTIAL at3/3.** R's four independently accepted4959right rows remain unchanged. The default B consumer now retains a whole, clean lower row on3229p2 mark5, removing following-line ink from its final crop. This is a second positive book and a second real extent consumer. Mark5 remains **partial→partial**: the builder produces two certified whole children, but final ownership retains the existing field-owned upper row, which still contains neighbouring ink. No additional complete owner group is claimed; the full GEOM03_GATE is not passed.
+
+Launch ec90d4bbb3c533e5944070b0f6197bc2438f6c87 was clean and code-identical to checked d468a9ff6703b5ef4f586045de33a416ed659d10. Final runtime manifest SHA256 **1587aec6c7e26f2768ce265c5bc3627814bef2db8616b0e3fb966ef442cb3d1b** is in `SOURCE.json`. Independently accepted predecessor: d468a9f. Recommended worker-checked candidate: ec90d4b plus the scoped final fallback `.astra/commit-F8-R8-GEOM-03-i3.sh`; independent i3 review remains pending. Git commit status is recorded in `COMMIT_VALIDATION.json`; no nonexistent commit is claimed.
+
+## Retained physical result and remaining export limit
+
+The real chain is compose → split_rows/analyze → same full native(slow) → confirmed_partition → whole_children → refreshed source/motif/rule checks → reconcile_rows → changed footprints/final faintness/frame. Native3/analyze input2 is bound to mark5 by exact original coordinates and ancestry, not an output index. Its pinned fixture SHA256 is ab98e5ad87721e8203421cb0a8c65681d3375f19663e2c88682ddc1ed1605de7.
+
+Existing discovery, window gate, tracks, whole word runs, bridges, valley admission, child count and order remain. Native's own body/track and detached-mark relations assign56/57 complete strip components to the two children. The final original-page audit certifies113 corresponding source components, zero member clipping, foreign ink or duplicate membership. It reuses the native Gaussian/Otsu scalar on a bounded original grayscale ROI, without a threshold refit or a new row/noise model. Original-page CCs are export observations, not the strip's label IDs. Both frames use actual rint/inclusive fillPoly.
+
+Native3 component1 is a zero-parent strip-edge preceding fragment; it stays unadmitted, never declared complete. Native5 component28 also has zero parent pixels, but its existing selected body track proves horizontal continuation through the clipped ε: this parent falls back for unsupported outer extent. Native7 component36 has seven parent pixels and remains an admitted strip-cut body: it also falls back. Neither accents nor all boundary components are discarded generically.
+
+The upper whole B child is retired by the existing field-priority duplicate reconciler. Its unchanged field-owned replacement conserves the admitted upper members but contains six other strip components. The lower final hull survives: all57 native members remain, while25 following-row components included by the old crop are excluded. The reviewed original grayscale/export comparison is `FINAL_MARK5.png`; `CHANGED_CROP_REVIEW.json` binds its exact polygon to final-source208. This is a physical exclusion correction; it does not claim that the previous final lower crop lost its own57 members, or that both final rows are now clean.
+
+## Mechanism, work removal and fallback
+
+The displaced policy is **raw detector-box vector slicing as final child extent**, conditionally replaced by certified whole-component extent after the already accepted partition. `partition` still establishes identity and provides the single atomic unsupported fallback. It is not deleted everywhere, and no row/bend authority count is reduced.
+
+The full native call passes a minimal ephemeral prepared context: its remapped grayscale/mask, Gaussian/Otsu ink, CC8 labels/stats/centres, transform, scale-adjusted height, native tracks/body labels/relations and mark attachments. The consumer does not remap, threshold or relabel that strip again. Arrays never enter ordinary diagnostics or a global cache. The existing mark relation is factored into `mark_bodies`, used by legacy bridges and this real completion consumer; it is not a second nearest-row vote. Outside mark work is requested only after necessary unique-track/body prerequisites. The unchanged vector-piece body/word census is passed directly from confirmed_partition, rather than repeating its dense polygon/body probes; exact geometry equality guards this result passing. Native's already observed parent-body presence also rejects ambiguous parents before a repeat mask or full child-track census; the original confirmed partition remains their sole fallback. The earlier frozen candidate's unnecessary work on already unsupported parents is removed; its complete valid measurements remain under `pre-deferred-attachment/`.
+
+Final-source208 naturally reaches42 successful parent partitions: one B replacement and41 atomic legacy fallbacks; each actual first prerequisite is enumerated in NATURAL_PARTITIONS.json. No book/page/mark selectors, timing fallback, blanket gate loosening, new detector, M06/M55 restoration or third separator engine enters runtime. Runtime line additions/deletions and the exact migration are recorded in `RUNTIME_MIGRATION.json`; this is conditional policy replacement and shared observations, not a claim of net code shrinkage or general faster geometry.
+
+Changed hulls receive fresh B5 census/anchors and applicable glyph-pool/vote work, motif recurrence, rule and forbidden checks. Existing reconcile, footprint generations, final faintness and frame decisions see the new geometry. Required source checks remain; unchanged native image/ROI/scale observations may be reused, never old decisions on changed polygons. `complete_children=False` is an explicit differential-test seam keeping R enabled. Existing `complete_rows=False` remains the R differential-test seam; neither is a rival production provider.
+
+## Correctness, wider scoring and source isolation
+
+310 tests pass; seven inherited strict xfails remain. Real native/confirmed_partition fixtures reproduce the56 partially included components under restored vector slicing. One-parent-pixel versus zero-parent boundary, actual native5/7 truncation, ambiguous body identity and forbidden-support cases discriminate. Native and actual analyze/compose/final export pass13 real x-origin remaps on the skewed page, with whole unique lower-row membership and original-page conservation. The two constructor children are distinguished from the single surviving final B child.
+
+R's detector/completion/recovery calculations and shared valley solver are exact unchanged source. Both genuine request windows replay the seven rows with identical four dense hulls1089/991/1059/1087 and unchanged three left fallbacks; reversing requests, pieces and neighbours preserves membership. The current26 raster sweep passes. Six source-bound R mutations remain valid and are cited separately as three fixture-only versus three genuine-crop discriminators; this iteration does not claim a new R raster gain.
+
+Fresh final-source disabled-B208 reproduces d468a9f exports and every non-clock evidence field. Enabled208 changes **one polygon on one page**, with no exclusion/source-ink/R-type/M17-proposal changes. All changed geometry receives native crop/source review. Named M33 endings/narrowings, “ἀποξήρανσίν”, weak31f40, pale1be6, initials/numbers,0ce9#34/#36 and seven negatives remain unchanged. Identical-input default M17 remains unchanged; no private44 or PDF text truth is accessed.
+
+`COHORT_CASES.json/.md` scores every fixed42case, preserving first-validation history:25owner groups on eight pages, seven R rows, M row5, c8/e259 and seven negatives. Validation is development-retest. Twenty-one owner/input matches are exact;3229m6/m10/m22 andc3ccm1 remain fuzzy field-owned overlaps, not adjudicated identities. New complete working/validation groups0/0; partial physical working gain1; R gains preserved4; additional positive book1; negative regressions0. The full133-mark/nine-missing-page ledgers receive additive entries, without declaring unchanged targets fixed. A/window admission, F/domain, M/no-seed and R-left/axes remain open.
+
+## Whole-page cost, controls and inherited speed debt
+
+Ten warmed pairs per order, in two five-pair blocks, include full file/Stack processing and refreshed final consumers. Positive-page added medians versus db899f1/0474bf8 are **45.7/56.6ms**, both≤100. Incremental B versus accepted R is **42.6/58.2ms**.3229p2 has zero R requests. Every raw pair and sub-block is retained, without order pooling, detector subtraction or favourable sample selection.
+
+The fixed repeated baseline/R reference covers both orders and matched two-warmup/page state; positive absolute controls match quiet i2 receipts. The revised source reuses that unchanged reference; no reference redefinition occurred. Both final-source blocks are drift-valid, with no invalid-block replacement. Previous-source valid samples remain archived; the source changed to remove demonstrated unsupported-parent work, not to rerun a valid failure until it passed. Unchanged clean controls and4959's natural page/request-stage controls are shown separately; no new image-processing or decision-refresh pass runs on the207 pages without B replacement.
+
+|Page|Order|Pairs|Combined versus pre-R ms|Incremental versus R ms|Five-pair blocks combined/incremental ms|
+|---|---|---|---|---|---|
+|s2-3229200bf47ca465a42d-p00002|AB|10|45.7|42.6|0: 46.5/44.8; 1: 45.5/41.7|
+|s2-3229200bf47ca465a42d-p00002|BA|10|56.6|58.2|0: 71.2/64.1; 1: 56.5/50.0|
+|s2-49598b2e848ab1f0ee1e-p00005|AB|10|131.8|-45.7|0: 131.1/-43.0; 1: 141.2/-49.7|
+|s2-49598b2e848ab1f0ee1e-p00005|BA|10|171.3|27.8|0: 178.6/-6.0; 1: 159.6/44.1|
+|an-1ba3fdb1436b-p000012|AB|10|-0.7|-6.5|0: 1.5/-6.0; 1: -3.0/-9.2|
+|an-1ba3fdb1436b-p000012|BA|10|-5.1|-3.9|0: 11.0/2.6; 1: -8.7/-4.5|
+|an-e74539ae215c-p000338|AB|10|1.2|-14.4|0: 2.3/-13.9; 1: -8.2/-19.6|
+|an-e74539ae215c-p000338|BA|10|-5.0|-1.0|0: 2.5/-0.1; 1: -13.9/-4.0|
+
+4959p5's inherited combined page increase is still over100ms; **no B parent qualifies there**. Its accepted R per-request gate is not revoked or converted into a whole-page speed claim. No R subtraction or page-specific exclusion buys B qualification. Current208 correction median/p95/max and all over1s pages are in `FULL208_SPEED.json`; the inherited global sub-second gate remains unsolved.
+
+## Closure, accountable debt and independent review
+
+GEOM03 is administratively CLOSED PARTIAL at its final slot. FONT03 owns the existing accent-bridge/row-count and unique-identity witnesses, R-left finite axes, A window/trim and M observation/admission where measured attribution feeds an existing consumer. CURL03 owns native5/7 horizontal support,8686rows40/41 ends, c8/e259/field domains and the explicit full-height-rule defect. The upper mark5 field-owned extent/reconcile limit is an additional finite-field/ownership witness, not permission to change the duplicate vote here. RUST02 receives only the qualified R/B calculations and actual costs; INK02 receives fresh-support/source/forbidden evidence and pale/weak/0ce9 debts. AUDIT02 owns the complete unresolved42/full-ledger consolidation. Their existing maxima remain3/3/3/3/1; no next prompt, launch or fourth geometry slot is written.
+
+Completion: the full gate is incomplete. Retained physical gain: four R rows plus one new clean final B row/exclusion gain on a second book. Retained mechanism: a second actual whole-component extent consumer and deferred exact mark-relation work. Experimental progress: two clean constructor children and the precisely isolated upper final-field ownership limit. Cost confidence: fixed-source preset paired page gate passes with stable controls; global speed debt remains. Source and input provenance, actual context/mutations, all42 outcomes, full208 review/clocks and `ITERATION_HANDOFF.json/.md` are under `.astra/fast_lines/out/round8/R8-GEOM-03-i3/`.
+
+Reviewer questions: Which solved R dependency now reaches the second consumer? Which additional book/layout gains physically by default, and which part remains only constructor evidence? Does the same-call native/page raster proof and safe atomic fallback hold? Did refreshed source/forbidden/footprint decisions and conditional policy replacement preserve quality? Were control drift, earlier source samples and all ten-order medians handled without cherry-picking? What exact existing caller remains first wrong for A/F/M/R-left/identity/outer extent and mark5's upper field owner? Which later bounded task can reuse the retained mechanism without promising every debt solved?
+
+
+## Final preservation and commit receipt
+
+Git staging failed once with `index.lock: Operation not permitted` at the read-only worktree administration directory. No alternate index or permission bypass was used. The final fallback validates ec90d4b, all13scoped files and source-bound quality/cost evidence before normal staging/commit. It preserves the repository's four required trailers. Independent i3 review and coordinator integration remain pending.
+
+The exploratory actual B profile records13native calls, five partition calls, three builder calls, one fresh ownership batch, two motif and two rule decisions. Builder work is40.4ms, ownership1.0ms, motifs2.1ms and rules9.1ms in that instrumented warm call; nested clocks are not additive and are not qualification samples. All42actual saved native partition decisions exactly match archived confirmed_partition.
+
+The unchanged4959page remains order-sensitive: final whole-page incremental medians versus accepted R are−45.7/+27.8ms, while combined pre-R medians are131.8/171.3ms. It has no qualified B extent; no subtraction or source-selected exclusion is used to promote a B repair there. R request calculations and non-clock decisions remain exact unchanged. These page clocks are reported as controls with remaining noise/work attribution limits, not zero extra elapsed cost or a new global speed acceptance. Clean controls1ba3/e745 show no repeatable slowdown; all unknown qualification work and stage clocks remain in TIMING_RAW.
+
+Daily cap configuration was verified at17%launch-stop/20%kill, with coordinator launch reading3%. STOP was checked before processing/timing samples. The sandbox live-meter probe produced no JSON; no reset/bypass or extra agent/launch was used.
+
+## 13 October 2026 — dated FONT-03 i1 correction after independent review
+
+Accepted commit is **aa6d3d4084591bf166ea2741772ee10940624b59** (the prior pending/no-worker-commit records remain historical). The lower 3229 p2 mark 5 gain is real: 57 native lower members conserved and 25 following-row components excluded. The rejected upper B constructor child omits its own 59-pixel κατ’ apostrophe (native 3 component 32), outside the parent and beyond unchanged attachment reach. It is therefore **not a certified whole upper row**. The final field-owned upper row conserves that apostrophe, but includes five neighbouring sliver components, about 26 pixels, including lower-row accents. The final upper/lower outputs share 14 ink pixels; zero duplicate final output was never established.
+
+FONT-03 i1 strengthens assertions on actual returned rint/inclusive-fillPoly polygons and all 13 phases, and pins the apostrophe omission as a strict physical expected failure with a passing real-reconciler conservation check. Membership/eligibility and field priority remain unchanged. CURL-03 must resolve this omission before preferring B's upper child; AUDIT-02 tracks the open prerequisite.
+
+Structural first failures for a73d 56/57, c8 input 84 and 4959 input 0 are multiple word rows per child, not merely the runtime identity short circuit. See the additive corrections in COHORT_CASES.json and NATURAL_PARTITIONS.json. Original measurements are retained. SOURCE_QUALITY_SUPERSEDING_2026-10-13.json supersedes the stale pre-cost qualification checkpoint and distinguishes constructor from final evidence. The offline round6_rows pilot now explicitly uses completion-off, without runtime source qualification.

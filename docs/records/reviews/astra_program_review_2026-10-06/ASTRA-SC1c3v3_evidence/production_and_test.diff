@@ -1,0 +1,325 @@
+diff --git a/greekocr/labelfix/release_gate.py b/greekocr/labelfix/release_gate.py
+index 6f9311c0..a5c1eb76 100644
+--- a/greekocr/labelfix/release_gate.py
++++ b/greekocr/labelfix/release_gate.py
+@@ -10,14 +10,16 @@ ENSEMBLE_AB/AE compare A with B/E exactly and do not veto on detector names.
+ from collections import Counter
+ from copy import deepcopy
+ from dataclasses import asdict, fields, replace
++from difflib import SequenceMatcher
+ import hashlib
+ import json
++import math
+ import unicodedata as ud
+ from . import reading as R
+ from .text import (clusters, nfd, nfc, GREEK_LETTERS, ELISION, BREATHINGS,
+                    is_letter, word_final_elision, spacing_breathing, punctuation_sites)
+ 
+-POLICY = 'sf5-release-v1'
++POLICY = 'sf6-release-v1'
+ MODES = ('PRESENCE', 'FULL', 'ENSEMBLE_AB', 'ENSEMBLE_AE')
+ ENSEMBLE_CAVEAT = "A and B share training data (C1 agreement labels) and therefore share errors; agreement measures the reader's stability, not an independent pixel signal. Precision on the training waves is unmeasured until the training-wave DEV with print truth exists. Wave 1c on this release is a pseudo-label experiment."
+ R1_LETTERS = frozenset('αεηιουωρΑΕΗΙΟΥΩΡ')
+@@ -223,6 +225,188 @@ def edit_guard(original, proposal):
+     return reasons
+ 
+ 
++def deletion_atoms(text):
++    """NFD deletions at fixed letter boundaries; only SF5 elision aliases fold.
++
++    A replacement deletes its old atom, even when it adds another accent or
++    attaches a spacing breathing. Repeated signs retain their multiplicity.
++    Keraia classification is descriptive: explicit numeral signs or an alias
++    after a Greek/decimal/Unicode numeral token. All punctuation classes
++    use the same detector AND recogniser requirement.
++    """
++    cs=clusters(nfd(text));out=[];boundary=0
++    for i,c in enumerate(cs):
++        letter=is_letter(c.base) and c.base not in '\u02b9\u0374\u0375\u0384'
++        if letter:
++            out.append(dict(key=('letter',boundary,c.base),character=c.base,
++                start=c.start,letter=boundary,category='other'))
++            out.extend(dict(key=('mark',boundary,m),character=m,start=c.start+j+1,
++                letter=boundary,category='mark') for j,m in enumerate(c.marks))
++            boundary+=1
++            continue
++        spacing=spacing_breathing(cs,i)
++        alias=word_final_elision(cs,i)
++        token=''
++        if c.base in ELISION:
++            for prev in reversed(cs[:i]):
++                if is_letter(prev.base) or prev.base.isdecimal() or ud.category(prev.base)=='Nl':token=prev.base+token
++                else:break
++        keraia=(c.base in '\u02b9\u0374\u0375\u0384' or (c.base in ELISION and token and
++            (token.isdecimal() or all(ud.category(x)=='Nl' for x in token) or
++             len(token)<=3 and all(x in 'ΑΒΓΔΕϚϜΖΗΘΙΚΛΜΝΞΟΠϞΡΣΤΥΦΧΨΩϠ' for x in token))))
++        category=('mark' if spacing or ud.category(c.base).startswith('M') else 'keraia' if keraia else
++                  'apostrophe' if alias else 'quote' if c.base in LEADING_QUOTES+'‘‚‹›' else
++                  'apostrophe' if c.base in ELISION else 'other')
++        # Spacing breathings refer to the following letter, other punctuation
++        # to the preceding letter (a leading quote to the first letter).
++        owner=boundary if spacing else max(0,boundary-1)
++        key=('punct',boundary,'elision' if alias else c.base)
++        out.append(dict(key=key,character=c.base,start=c.start,letter=owner,category=category))
++        out.extend(dict(key=('punct_mark',boundary,m),character=m,start=c.start+j+1,
++            letter=owner,category='mark') for j,m in enumerate(c.marks))
++    return out
++
++
++def google_deletions(original, proposal):
++    """Include replaced characters; exclude canonical and pure elision aliases."""
++    a,b=deletion_atoms(original),deletion_atoms(proposal)
++    matcher=SequenceMatcher(None,[x['key'] for x in a],[x['key'] for x in b],autojunk=False)
++    return [dict(x) for tag,i,j,_,_ in matcher.get_opcodes() if tag!='equal' for x in a[i:j]]
++
++
++def _finite_span(value):
++    return (isinstance(value,(list,tuple)) and len(value)==2
++            and all(isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x) for x in value)
++            and 0<=value[0]<value[1])
++
++
++def deletion_guard(original, proposal, runtime, decision):
++    """SF6: two positive absences, except an R1-named same-kind breathing MOVE.
++
++    A/B (or A/E) together are ONE reader. The R1 heads name combining
++    marks only. Punctuation therefore needs detector AND scored recogniser
++    text. Empty candidates outside a detector's head/window are unknown.
++    This checks saved evidence and never runs or alters a source decision.
++    """
++    deleted=google_deletions(original,proposal)
++    if not deleted:return []
++    text=runtime.get('recogniser_text','')
++    letters=[c for c in _letters(text) if c.base not in '\u02b9\u0374\u0375\u0384']
++    aligned=([c.base for c in _letters(original) if c.base not in '\u02b9\u0374\u0375\u0384']==[c.base for c in letters])
++    raw=runtime.get('detector',{});raw=serialize(raw) if not isinstance(raw,dict) else raw
++    slots={s['start']:s for s in raw.get('slots',())}
++    composed={s['start']:s for s in decision.get('slots',())}
++    coverage={s['start']:s for s in runtime.get('coverage',())}
++    predictions=prediction_index(runtime.get('r1_predictions',()))
++    rec_atoms=Counter(x['key'] for x in deletion_atoms(text))
++    # SF6b moves content from a spacing sign onto the SAME capital. It does
++    # not certify absence. Keep the raw deletion inventory and absence signals
++    # intact, and identify the exception explicitly in the resulting check.
++    moves={};source=clusters(nfd(original));target=_letters(proposal)
++    same_letters=([c.base for c in _letters(original)]==[c.base for c in target])
++    boundary=0
++    for i,x in enumerate(source):
++        if is_letter(x.base):boundary+=1
++        part={'᾿':'psili','᾽':'psili','῾':'dasia'}.get(x.base)
++        if not (aligned and same_letters and part and not x.marks and i+1<len(source)
++                and boundary<len(target) and boundary<len(letters)):continue
++        old=source[i+1];new=target[boundary];rc=letters[boundary]
++        if not (old.base in R1_LETTERS and old.base.isupper() and old.base==new.base==rc.base
++                and not set(old.marks)&BREATHINGS
++                and set(new.marks)&BREATHINGS=={R.MARKS[part]}):continue
++        slot=slots.get(rc.start,{});written=composed.get(rc.start,{})
++        ev=slot.get('evidence',{});ev=ev.to_record() if hasattr(ev,'to_record') else ev
++        window=ev.get('window')
++        if not (slot and written.get('base')==rc.base and written.get('label_status')=='ACCEPT'
++                and not written.get('hold') and not written.get('hold_reasons')
++                and _finite_span(window) and slot.get('base')==rc.base
++                and slot.get('localisation_unknown') is False and slot.get('segmentation_uncertain') is False
++                and slot.get('physical_resolved') is not False
++                and not any(slot.get(k) for k in ('unnamed','ambiguity','hold','unseen_zones','constraint_flags'))
++                and slot.get('evidence_state')!='UNKNOWN' and ev.get('evidence_state')!='UNKNOWN'
++                and not ev.get('uncertainty') and ev.get('clipped_top') is False
++                and not any(ev.get('clipped_'+z) for z in ('left','right'))
++                and ev.get('observation',{}).get('above') not in ('UNSEEN','UNKNOWN')
++                and not any(_flag_targets(f,rc.start) for f in raw.get('constraint_flags',()))
++                and not raw.get('geometry',{}).get('physical_mapping',{}).get('ambiguous')):continue
++        named=True
++        arms=[(predictions,coverage)]
++        for peer in (('B','E') if decision.get('mode')=='ENSEMBLE_AE' else ('B',)):
++            arms.append((prediction_index(runtime.get('peer_predictions',{}).get(peer,())),
++                         {c['start']:c for c in runtime.get('peer_coverage',{}).get(peer,())}))
++        for preds,covs in arms:
++            pred=preds.get(rc.start);cov=covs.get(rc.start)
++            named=bool(named and cov and not _reader_reasons(slot,pred,cov,'r1')
++                and _finite_span(cov.get('span'))
++                and window[0]<=cov['span'][0]<cov['span'][1]<=window[1]
++                and set(pred.get('parts',pred.get('cls','none').split('+')))&{'psili','dasia'}=={part})
++        if named:moves[x.start]=part
++    events=[]
++    for atom in deleted:
++        index=atom['letter'];c=letters[index] if aligned and index<len(letters) else None
++        s=slots.get(c.start,{}) if c else {};d=composed.get(c.start,{}) if c else {}
++        ev=s.get('evidence',{});ev=ev.to_record() if hasattr(ev,'to_record') else ev
++        char=atom['character'];category=atom['category']
++        part=next((p for p,m in R.MARKS.items() if m==char),None)
++        if char in '᾿᾽':part='psili'
++        zone='below' if part=='subscript' else 'above'
++        edge='bottom' if zone=='below' else 'top'
++        clean=bool(c and s and s.get('base')==c.base
++            and s.get('localisation_unknown') is False and s.get('segmentation_uncertain') is False
++            and s.get('physical_resolved') is not False
++            and not any(s.get(k) for k in ('unnamed','ambiguity','hold','unseen_zones','constraint_flags'))
++            and s.get('evidence_state')!='UNKNOWN' and ev.get('evidence_state')!='UNKNOWN'
++            and not ev.get('uncertainty') and not d.get('hold_reasons')
++            and not any(_flag_targets(f,c.start) for f in raw.get('constraint_flags',()))
++            and not raw.get('geometry',{}).get('physical_mapping',{}).get('ambiguous')
++            and ev.get('clipped_'+edge) is False
++            and not any(ev.get('clipped_'+z) for z in ('left','right'))
++            and ev.get('observation',{}).get(zone) not in ('UNSEEN','UNKNOWN'))
++        cov=coverage.get(c.start) if c else None
++        pred=predictions.get(c.start) if c else None
++        scored=bool(clean and cov and not _reader_reasons(s,pred,cov,'r1')
++                    and _finite_span(cov.get('span')))
++        reader=bool(category=='mark' and part and c and c.base in R1_LETTERS and scored
++                    and part not in (pred.get('parts',pred.get('cls','none').split('+')) or []))
++        # The coordinator's A∧B is one reader absence in every release mode.
++        # AE additionally retains its selected E check; it supplies no extra
++        # independent signal. Missing/conflicting arms cannot certify absence.
++        for peer in (('B','E') if decision.get('mode')=='ENSEMBLE_AE' else ('B',)):
++            pp=prediction_index(runtime.get('peer_predictions',{}).get(peer,())).get(c.start) if c else None
++            pc={x['start']:x for x in runtime.get('peer_coverage',{}).get(peer,())}.get(c.start) if c else None
++            reader=bool(reader and pc and not _reader_reasons(s,pp,pc,'peer')
++                        and _finite_span(pc.get('span'))
++                        and part not in pp.get('parts',pp.get('cls','none').split('+')))
++        observed=ev.get('observation',{})
++        detector=bool(clean and _finite_span(ev.get('window')) and observed.get(zone)=='OBSERVED'
++                      and 'parts' in s and category=='mark' and part and part not in s['parts'])
++        if category in ('apostrophe','keraia'):
++            # ink.apostrophe_candidates scores only these word-final letters;
++            # in particular an empty Ι/kappa/mu slot is not a negative head.
++            detector=bool(clean and category=='apostrophe' and s.get('word_final') is True
++                and c.base.lower() in 'δτρθπ' and s.get('apostrophe') is False
++                and ev.get('apostrophes')==[] and observed.get('above')=='OBSERVED'
++                and observed.get('right')=='OBSERVED' and _finite_span(ev.get('window')))
++        elif category=='quote':
++            detector=bool(clean and atom['key'][1]==0 and raw.get('opening_quotes')==[]
++                and observed.get('above')=='OBSERVED' and observed.get('left')=='OBSERVED'
++                and _finite_span(ev.get('window')))
++        confidence=runtime.get('recognition_confidence')
++        recogniser=bool(clean and _finite_span(s.get('locator_span'))
++            and isinstance(confidence,(int,float)) and not isinstance(confidence,bool)
++            and math.isfinite(confidence) and 0<=confidence<=1 and rec_atoms[atom['key']]==0)
++        # Text presence is decisive against absence, even if it has a score.
++        allowed=(detector and recogniser if category in ('apostrophe','quote','keraia')
++                 else reader and (detector or recogniser))
++        move=moves.get(atom['start']) if atom['key'][0]=='punct' else None
++        allowed=allowed or bool(move)
++        events.append(dict(atom,recogniser_start=c.start if c else None,
++            signals=dict(reader=reader,detector=detector,recogniser=recogniser),allowed=bool(allowed),
++            reason=None if allowed else 'sf6:deletion_needs_two_positive_absences:'+category))
++        if move:events[-1].update(operation='MOVE',breathing=move)
++    return events
++
++
+ def _reader_reasons(slot, prediction, coverage, prefix):
+     reasons=[]
+     if prediction is None:reasons.append(prefix+'_missing')
+@@ -428,6 +612,10 @@ def bind_runtime(runtime, k1_flags=()):
+     if 'recogniser_nfd' in runtime:
+         if nfd(runtime['recogniser_text'])!=nfd(runtime['recogniser_nfd']):raise ValueError('runtime recogniser text mismatch')
+         evidence['recogniser_nfd']=runtime['recogniser_nfd']
++    # SF6 uses this saved score to distinguish observed text absence from an
++    # unscored transcript. Bind its presence/value as well as all old inputs.
++    if 'recognition_confidence' in runtime:
++        evidence['recognition_confidence']=runtime['recognition_confidence']
+     if not isinstance(evidence['detector'],dict):evidence['detector']=serialize(evidence['detector'])
+     digest=hashlib.sha256(json.dumps(evidence,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+     if runtime.get('evidence_sha256',digest)!=digest:raise ValueError('runtime evidence binding mismatch')
+diff --git a/scripts/labelfix/clariden/l1_common.py b/scripts/labelfix/clariden/l1_common.py
+index 19f92b0a..9fb2371a 100644
+--- a/scripts/labelfix/clariden/l1_common.py
++++ b/scripts/labelfix/clariden/l1_common.py
+@@ -10,7 +10,7 @@ import unicodedata
+ 
+ from scripts.labelfix.clariden.r1_common import rows, write_rows, sha256, write_json
+ from greekocr.labelfix.text import nfd, elision_alias_key
+-from greekocr.labelfix.release_gate import compose_runtime, edit_guard, release_text, POLICY, ENSEMBLE_CAVEAT
++from greekocr.labelfix.release_gate import compose_runtime, edit_guard, release_text, deletion_guard, POLICY, ENSEMBLE_CAVEAT
+ 
+ STATUSES = ('corrected', 'unchanged', 'hold', 'out_of_scope')
+ 
+@@ -57,6 +57,12 @@ def overlay(record, runtime, variant, binding):
+     alias_only = (nfd(original)!=nfd(mode['text'])
+                   and elision_alias_key(original)==elision_alias_key(mode['text']))
+     result.update(alias_only=alias_only,elision_census=census)
++    deletions=deletion_guard(original,proposal,runtime,mode)
++    result['deletion_checks']=deletions
++    for deletion in deletions:
++        if not deletion['allowed']:
++            result['hold_slots'].append(dict(start=deletion['start'],letter=deletion['character'],
++                reason='deletion_uncertain',detail=deletion['reason']))
+     for detail in edit_guard(original, runtime['recogniser_text']) + edit_guard(original,proposal):
+         result['hold_slots'].append(dict(start=0,letter='',reason='edit_guard',detail=detail))
+     if result['hold_slots']:
+diff --git a/tests/labelfix/test_sf5.py b/tests/labelfix/test_sf5.py
+index 67f45ec4..ebb7f102 100644
+--- a/tests/labelfix/test_sf5.py
++++ b/tests/labelfix/test_sf5.py
+@@ -40,11 +40,34 @@ def overlay(policy, original, runtime, mode='ensemble_ab'):
+ 
+ 
+ WITNESSES=list(rows(DOC/'SF5_evidence/witness_inputs.jsonl.gz'))
++SF6_HELD={
++    'a300f5e1c3f6a38d97201791-p000442-l0085',
++    '453f156dc6352286456a08cb-p000100-l0002',
++    '143e78b5de2e6e784534ee0d-p000061-l0032',
++    'b518f9f9b73fe9a3257fe2f0-p000041-l0022',
++    '137e9af6a0045d5746e26efa-p000008-l0008',
++    '8961f6bdd6daf004b4a84dfa-p000025-l0051',
++    '00c322b3ee04b419d1979f22-p000115-l0022',
++    '827d2345ad77e5cdec320e80-p000028-l0019',
++}
++
++
++def assert_sf6_hold(result,original):
++    assert result['status']=='hold' and result.get('label',original)==original
++    assert result['changes']==[]
++    assert any(not c['allowed'] for c in result['deletion_checks'])
++    assert any(s['detail'].startswith('sf6:deletion_needs_two_positive_absences:') for s in result['hold_slots'])
+ 
+ 
+ @pytest.mark.parametrize('w',WITNESSES,ids=[r['id'] for r in WITNESSES])
+ def test_saved_56_release_witnesses(policy,w):
+     result=policy[1].overlay(w['record'],w['runtime'],'ensemble_ab',BINDING)
++    # SF6 changes only release acceptance. Preserve this exact assertion even
++    # for the eight still-held lines, including both known reader mistakes.
++    assert policy[0].compose_runtime(w['runtime'],'ENSEMBLE_AB')['slots']==w['sf4_decisions']['slots']
++    if policy[0].POLICY=='sf6-release-v1' and w['id'] in SF6_HELD:
++        assert_sf6_hold(result,w['record']['label'])
++        return
+     assert result['status'] in ('corrected','unchanged')
+     actual=result['label']
+     if w['kind'].startswith('known_reader_'):
+@@ -92,6 +115,13 @@ def test_spacing_breathing_consumed_in_same_edit(policy,mode,spacing,base):
+     breathing='\u0314' if base=='Ρ' else '\u0313'
+     runtime=synthetic("-'"+base+breathing+'λα')
+     result=overlay(policy,original,runtime,mode)
++    if policy[0].POLICY=='sf6-release-v1':
++        assert_sf6_hold(result,original)
++        assert any(c['character']==spacing and c['category']=='mark' for c in result['deletion_checks'])
++        # The SF5 proposal is still atomic; only release becomes HOLD.
++        proposal,_=policy[0].release_text(original,runtime['recogniser_text'],policy[0].compose_runtime(runtime,mode)['text'])
++        assert proposal==nfc('-'+base+breathing+'λα')
++        return
+     assert result['status']=='corrected' and result['label']==nfc('-'+base+breathing+'λα')
+     assert len(result['changes'])>=1 and not result['hold_slots']
+ 
+@@ -100,6 +130,11 @@ def test_spacing_breathing_consumed_in_same_edit(policy,mode,spacing,base):
+ def test_spacing_breathing_unattached_stays_verbatim(policy,spacing):
+     original='-'+spacing+'Αλλά'
+     result=overlay(policy,original,synthetic(original,named=False))
++    if policy[0].POLICY=='sf6-release-v1':
++        assert_sf6_hold(result,original)
++        assert spacing in result.get('label',original)
++        assert [c['character'] for c in result['deletion_checks']]==['\u0301']
++        return
+     assert result['label']==nfc(original.replace('ά','α'))  # real accent edit is still allowed
+     assert spacing in result['label'] and '’' not in result['label']
+ 
+@@ -133,7 +168,10 @@ def test_single_source_presence_behavior_unchanged_and_counted(policy,source,det
+     text='κ α' if source=='google' else "κ' α"
+     result=overlay(policy,original,synthetic(text,detector_apostrophe=detected))
+     expected=('κ᾿ α' if source=='google' else 'κ’ α') if detected else 'κ α'
+-    assert result['label']==expected
++    if policy[0].POLICY=='sf6-release-v1' and source=='google' and not detected:
++        assert_sf6_hold(result,original)
++        assert result['deletion_checks'][0]['category']=='apostrophe'
++    else:assert result['label']==expected
+     c=result['elision_census']
+     assert c['both']==0 and c[source+'_only']==1
+     assert c[source+'_only_kept' if detected else source+'_only_deleted']==1

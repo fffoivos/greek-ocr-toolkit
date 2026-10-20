@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / '.astra/out'
 OLD = ROOT / '.astra/previous_round2'
-REPORT = ROOT / 'docs/reviews/PAGE_LINES_ROUND3_20261009.md'
+REPORT = ROOT / 'docs/records/reviews/PAGE_LINES_ROUND3_20261009.md'
 P = 'an-d6fd2cf2f618-p000047'
 V = 's2-49598b2e848ab1f0ee1e-p00001'
 T = 'an-1f8e7d022643-p000003'

@@ -1,0 +1,805 @@
+--- 413f8dc311e772e0/docs/harvest/line_pipeline/README.md
++++ capture/docs/harvest/line_pipeline/README.md
+@@ -55,6 +55,8 @@
+   "metadata": "/worker/frozen-book-page-metadata.json",
+   "codec": "/worker/toolkit/greekocr/_vendor/codec/v2.json",
+   "predictor": "/worker/toolkit/scripts/harvest/filter_runtime/target/release/greekocr-frozen-font-predict",
++  "runtime_manifest": "/worker/frozen-native-runtime.json",
++  "native_workers": 8,
+   "row_timeout_seconds": 120,
+   "component_roots": {
+     "greek-ocr-toolkit-sol-recut": "/worker/toolkit",
+@@ -124,6 +126,12 @@
+ 
+ ## CSCS native-worker concurrency
+ 
+-`native_workers` defaults to 1 and accepts 1–64. Only native measurements run concurrently, each through an independent persistent, deadline-limited process. All SQLite access, correction composition, output ordering and release decisions stay in the coordinator. At most twice the worker count is in flight. Missing-boundary/expectation rows are excluded before native work; verified measurements are reused on resume. Worker failures remain infrastructure errors, and unavailable crops remain explicit holds. `runtime.json` records attempts, reuse and timing separately from the scientific decisions.
++`native_workers` defaults to 1 and accepts 1–256. Only native measurements run concurrently, each through an independent persistent, deadline-limited process. All SQLite access, correction composition, output ordering and release decisions stay in the coordinator. `native_prefetch_factor` accepts 1–64 and defaults to 2; worker count times factor must not exceed 4,096 pending observations. Both the pool and qualification planner reject oversized combinations before starting workers. This permits a wider queue with fewer native processes without increasing the global observation bound. Missing-boundary/expectation rows are excluded before native work; verified measurements are reused on resume. Worker failures remain infrastructure errors, and unavailable crops remain explicit holds. `runtime.json` records attempts, reuse and timing separately from the scientific decisions. Select deployment settings only from a fresh worker-side equality, throughput and memory comparison; the maximum supported worker count is not a recommended setting.
+ 
+ Use the same bound parents, metadata, versions and binary for worker-count comparisons. Output decision equality excludes the run-binding fingerprint, which intentionally changes when the worker-count configuration changes. No local or remote speedup is claimed before a same-input native comparison. Full native and timing qualification runs only on a Slurm worker; the Mac runs metadata fixtures only.
++
++Native execution requires a runtime manifest. It records the actual loaded PNG/JPEG libraries, explicit preload and library hashes, compiled Python modules, package versions, Python/Node/predictor binaries and child-thread settings. Both the coordinator (including cached resumes) and actual native child validate the selected executable paths and loaded runtime before use. The manifest fingerprint enters run identity and measurement keys. A change requires a new ledger; never edit an existing manifest to conceal drift.
++
++On Clariden the original collector's grayscale PNG encoding requires the private zlib-ng 2.3.3 compatibility library. The system zlib produced different frozen crop bytes; accepting those differences would violate the input identity contract. `filter_worker.sbatch` verifies the private library SHA before preloading it. Four crop witnesses, followed by all selected native qualification rows, must retain their strict frozen SHA checks. `png-codec.json` describes the installed library, while each run's runtime manifest binds what Python actually loads.
++
++The thin Clariden adapter reuses the existing Greek OCR `common.sh` allocation/receipt helper. Its modes are `inventory`, `prepare`, `qualify` and `census`. `prepare` verifies every referenced source page, binds every original-v2 crop path/hash without rewriting original parent manifests, and emits a fingerprinted full diagnostic configuration with existing correction releases. Missing assets stop preparation. The original train/dev/test split manifests remain declared; new split and edition identities are not guessed. `qualify --stratified` selects deterministic SHA-priority samples across complete parents and compares fresh serial/parallel runs. `census --config <prepared/config.json>` executes the bound full diagnostic pipeline. This census still excludes unresolved corrective/audit/metadata evidence; it is not an unconditional training release.
+--- 413f8dc311e772e0/docs/harvest/line_pipeline/tool_versions.json
++++ capture/docs/harvest/line_pipeline/tool_versions.json
+@@ -64,25 +64,28 @@
+       "digest": "50b06dd57cb18e0fb9b6e4e7ea64bc850057228f86085446565ce15809327749"
+     },
+     "segmentation": {
+-      "version": "0.5",
++      "version": "0.8",
+       "documented_iterations": [
+         "29fa466 crop guides",
+         "5d664bf font normalized",
+         "cad8709 target-box normalization",
+         "b2f8d95 whole-word tolerance",
+-        "405d4f1 padding 1.5 heights"
++        "405d4f1 padding 1.5 heights",
++        "0.5 + row-frame text box",
++        "crop-only line inventory and cut-off gate before length",
++        "owner's three rules; remove target-cut veto and taller-than-upright guard"
+       ],
+-      "iteration_count": 5,
+-      "scope": "owner accepted current decisions unchanged on 2026-10-18",
++      "iteration_count": 8,
++      "scope": "0.8 exactly the owner's three rules: crop-only other-lines gate, unchanged 0.6 length and padding; cut evidence is diagnostics only; owner policy 2026-10-19",
+       "components": {
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/segmentation-policy.js": "8334dd4028822edbd740a1a96a0ead6367c7af953e545bad8bd60a911c65a819",
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/crop-tools.py": "d04b7b48ca54c18dc416a9f402a95661db3ef15c7001e04e45e1a7f033888390",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/segmentation-policy.js": "e5b635ff9a04cc66f454a68e01ce9773229672e655b3ee08296ee5c0d149ee15",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/crop-tools.py": "921b79ad1450e1023518e4aa36280a0efea2fe83ae1739ca0166e98c14ede1af",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/font-models.json": "fb3f28f7d90c2b638bfe9c72ab42dcf060d59939a7ab410fc2e1cf6d898965de",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/service.mjs": "df1781fb469c92dfe3b7fe886b4297a7ca20878bb82006cf6825536ce537c911",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py": "1dd618bc2d884cf2490498456653f49b0276944f3bde83d38e26e633031eb641",
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py": "038bd46af4535e6de6af58e11c4b7496e03e0434094cc8cd6b48668e2199ad77"
+       },
+-      "digest": "76baed43e99e40e6e7795c1431c77798c65be24a664fc449edcea2a26f687562"
++      "digest": "512e362a691c6f2f425acc41e587b4b751dedbaadd10077d42309ed3f1f7bebd"
+     },
+     "content_gate": {
+       "version": "0.2",
+@@ -94,9 +97,9 @@
+       "scope": "existing toolkit primitives with new orchestration",
+       "components": {
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline.py": "82976d9b6754984bc4c0bc22b1a166381aca4a123d419374f945b288894c4a2c",
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py": "9f856886da8ed63c330fa9dd8d9a1b1e1af3bcb4a4280b3d0871a1a578ec6237"
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py": "ea98ad249fc629da2c00331f39884b4fb75154de8e9ebe843a4055a4ba52f77d"
+       },
+-      "digest": "c6fd687dabe6d6245884dd9d6c478171186375946e1befb7bb6156a20f399b8d"
++      "digest": "8da587441139419b2e76d6d4bd2688afd7459e081bd5b02325efdbe8d64d08a2"
+     },
+     "content_repair": {
+       "version": "0.2",
+@@ -108,9 +111,9 @@
+       "scope": "evidence-backed external repair interface; missing evidence holds",
+       "components": {
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline.py": "82976d9b6754984bc4c0bc22b1a166381aca4a123d419374f945b288894c4a2c",
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py": "9f856886da8ed63c330fa9dd8d9a1b1e1af3bcb4a4280b3d0871a1a578ec6237"
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py": "ea98ad249fc629da2c00331f39884b4fb75154de8e9ebe843a4055a4ba52f77d"
+       },
+-      "digest": "c6fd687dabe6d6245884dd9d6c478171186375946e1befb7bb6156a20f399b8d"
++      "digest": "8da587441139419b2e76d6d4bd2688afd7459e081bd5b02325efdbe8d64d08a2"
+     },
+     "composer": {
+       "version": "0.2",
+@@ -122,9 +125,9 @@
+       "scope": "existing toolkit primitives with new orchestration",
+       "components": {
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline.py": "82976d9b6754984bc4c0bc22b1a166381aca4a123d419374f945b288894c4a2c",
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py": "9f856886da8ed63c330fa9dd8d9a1b1e1af3bcb4a4280b3d0871a1a578ec6237"
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py": "ea98ad249fc629da2c00331f39884b4fb75154de8e9ebe843a4055a4ba52f77d"
+       },
+-      "digest": "c6fd687dabe6d6245884dd9d6c478171186375946e1befb7bb6156a20f399b8d"
++      "digest": "8da587441139419b2e76d6d4bd2688afd7459e081bd5b02325efdbe8d64d08a2"
+     },
+     "final_eligibility": {
+       "version": "0.2",
+@@ -136,26 +139,36 @@
+       "scope": "existing toolkit primitives with new orchestration",
+       "components": {
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline.py": "82976d9b6754984bc4c0bc22b1a166381aca4a123d419374f945b288894c4a2c",
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py": "9f856886da8ed63c330fa9dd8d9a1b1e1af3bcb4a4280b3d0871a1a578ec6237"
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py": "ea98ad249fc629da2c00331f39884b4fb75154de8e9ebe843a4055a4ba52f77d"
+       },
+-      "digest": "c6fd687dabe6d6245884dd9d6c478171186375946e1befb7bb6156a20f399b8d"
++      "digest": "8da587441139419b2e76d6d4bd2688afd7459e081bd5b02325efdbe8d64d08a2"
+     },
+     "census": {
+-      "version": "0.3",
++      "version": "0.5",
+       "documented_iterations": [
+         "first integrated graph implementation",
+         "Astra review: composed coverage, producer binding and atomic exports",
+-        "bounded parallel native workers for CSCS"
++        "bounded parallel native workers for CSCS",
++        "profiled CSCS throughput tuning with bounded queue lookahead and node-scale worker qualification",
++        "parent-confirmed collection-v2 legacy evaluation split aliases with retained lineage"
+       ],
+-      "iteration_count": 3,
++      "iteration_count": 5,
+       "scope": "existing toolkit primitives with new orchestration",
+       "components": {
+         "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline.py": "82976d9b6754984bc4c0bc22b1a166381aca4a123d419374f945b288894c4a2c",
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py": "9f856886da8ed63c330fa9dd8d9a1b1e1af3bcb4a4280b3d0871a1a578ec6237",
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_parallel.py": "4e1c21a57fbe9f91f68c99fea44c5f45981ca0fc90cdf9183f9e20504e852d03",
+-        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_native.py": "7faec7a3d00045b3cf38d982c149d3310019718a6566433bb4e8dae3b0ae3622"
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py": "ea98ad249fc629da2c00331f39884b4fb75154de8e9ebe843a4055a4ba52f77d",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_sources.py": "d84f024f755d23543bd0b0601f14e2e7adae5d1eaadbc325e636bff3d628788e",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_parallel.py": "52aef74eb01e17669dc068c8532c7008c251e8d1b5308f8e38790c613db0197e",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_native.py": "47b7742ef6bae9274392838c070309f1e7d5c8fc389b52826a21ee1d1fa8515c",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_runtime.py": "8687f59c0986eff6a3f008c890385724a880c0e6356d6e059d61ec192386d483",
++        "greek-ocr-toolkit-sol-recut/greekocr/harvest/geometry_observations.py": "524972373acb094384f48055dfb1189f799c648df81370c5a9d5952c7798c695",
++        "greek-ocr-toolkit-sol-recut/scripts/harvest/clariden/worker.py": "8c8109606e50bf6b26f74d95436e555bc3bac0984ed5c584600fa2602b2ea5c7",
++        "greek-ocr-toolkit-sol-recut/scripts/harvest/clariden/bootstrap.py": "7ec4b9ddb4a7ad87631992f834ab9a0f52ce6a42e2f6226103ad9a839695dc18",
++        "greek-ocr-toolkit-sol-recut/scripts/harvest/clariden/filter_crop_paths.py": "04247e96e82db502c7da154f70360f8f4a17b2a9620bb26df9d8bca781ae7110",
++        "greek-ocr-toolkit-sol-recut/scripts/harvest/clariden/filter_worker.sbatch": "3b30cf18b1d72207000d0532afed44cfa9961982dc84dbd950d66de2b716153c",
++        "greek-ocr-toolkit-sol-recut/scripts/harvest/clariden/package.py": "cd4b9d0ae23e405ed61c81abb1a37029ce43abf456390abd2167df5b9b613da5"
+       },
+-      "digest": "3264d049a4343d4fa95663adec9048a95eba5cb72510a7bc3353c83205572ad5"
++      "digest": "e4dc7914f690c743e023f5ac49c8d990bd07615d243ab18488fa21267b22e93e"
+     },
+     "inventory": {
+       "version": "0.1",
+--- 413f8dc311e772e0/greekocr/harvest/filtering_assets/crop-tools.py
++++ capture/greekocr/harvest/filtering_assets/crop-tools.py
+@@ -21,6 +21,75 @@
+ ROOT = Path(__file__).resolve().parents[2]
+ TEXT_ROLES = frozenset({'letter', 'fragment', 'mark', 'punct'})
+ BODY_ROLES = frozenset({'letter', 'fragment'})
++
++
++def line_inventory(glyphs, lines, components, angle_deg):
++    """Inventory existing bands/roles; no fitting, relabelling or page context."""
++    from dataclasses import asdict
++    import numpy as np
++    from greekocr.glyphs.baseline import skew_line
++    from greekocr.harvest.neighbour_words import WORD_PROXY
++
++    xh, width = glyphs.band.xh, glyphs.width
++    assigned = [[] for _ in lines]
++    for c in components:
++        x0, y0, x1, y1 = c['bbox']
++        x = int(np.clip((x0+x1)/2, 0, width-1))
++        if lines:
++            at = min(range(len(lines)), key=lambda i: abs((y0+y1)/2 - (lines[i].mean[x]+lines[i].base[x])/2))
++            assigned[at].append(c)
++
++    def body(c, line):
++        x0, y0, x1, y1 = c['bbox']
++        x = int(np.clip((x0+x1)/2, 0, width-1))
++        # Exactly second_line's per-band body overlap/width/role criteria.
++        return (c['role'] not in ('mark', 'rule') and x1-x0 <= 2*xh
++                and min(y1, line.base[x])-max(y0, line.mean[x]) >= .6*xh)
++
++    inventory = []
++    for index, (line, owned) in enumerate(zip(lines, assigned)):
++        bodies = [c['index'] for c in owned if body(c, line)]
++        coverage = (line.x1-line.x0+1)/width
++        groups = []
++        if line.side != 'main':
++            # Same empty-gap scale as neighbour_words.row_word_evidence, within
++            # ONE existing band. Retain partial tips; they are cut-off groups.
++            for c in sorted((c for c in owned if c['role'] == 'neighbour'), key=lambda c: (c['bbox'][0], c['index'])):
++                if not groups or c['bbox'][0]-max(p['bbox'][2] for p in groups[-1]) >= WORD_PROXY['word_gap_xh']*xh:
++                    groups.append([])
++                groups[-1].append(c)
++        words = []
++        for group in groups:
++            bbox = [min(c['bbox'][0] for c in group), min(c['bbox'][1] for c in group),
++                    max(c['bbox'][2] for c in group), max(c['bbox'][3] for c in group)]
++            body_ids = [c['index'] for c in group if body(c, line)]
++            edge = bbox[0] == 0 or bbox[2] == width
++            words.append(dict(bbox=bbox, component_ids=[c['index'] for c in group],
++                body_ids=body_ids, bodies=len(body_ids), touches_horizontal_edge=edge,
++                whole=len(body_ids) >= 2 and not edge))
++        inventory.append(dict(index=index, side=line.side, votes=float(line.votes), visible=float(line.visible),
++            x0=int(line.x0), x1=int(line.x1), coverage=coverage, bodies=len(bodies), body_ids=bodies,
++            complete=bool(line.votes >= 6 and len(bodies) >= 6 and line.visible >= .9 and coverage >= .6),
++            component_ids=[c['index'] for c in owned], whole_words=sum(w['whole'] for w in words),
++            cutoff_words=sum(not w['whole'] for w in words), word_groups=words,
++            context_whole_words=None, context_cutoff_words=None, context_count_resolved=None))
++    main = next((l for l in lines if l.side == 'main' and l.votes > 0), None)
++    # skew_line and the measured heights are diagnostics only, never gate inputs.
++    cut = dict(angle_deg=None, crossings=[], cut_spans=[], cut_letters=[], baseline_exit=False,
++        low_visibility_span=False, upright_box_height=None, row_frame_height=None)
++    if main is not None:
++        skew = skew_line(glyphs)
++        cut.update(angle_deg=skew.angle_deg, crossings=[asdict(c) for c in skew.crossings],
++            cut_spans=[asdict(s) for s in skew.cut_spans], cut_letters=[asdict(c) for c in skew.cut_letters])
++        cut['baseline_exit'] = any(c.line == 'baseline' and 'leaves the crop' in c.meaning for c in skew.crossings)
++        cut['low_visibility_span'] = any(s.min_visible < .6 for s in skew.cut_spans)
++        text = [c for c in components if c['role'] in TEXT_ROLES]
++        upright = tight_box(text)
++        row = tight_box(text, labels=glyphs.labels, angle_deg=angle_deg, centre=(glyphs.width/2, glyphs.height/2))
++        if upright is not None:
++            cut.update(upright_box_height=upright[3]-upright[1], row_frame_height=row[3]-row[1])
++    cut['cut'] = cut['baseline_exit'] or cut['low_visibility_span']
++    return inventory, cut
+ 
+ 
+ def orient_crop(image, content_class, measure_orientation, QuarterTurn, visual_review=None):
+@@ -52,9 +121,25 @@
+     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+ 
+ 
+-def tight_box(components):
++def tight_box(components, *, labels=None, angle_deg=0, centre=None):
+     if not components:
+         return None
++    if angle_deg != 0:
++        import numpy as np
++        # Rotate only the selected components' ink, not their upright envelopes.
++        # Pixel cells have unit area; their projected half-width bounds the ink
++        # without resampling or rounding a continuous row-frame measurement.
++        yy, xx = np.nonzero(np.isin(labels, [c['index'] for c in components]))
++        if not len(xx):
++            raise ValueError('text components have no labelled ink')
++        cx, cy = centre
++        c, s = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
++        dx, dy = xx + .5 - cx, yy + .5 - cy
++        u, v = c*dx + s*dy + cx, -s*dx + c*dy + cy
++        half = (abs(c) + abs(s))/2
++        return [float(u.min()-half), float(v.min()-half),
++                float(u.max()+half), float(v.max()+half)]
++    # Preserve the original integer box exactly for the identity transform.
+     return [min(c['bbox'][0] for c in components), min(c['bbox'][1] for c in components),
+             max(c['bbox'][2] for c in components), max(c['bbox'][3] for c in components)]
+ 
+@@ -81,7 +166,8 @@
+ 
+ 
+ def features_from_observation(*, width, height, components, ink_box, ink_pixels,
+-                              xheight, xheight_source, support_count, chars):
++                              xheight, xheight_source, support_count, chars,
++                              labels=None, angle_deg=0):
+     """Geometry arithmetic only; components/roles come from the existing tool."""
+     if width <= 0 or height <= 0 or chars < 0:
+         raise ValueError('invalid native dimensions or character count')
+@@ -102,6 +188,16 @@
+         raise ValueError('component census exceeds observed ink')
+     text_pixels = sum(c['area'] for c in text)
+     text_box = box_metrics(tight_box(text), width, height, xheight)
++    row_box = tight_box(text, labels=labels, angle_deg=angle_deg, centre=(width/2, height/2))
++    row_frame = None
++    if row_box is not None:
++        x0, y0, x1, y1 = row_box
++        corners = [[x0,y0], [x1,y0], [x1,y1], [x0,y1]]
++        if angle_deg != 0:
++            c, s = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
++            corners = [[c*(x-width/2)-s*(y-height/2)+width/2,
++                        s*(x-width/2)+c*(y-height/2)+height/2] for x,y in corners]
++        row_frame = dict(angle_deg=angle_deg, length=x1-x0, height=y1-y0, corners=corners)
+     body_box = box_metrics(tight_box(bodies), width, height, xheight)
+     letters = [c for c in components if c['role'] == 'letter']
+     def median(values):
+@@ -126,7 +222,7 @@
+     return dict(segment=dict(width=width, height=height, aspect=width/height,
+                              short_long=min(width,height)/max(width,height)),
+                 all_ink_box=box_metrics(ink_box,width,height,xheight),
+-                candidate_text_box=text_box, letter_component_box=body_box,
++                candidate_text_box=text_box, row_frame_text_box=row_frame, letter_component_box=body_box,
+                 neighbour_box=box_metrics(tight_box(neighbours),width,height,xheight),
+                 xheight_px=xheight, xheight_source=xheight_source, band_support=support_count,
+                 median_letter_component_width_px=letter_width,
+--- 413f8dc311e772e0/greekocr/harvest/filtering_assets/segmentation-policy.js
++++ capture/greekocr/harvest/filtering_assets/segmentation-policy.js
+@@ -1,6 +1,8 @@
+-// Independent OCR-length screen using the measured target text box.
+-// Geometry, script coverage, component count and body-height proxies are
+-// reported separately. They cannot short-circuit this numerical comparison.
++// Segmentation 0.8: exactly the owner's three rules, in this order:
++// 1. Other lines: additional complete line or >2 whole words; cut-off words do not count.
++// 2. De-skewed main-row box length, height-normalised through the frozen predictor.
++// 3. Crop height <= upright box height + 1.5 * de-skewed line height.
++// Cut evidence and optional source context are diagnostics only.
+ // KEEP here passes this screen only; it is not a training-admission certificate.
+ function boxLengthJudgement(row,lower=.5,upper=1.5,mode=2){
+  const e=row.box_evidence,chars=row.characters;
+@@ -11,20 +13,16 @@
+  const ratio=(chars+1)/(expected+1);
+  return ratio<lower?{verdict:'DROP',reason:'Too little OCR output for the text box after height normalisation.'}:ratio>upper?{verdict:'DROP',reason:'Too much OCR output for the text box after height normalisation.'}:{verdict:'KEEP',reason:'OCR output agrees with the height-normalised text-box length.'};
+ }
+-function detectedRowsJudgement(row,maxWholeWords=2){
+- if(!row.box_evidence?.available||!row.detected_rows?.length)return {verdict:'UNCERTAIN',reason:'No target text box and detected row were established.'};
+- if(row.orientation_resolved===false)return {verdict:'UNCERTAIN',reason:'The reading direction remains unresolved.'};
+- const lines=row.detected_rows.filter(l=>Number.isFinite(l.votes)&&l.votes>0);
+- if(!lines.length)return {verdict:'UNCERTAIN',reason:'The detector returned no row with observed support.'};
+- const n=row.neighbour_evidence;
+- // A vertically complete band is not proof of an entire second printed line.
+- // Native source-row extent and whole-word evidence supply those distinctions.
+- if(n?.additional_full_line_count>0)return {verdict:'DROP',reason:'A second complete printed line is visible.'};
+- if(n?.whole_word_count_resolved!==false&&Number.isFinite(n?.whole_neighbour_words)&&n.whole_neighbour_words>maxWholeWords)return {verdict:'DROP',reason:'More than '+maxWholeWords+' complete neighbouring words are visible.'};
+- if(n?.status==='measured'&&n.whole_word_count_resolved!==false&&Number.isFinite(n.whole_neighbour_words))return {verdict:'KEEP',reason:'No second complete line; '+n.whole_neighbour_words+' complete neighbouring word'+(n.whole_neighbour_words===1?'':'s')+' within the allowance. Clipped words are allowed.'};
+- if((n?.status==='unresolved'||n?.status==='unavailable')&&lines.some(l=>l.side!=='main'))return {verdict:'UNCERTAIN',reason:'The complete neighbouring-word count or line extent is unresolved.'};
+- if(lines.some(l=>l.side!=='main'))return {verdict:'UNCERTAIN',reason:'Native word evidence is needed to distinguish complete words from fragments.'};
+- return {verdict:'KEEP',reason:'One target row; no neighbouring text was detected.'};
++// Stage A is crop-only. Source-context counts are diagnostic evidence only.
++function lineInventoryJudgement(row,maxWholeWords=2){
++ const lines=row.lines??[],main_cut=row.gate?.main_cut??{};
++ const neighbours=lines.filter(l=>l.side!=='main');
++ const result={verdict:'PASS',reason:'gate: pass',whole_words:neighbours.reduce((n,l)=>n+l.whole_words,0),cutoff_words:neighbours.reduce((n,l)=>n+l.cutoff_words,0),complete_rows:neighbours.filter(l=>l.complete).map(l=>l.index),main_cut};
++ if(!lines.some(l=>l.side==='main'&&l.votes>0))return {...result,verdict:'UNCERTAIN',reason:'gate: no main row found'};
++ if(row.orientation_resolved===false)return {...result,verdict:'UNCERTAIN',reason:'gate: reading direction unresolved'};
++ if(result.complete_rows.length)return {...result,verdict:'DROP',reason:'gate: second complete line'};
++ if(result.whole_words>maxWholeWords)return {...result,verdict:'DROP',reason:'gate: too many whole neighbour words'};
++ return result;
+ }
+ function paddingJudgement(row,maxPaddingHeights=1.5){
+  const p=row.padding_evidence;
+@@ -32,13 +30,12 @@
+  return p.total_padding_line_heights>maxPaddingHeights?{verdict:'DROP',reason:'Top and bottom padding together exceed '+maxPaddingHeights+' target-line heights.'}:{verdict:'KEEP',reason:'Combined top and bottom padding is within '+maxPaddingHeights+' target-line heights.'};
+ }
+ function combinedBoxJudgement(row,lower=.5,upper=1.5,mode=2,options={}){
+- const length=boxLengthJudgement(row,lower,upper,mode),geometry=detectedRowsJudgement(row,options.maxWholeWords??2),padding=paddingJudgement(row,options.maxPaddingHeights??1.5);
+- // A decisive failure survives uncertainty in an independent check.
+- if(length.verdict==='DROP')return length;
+- if(geometry.verdict==='DROP')return geometry;
+- if(padding.verdict==='DROP')return padding;
+- if(length.verdict==='UNCERTAIN')return length;
+- if(geometry.verdict==='UNCERTAIN')return geometry;
+- if(padding.verdict==='UNCERTAIN')return padding;
+- return {verdict:'KEEP',reason:'OCR length matches; neighbouring words and vertical padding are within the selected allowances, with no second complete line.'};
++ const gate=lineInventoryJudgement(row,options.maxWholeWords??2);
++ if(row.gate_only===true)return gate;
++ if(gate.verdict!=='PASS')return {verdict:gate.verdict,reason:gate.reason};
++ const length=boxLengthJudgement(row,lower,upper,mode);
++ if(length.verdict!=='KEEP')return {...length,reason:'length: '+length.reason};
++ const padding=paddingJudgement(row,options.maxPaddingHeights??1.5);
++ if(padding.verdict!=='KEEP')return {...padding,reason:'length: '+padding.reason};
++ return {verdict:'KEEP',reason:'length: OCR length matches; vertical padding is within the selected allowance.'};
+ }
+--- 413f8dc311e772e0/greekocr/harvest/geometry_observations.py
++++ capture/greekocr/harvest/geometry_observations.py
+@@ -79,6 +79,31 @@
+     if digest != PARAMS_SHA:
+         raise ValueError('foreign-ink parameters changed')
+     return digest
++
++
++def prepare_geometry_row(r, structural, ink, labels, ownership):
++    """Established CP2 row validation/quarantine, shared with live observations.
++
++    Only a nonpositive outer envelope is row-local unavailability. Never fix
++    curves or suppress malformed arrays, labels, identities or body guides.
++    """
++    foreign_ink._centre_fit(r)
++    n = r['x1'] - r['x0']
++    curves = {k: np.asarray(r[k], dtype=float) for k in ownership.CURVES}
++    if (not 0 <= r['x0'] < r['x1'] <= ink.shape[1] or
++            any(v.shape != (n,) or not np.isfinite(v).all() for v in curves.values())):
++        raise ValueError('invalid_detector_geometry')
++    delta = curves['bottom'] - curves['top']
++    if np.any(delta <= 0):
++        if not structural.get('line_indices'):
++            raise ValueError('missing_invalid_row_line_indices')
++        return None, dict(r, status='invalid_geometry',
++            reason='nonpositive_row_envelope', minimum_bottom_minus_top=float(delta.min()),
++            unavailable_box=[min(r['x0'], r['owned_box'][0]),
++                min(r['owned_box'][1], *(float(v.min()) for v in curves.values())),
++                max(r['x1'], r['owned_box'][2]),
++                max(r['owned_box'][3], *(float(v.max()) for v in curves.values()))])
++    return ownership.prepare_row(r, ink, labels), None
+ 
+ 
+ def load_cached_page(source, cache, expected_sha, *, collector=COLLECTOR):
+@@ -131,26 +156,9 @@
+             raise ValueError('inconsistent_structural_row')
+         if not r['component_ids'] or not set(r['component_ids']) <= present_ids:
+             raise ValueError('missing_native_component')
+-        foreign_ink._centre_fit(r)  # Validate saved curves, never fit/refit.
+-        # Only an inverted/zero envelope is row-local unavailability. All
+-        # identity, native-label, body-guide and array checks remain strict.
+-        n = r['x1'] - r['x0']
+-        curves = {k: np.asarray(r[k], dtype=float) for k in ownership.CURVES}
+-        if (not 0 <= r['x0'] < r['x1'] <= size[0] or
+-                any(v.shape != (n,) or not np.isfinite(v).all() for v in curves.values())):
+-            raise ValueError('invalid_detector_geometry')
+-        delta = curves['bottom'] - curves['top']
+-        if np.any(delta <= 0):
+-            if not structural.get('line_indices'):
+-                raise ValueError('missing_invalid_row_line_indices')
+-            invalid_rows.append(dict(r, status='invalid_geometry',
+-                reason='nonpositive_row_envelope', minimum_bottom_minus_top=float(delta.min()),
+-                unavailable_box=[min(r['x0'], r['owned_box'][0]),
+-                    min(r['owned_box'][1], *(float(v.min()) for v in curves.values())),
+-                    max(r['x1'], r['owned_box'][2]),
+-                    max(r['owned_box'][3], *(float(v.max()) for v in curves.values()))]))
+-            continue
+-        rows.append(ownership.prepare_row(r, ink, labels))
++        prepared,invalid=prepare_geometry_row(r,structural,ink,labels,ownership)
++        if invalid is not None:invalid_rows.append(invalid)
++        else:rows.append(prepared)
+     ink.flags.writeable = labels.flags.writeable = False
+     binding.update(source=str(source), source_sha256=expected_sha, frame=0,
+                    cache_directory=str(cache.resolve()),
+--- 413f8dc311e772e0/greekocr/harvest/line_pipeline_census.py
++++ capture/greekocr/harvest/line_pipeline_census.py
+@@ -320,11 +320,22 @@
+             if file_sha(actual)!=wanted:raise ValueError("tool source/release changed: "+relative)
+ 
+ 
+-def run(config, out, *, execute=False, allow_local=False, retry_errors=False, retry_holds=False, segmenter_factory=None):
++def run(config, out, *, execute=False, allow_local=False, retry_errors=False, retry_holds=False, segmenter_factory=None, validate_inputs_only=False):
+     if not execute:
+         return dict(status="preflight",parents=config["parents"],correction_artifacts=config.get("corrections",[]),processing_started=False)
+     if platform.system()=="Darwin" and not allow_local and segmenter_factory is None:
+         raise RuntimeError("MacBook is not a processing worker; use the prepared worker package")
++    if segmenter_factory is None and not config.get('runtime_manifest'):
++        raise ValueError('native census requires runtime_manifest')
++    runtime_sha=None
++    if config.get('runtime_manifest'):
++        from .line_pipeline_runtime import validate
++        if segmenter_factory is None:
++            import shutil
++            node=shutil.which('node')
++            if node is None:raise FileNotFoundError('Node runtime unavailable')
++            runtime_sha=validate(config['runtime_manifest'],dict(node=node,predictor=config['predictor']))
++        else:runtime_sha=validate(config['runtime_manifest'])
+     out=Path(out);out.mkdir(parents=True,exist_ok=True)
+     versions=json.loads(Path(config["versions"]).read_text())["tools"]
+     if segmenter_factory is None:verify_versions(versions,config.get("component_roots"))
+@@ -335,7 +346,7 @@
+         if parent["id"] in parent_hashes:raise ValueError("duplicate parent identity")
+         if file_sha(parent["path"])!=parent["sha256"]:raise ValueError("parent SHA mismatch")
+         parent_hashes[parent["id"]]=parent["sha256"]
+-    binding=dict(config=config,versions_sha256=file_sha(config["versions"]),metadata_sha256=file_sha(config["metadata"]),codec_sha256=codec["sha256"],code=code_binding(),predictor_sha256=file_sha(config["predictor"]) if config.get("predictor") else None)
++    binding=dict(config=config,versions_sha256=file_sha(config["versions"]),metadata_sha256=file_sha(config["metadata"]),codec_sha256=codec["sha256"],code=code_binding(),predictor_sha256=file_sha(config["predictor"]) if config.get("predictor") else None,runtime_sha256=runtime_sha)
+     ledger=Ledger(out/"ledger.sqlite",binding)
+     atomic_json(out/"progress.json",dict(ledger.summary(detailed=False),stage="inventory_registration"))
+     # Inventory EVERY row before any filter. This also powers immutable page counts.
+@@ -355,17 +366,32 @@
+     policy["heldout_editions"]=sorted(set(policy.get("heldout_editions",[]))|{r[0] for r in ledger.db.execute("SELECT DISTINCT edition FROM observations WHERE split!='train'")})
+     corrector=ArtifactCorrector(ledger,versions,parent_hashes)
+     for release in config.get("corrections",[]):corrector.load(release)
+-    factory=segmenter_factory or (lambda:NativeWorker(config["versions"],config["predictor"],config.get("row_timeout_seconds",120)))
+-    pool=NativePool(factory,config.get("native_workers",1))
++    if validate_inputs_only:
++        result=dict(status="PASS",preflight_complete=True,complete=False,processing_started=False,
++            scope="all-parent canonical registration and correction schema; no native filtering or training admission",
++            input_rows=ledger.total,run_binding_sha256=ledger.binding_sha256,parent_hashes=parent_hashes,
++            by_parent_split=[dict(parent=p,split=s,rows=n) for p,s,n in ledger.db.execute(
++                "SELECT parent,split,count(*) FROM observations GROUP BY parent,split ORDER BY parent,split")],
++            source_split_counts=[dict(parent=p,source_split=s,rows=n) for p,s,n in ledger.db.execute(
++                "SELECT parent,json_extract(payload,'$.source_split'),count(*) FROM observations GROUP BY parent,json_extract(payload,'$.source_split') ORDER BY parent")],
++            correction_rows=ledger.db.execute("SELECT count(*) FROM corrections").fetchone()[0],
++            correction_releases=ledger.db.execute("SELECT count(*) FROM releases").fetchone()[0],
++            decisions=ledger.db.execute("SELECT count(*) FROM decisions").fetchone()[0],runtime_sha256=runtime_sha)
++        atomic_json(out/"input-preflight.json",result)
++        atomic_json(out/"progress.json",dict(ledger.summary(detailed=False),stage="input_preflight_complete"))
++        ledger.db.close()
++        return result
++    factory=segmenter_factory or (lambda:NativeWorker(config["versions"],config["predictor"],config.get("row_timeout_seconds",120),config.get('runtime_manifest')))
++    pool=NativePool(factory,config.get("native_workers",1),config.get('native_prefetch_factor',2))
+     code_sha=digest(canonical(binding["code"]))
+     cache_keys={}
+-    runtime=dict(native_workers=pool.workers,native_attempts=0,cached_measurements=0,native_seconds_sum=0,unavailable=0,invalid_cache_entries=0)
++    runtime=dict(native_workers=pool.workers,native_prefetch_factor=pool.prefetch_factor,native_attempts=0,cached_measurements=0,native_seconds_sum=0,unavailable=0,invalid_cache_entries=0)
+     started=time.monotonic()
+     def prepare(row):
+         try:expectations(row,metadata)
+         except ValueError:return Observation()
+         if row.get("crop_identity_status","bound")!="bound":return Observation()
+-        key=digest(canonical(dict(binding=identity(row),raw=digest(row["raw_text"]),source=row.get("crop_source_sha256"),bbox=row.get("crop_bbox"),code=code_sha)))
++        key=digest(canonical(dict(binding=identity(row),raw=digest(row["raw_text"]),source=row.get("crop_source_sha256"),bbox=row.get("crop_bbox"),code=code_sha,runtime_sha256=runtime_sha)))
+         cache_keys[(row["parent_id"],row["id"])]=key
+         previous=ledger.db.execute("SELECT payload FROM measurements WHERE key=?",(key,)).fetchone()
+         if previous:
+--- 413f8dc311e772e0/greekocr/harvest/line_pipeline_native.py
++++ capture/greekocr/harvest/line_pipeline_native.py
+@@ -17,6 +17,7 @@
+ import sys
+ import unicodedata as ud
+ import warnings
++import shutil
+ 
+ from .line_pipeline import digest, identity
+ 
+@@ -30,6 +31,34 @@
+ 
+ def character_count(text):
+     return sum(not c.isspace() and ud.category(c)[0] not in {"M", "C"} for c in ud.normalize("NFC", text))
++
++
++def reconstructed_crop(page,box,mode="L"):
++    """Existing collect_v3.storage.ensure_crop byte contract, without writes."""
++    image=page.convert(mode).crop(box)
++    buffer=io.BytesIO();image.save(buffer,format="PNG",compress_level=3)
++    return image,buffer.getvalue()
++
++
++def source_crop_matches(page,image,box):
++    import numpy as np
++    return np.array_equal(np.asarray(page.crop(box).convert(image.mode).convert("RGB")),np.asarray(image.convert("RGB")))
++
++
++def empty_oblique_rule_fit(error):
++    """Recognize only the witnessed no-support refit in the frozen detector.
++
++    This is missing context evidence, not a fitted line or a repaired detector.
++    The message AND actual pinned function code frame must match; unrelated
++    TypeErrors and every other geometry/runtime contract error remain strict.
++    """
++    if type(error) is not TypeError or str(error)!='expected non-empty vector for x':return False
++    from greekocr.pages.pixels import _direct_rules
++    trace=error.__traceback__
++    while trace is not None:
++        if trace.tb_frame.f_code is _direct_rules.__code__:return True
++        trace=trace.tb_next
++    return False
+ 
+ 
+ class JsonService:
+@@ -100,9 +129,8 @@
+             with Image.open(source) as page:
+                 if not valid_box(box, page.size):
+                     raise ValueError("invalid frozen crop coordinates")
+-                image = page.crop(box)
+-                buffer = io.BytesIO(); image.save(buffer, format="PNG", compress_level=3)
+-                if digest_bytes(buffer.getvalue()) != row["crop_sha256"]:
++                image,encoded=reconstructed_crop(page,box,row.get("crop_color_mode","L"))
++                if digest_bytes(encoded) != row["crop_sha256"]:
+                     raise ValueError("reconstructed crop bytes differ from frozen crop hash")
+         else:
+             raise FileNotFoundError("crop and reconstructable source unavailable")
+@@ -117,26 +145,65 @@
+         yy, xx = np.nonzero(glyphs.ink)
+         ink_box = [int(xx.min()), int(yy.min()), int(xx.max())+1, int(yy.max())+1] if len(xx) else None
+         components = [dict(index=int(c.index), bbox=[int(c.x0),int(c.y0),int(c.x1),int(c.y1)], role=c.role, area=int(c.area), touches=list(c.touches)) for c in glyphs.components]
+-        features = self.crop_tools.features_from_observation(width=glyphs.width, height=glyphs.height, components=components,
+-            ink_box=ink_box, ink_pixels=int(glyphs.ink.sum()), xheight=float(glyphs.band.xh), xheight_source=glyphs.band.xh_source,
+-            support_count=glyphs.band.n_support, chars=chars)
++        main = next((l for l in lines if l.side == "main"), None)
++        angle_deg = 0.0
++        # A mathematically flat fitted curve can carry a few ULPs of solver
++        # roundoff. Keep that identity case off the floating rotation path.
++        if main is not None and len(main.base) > 1 and np.ptp(main.base) > 8*np.spacing(max(1., float(np.max(np.abs(main.base))))):
++            x = np.arange(len(main.base), dtype=float); x -= x.mean()
++            slope = float(np.dot(x, main.base-main.base.mean()) / np.dot(x, x))
++            angle_deg = float(np.degrees(np.arctan(slope)))  # clockwise in image coordinates
++        inventory, main_cut = self.crop_tools.line_inventory(glyphs, lines, components, angle_deg)
+         packed = []
+         for l in lines:
+             at = np.unique(np.r_[np.linspace(0,glyphs.width-1,min(128,glyphs.width),dtype=int), *[np.array([np.argmin(getattr(l,k)),np.argmax(getattr(l,k))]) for k in ('ascender','mean','base','descender')]])
+             packed.append(dict(side=l.side, votes=l.votes, visible=l.visible,
+                 curves={k:[[int(x),round(float(getattr(l,k)[x]),3)] for x in at] for k in ('ascender','mean','base','descender')}))
+-        b = features["candidate_text_box"]
+         evidence = dict(characters=chars, orientation_resolved=frame["orientation_resolved"],
+-            box_evidence=dict(available=False), detected_rows=packed,
+-            padding_evidence=dict(available=False), neighbour_evidence=None)
+-        if b:
+-            prediction = self.predictor.call(dict(long_side=max(b["width"],b["height"]), short_side=min(b["width"],b["height"]), script=row.get("script_class", "pooled")))
+-            evidence["box_evidence"] = dict(available=True, predictions=[None,None,prediction["expected"]], bbox=b["bbox"], prediction=prediction)
+-            h = features["segment"]["height"]
+-            evidence["padding_evidence"] = dict(available=True, total_padding_line_heights=(h-b["height"])/b["height"])
++            lines=inventory, gate=dict(main_cut=main_cut), detected_rows=packed,
++            box_evidence=dict(available=False, reason="skipped: gate did not pass"),
++            padding_evidence=dict(available=False, reason="skipped: gate did not pass"), neighbour_evidence=None)
++        gate = self.service.call(dict(operation="decide", policy_sha256=self.policy_sha,
++            evidence=dict(evidence, gate_only=True)))
++        evidence["gate"] = gate
++        if gate["verdict"] == "PASS":
++            features = self.crop_tools.features_from_observation(width=glyphs.width, height=glyphs.height, components=components,
++                ink_box=ink_box, ink_pixels=int(glyphs.ink.sum()), xheight=float(glyphs.band.xh), xheight_source=glyphs.band.xh_source,
++                support_count=glyphs.band.n_support, chars=chars, labels=glyphs.labels, angle_deg=angle_deg)
++            b = features["candidate_text_box"]
++            evidence["box_evidence"] = dict(available=False)
++            evidence["padding_evidence"] = dict(available=False)
++            if b:
++                rf = features["row_frame_text_box"]
++                prediction = self.predictor.call(dict(long_side=max(rf["length"],rf["height"]), short_side=min(rf["length"],rf["height"]), script=row.get("script_class", "pooled")))
++                evidence["box_evidence"] = dict(available=True, predictions=[None,None,prediction["expected"]], bbox=b["bbox"], prediction=prediction, row_frame=rf)
++                h = features["segment"]["height"]
++                evidence["padding_evidence"] = dict(available=True, total_padding_line_heights=(h-b["height"])/rf["height"],
++                    upright_box_height=b["height"], row_frame_height=rf["height"])
+         if any(l["side"] != "main" and l["votes"] > 0 for l in packed):
+-            context = self.context(row, image, frame, QuarterTurn)
++            try:
++                context = self.context(row, image, frame, QuarterTurn)
++            except (OSError, ValueError) as exc:
++                # Context is optional diagnostics; a verified crop's decision
++                # never depends on source-page availability or its binding.
++                context = dict(status="unavailable", reason="source context unusable",
++                    error=dict(type=type(exc).__name__, detail=str(exc)))
++            if context.get('error'):
++                evidence['context_unavailable']={k:context[k] for k in ('status','reason','error')}
++            if context.get('invalid_geometry_count'):
++                evidence['context_geometry']={k:context.get(k) for k in ('status','reason','invalid_geometry_count','invalid_row_ids','affected_invalid_row_ids')}
+             evidence["neighbour_evidence"] = self.service.call(dict(operation="reconcile", policy_sha256=self.policy_sha, context=context, crop=dict(lines=packed)))
++            reconciled = evidence["neighbour_evidence"]
++            bands = [l for l in inventory if l["votes"] > 0]
++            if "group_bindings" in reconciled:
++                for i, band in enumerate(bands):
++                    if band["side"] == "main":
++                        continue
++                    groups = [g for g in reconciled["group_bindings"] if g["band_index"] == i]
++                    band.update(context_whole_words=sum(g["positive"] for g in groups),
++                        context_cutoff_words=sum(not g["positive"] and not g["unresolved"] for g in groups),
++                        context_count_resolved=reconciled["whole_word_count_resolved"])
++
+         result = self.service.call(dict(operation="decide", policy_sha256=self.policy_sha, evidence=evidence))
+         return dict(result, tool_version=self.versions["segmentation"]["version"], binding=identity(row), raw_text_sha256=digest(row["raw_text"]),
+             policy_sha256=self.policy_sha, evidence=evidence, frame=frame, warnings=[str(w.message) for w in notices])
+@@ -145,7 +212,7 @@
+         import numpy as np
+         from PIL import Image
+         from greekocr.pages import process_page, PageOptions
+-        from .geometry_observations import vendor_ownership, vendor_magnitude
++        from .geometry_observations import vendor_ownership, vendor_magnitude, prepare_geometry_row
+         from .row_inclusion import supported_rows
+         source, box = row.get("crop_source_image"), row.get("crop_bbox")
+         if not source or not box:
+@@ -154,7 +221,7 @@
+             raise ValueError("context page hash mismatch")
+         with Image.open(source) as native:
+             native.load()
+-            if not valid_box(box, native.size) or not np.array_equal(np.asarray(native.crop(box).convert("RGB")), np.asarray(image.convert("RGB"))):
++            if not valid_box(box, native.size) or not source_crop_matches(native,image,box):
+                 raise ValueError("source/crop pixels differ")
+             turn = QuarterTurn(native.width,native.height,frame["normalization_cw"])
+             page = turn.image(native); corners = turn.rectangle(box,inverse=False)
+@@ -162,23 +229,31 @@
+             roi=[0,max(0,mapped[1]-3*h),page.width,min(page.height,mapped[3]+3*h)]
+             context=page.crop(roi); crop=[mapped[0],mapped[1]-roi[1],mapped[2],mapped[3]-roi[1]]
+         collector=ASSETS/"collector"
+-        ownership=vendor_ownership(collector=collector); result=process_page(context,options=PageOptions(join_lines=True,granularity="rows"))
+-        pixels=result.segmentation.pixels; metadata={r["id"]:r for r in result.rows}; rows=[]
++        ownership=vendor_ownership(collector=collector)
++        try:result=process_page(context,options=PageOptions(join_lines=True,granularity="rows"))
++        except TypeError as exc:
++            if not empty_oblique_rule_fit(exc):raise
++            return dict(status='unavailable',reason='empty_oblique_rule_refit',error=dict(type=type(exc).__name__,detail=str(exc)))
++        pixels=result.segmentation.pixels; metadata={r["id"]:r for r in result.rows}; rows=[];invalid_rows=[]
+         for delivered in result.delivery:
+             r={k:v for k,v in delivered.items() if k!="pieces"}
+             r["component_ids"]=sorted({int(c) for i in metadata[r["row_id"]]["line_indices"] for c in result.segmentation.lines[i].component_ids})
+             owned=pixels.components[np.isin(pixels.components[:,5],r["component_ids"])]
+             if not len(owned): continue
+             r["owned_box"]=[int(owned[:,0].min()),int(owned[:,1].min()),int(owned[:,2].max()),int(owned[:,3].max())]
+-            rows.append(ownership.prepare_row(r,pixels.ink,pixels.labels))
+-        observation=supported_rows(dict(rows=rows,invalid_rows=[],invalid_geometry_count=0,structure=metadata,ink=pixels.ink,labels=pixels.labels,ownership=ownership),crop,
++            prepared,invalid=prepare_geometry_row(r,metadata[r['row_id']],pixels.ink,pixels.labels,ownership)
++            if invalid is not None:invalid_rows.append(invalid)
++            else:rows.append(prepared)
++        observation=supported_rows(dict(rows=rows,invalid_rows=invalid_rows,invalid_geometry_count=len(invalid_rows),structure=metadata,ink=pixels.ink,labels=pixels.labels,ownership=ownership),crop,
+             magnitude_loader=lambda:vendor_magnitude(collector=collector))
+         if observation["status"]!="measured":
+-            return dict(status="unavailable", reason=observation.get("reason"))
++            return dict(status="unavailable", reason=observation.get("reason"),invalid_geometry_count=len(invalid_rows),
++                invalid_row_ids=[r['row_id'] for r in invalid_rows],affected_invalid_row_ids=observation.get('invalid_row_ids',[]))
+         hits=sorted([(int(ownership.box_hits(r,crop).sum()),r["row_id"]) for r in rows],reverse=True)
+         hits=[hit for hit in hits if hit[0]]
+         if not hits or len(hits)>1 and hits[0][0]==hits[1][0]:
+-            return dict(status="unavailable",reason="missing_or_ambiguous_target_row")
++            return dict(status="unavailable",reason="missing_or_ambiguous_target_row",invalid_geometry_count=len(invalid_rows),
++                invalid_row_ids=[r['row_id'] for r in invalid_rows])
+         target=hits[0][1]; byid={r["row_id"]:r for r in rows}; observed=[]
+         for rr in observation["rows"]:
+             if not rr["assigned_pixels"]:continue
+@@ -189,6 +264,7 @@
+             full=bool(inside and not edge and groups and all(g["positive"] for g in groups))
+             observed.append(dict(row_id=rr["row_id"],full_line=full,groups=[dict(bbox=[g["box"][0]-crop[0],g["box"][1]-crop[1],g["box"][2]-crop[0],g["box"][3]-crop[1]],positive=bool(g["positive"]),unresolved=bool(g["unresolved"])) for g in groups]))
+         return dict(id=row["id"],status="measured",target_row_id=target,rows=observed,
++            invalid_geometry_count=len(invalid_rows),invalid_row_ids=[r['row_id'] for r in invalid_rows],
+             qualification="Existing CP4 word-group geometric proxy; owner accepted current segmentation unchanged")
+ 
+ 
+@@ -202,8 +278,9 @@
+ 
+ class NativeWorker:
+     """One reusable native process; hard per-row timeout kills its whole group."""
+-    def __init__(self, versions_path, predictor, timeout=120):
++    def __init__(self, versions_path, predictor, timeout=120, runtime_manifest=None):
+         self.command=[sys.executable,"-m",__name__,"--worker",str(versions_path),str(predictor)]
++        if runtime_manifest:self.command.extend(['--runtime-manifest',str(runtime_manifest)])
+         self.timeout=timeout;self.process=None
+ 
+     def __call__(self,row):
+@@ -260,8 +337,16 @@
+     import argparse
+     import contextlib
+     p=argparse.ArgumentParser();p.add_argument("--worker",action="store_true");p.add_argument("versions");p.add_argument("predictor")
++    p.add_argument('--runtime-manifest')
+     args=p.parse_args()
+-    native=NativeSegmenter(json.loads(Path(args.versions).read_text())["tools"],args.predictor)
++    if not args.runtime_manifest:
++        raise ValueError('native worker requires a bound runtime manifest')
++    node=shutil.which('node')
++    if node is None:raise FileNotFoundError('Node runtime unavailable')
++    if args.runtime_manifest:
++        from .line_pipeline_runtime import validate
++        validate(args.runtime_manifest,dict(node=node,predictor=args.predictor))
++    native=NativeSegmenter(json.loads(Path(args.versions).read_text())["tools"],str(Path(args.predictor).resolve()),node=str(Path(node).resolve()))
+     try:
+         for line in sys.stdin:
+             try:
+--- 413f8dc311e772e0/greekocr/harvest/line_pipeline_parallel.py
++++ capture/greekocr/harvest/line_pipeline_parallel.py
+@@ -4,6 +4,8 @@
+ from dataclasses import dataclass
+ import threading
+ import time
++
++MAX_PENDING_OBSERVATIONS = 4096
+ 
+ 
+ @dataclass
+@@ -16,9 +18,14 @@
+ 
+ 
+ class NativePool:
+-    def __init__(self, factory, workers):
+-        if type(workers) is not int or not 1 <= workers <= 64:
+-            raise ValueError("native_workers must be an integer from 1 through 64")
++    def __init__(self, factory, workers, prefetch_factor=2):
++        if type(workers) is not int or not 1 <= workers <= 256:
++            raise ValueError("native_workers must be an integer from 1 through 256")
++        if type(prefetch_factor) is not int or not 1 <= prefetch_factor <= 64:
++            raise ValueError('native_prefetch_factor must be an integer from 1 through 64')
++        if workers * prefetch_factor > MAX_PENDING_OBSERVATIONS:
++            raise ValueError('native_workers times native_prefetch_factor must be at most 4096')
++        self.prefetch_factor=prefetch_factor
+         self.factory=factory;self.workers=workers
+         self.local=threading.local();self.instances=[];self.lock=threading.Lock()
+         self.executor=ThreadPoolExecutor(max_workers=workers,thread_name_prefix="native-filter")
+@@ -34,7 +41,7 @@
+             return Observation(error=exc,seconds=time.monotonic()-started,attempted=True)
+ 
+     def ordered(self, rows, prepare):
+-        """Prepare/cache lookup on caller thread, at most 2N rows in flight."""
++        """Coordinator-owned prepare/cache lookup with explicitly bounded lookahead."""
+         pending=deque()
+         for row in rows:
+             ready=prepare(row)
+@@ -42,7 +49,7 @@
+             else:
+                 future=Future();future.set_result(ready)
+             pending.append((row,future))
+-            if len(pending)>=2*self.workers:
++            if len(pending)>=self.prefetch_factor*self.workers:
+                 item,future=pending.popleft();yield item,future.result()
+         while pending:
+             item,future=pending.popleft();yield item,future.result()
+--- 413f8dc311e772e0/greekocr/harvest/line_pipeline_sources.py
++++ capture/greekocr/harvest/line_pipeline_sources.py
+@@ -25,7 +25,28 @@
+         book=record["doc"];page=record["id"].rsplit("-l",1)[0]
+     row["book_id"]=book;row["page_id"]=page
+     declared=metadata.get("books",{}).get(book,{})
+-    split=metadata.get("row_splits",{}).get(canonical([parent["id"],row["id"]]),declared.get("split",record.get("split","unassigned")))
++    split=metadata.get("row_splits",{}).get(canonical([parent["id"],row["id"]]),declared.get("split",record.get("split",parent.get('split','unassigned'))))
++    if parent["format"]=="collection-v2" and parent.get("split") in {"train","dev","test"}:
++        aliases={"val":"dev","reserved":"test"}
++        # A frozen parent defines its cohort. No raw/book/row override may
++        # silently move observations between training and evaluation.
++        values=[record.get("split"),declared.get("split"),
++                metadata.get("row_splits",{}).get(canonical([parent["id"],row["id"]]))]
++        if any(value is not None and aliases.get(value,value)!=parent["split"] for value in values):
++            raise ValueError("collection-v2 split conflicts with frozen parent")
++    # Frozen collection-v2 evaluation manifests use legacy cohort spellings.
++    # Require the explicit parent cohort and reject metadata that would move
++    # these observations into training; retain the literal source spelling.
++    if parent["format"]=="collection-v2" and split in {"val","reserved"}:
++        cohort={"val":"dev","reserved":"test"}[split]
++        if parent.get("split")!=cohort:
++            raise ValueError("collection-v2 legacy evaluation split conflicts with parent/metadata")
++        split=cohort
++    if parent["format"]=="collection-v2" and record.get("split") in {"val","reserved"}:
++        original=record["split"]
++        if parent.get("split")!={"val":"dev","reserved":"test"}[original]:
++            raise ValueError("collection-v2 legacy evaluation split conflicts with parent/metadata")
++        row["source_split"]=original
+     row["split"]=split
+     row["edition_id"]=declared.get("edition_id",record.get("edition_id","unresolved:"+book))
+     row["edition_identity_status"]="bound" if declared.get("edition_id") or record.get("edition_id") else "unresolved"
+@@ -36,7 +57,7 @@
+     crop=metadata.get("crops",{}).get(canonical([parent["id"],row["id"]]),{})
+     row["crop_sha256"]=record.get("crop_sha256") or crop.get("sha256") or "0"*64
+     row["crop_identity_status"]="bound" if record.get("crop_sha256") or crop.get("sha256") else "unavailable"
+-    row["crop_path"]=map_path(record.get("crop"),parent)
++    row["crop_path"]=map_path(crop.get("path",record.get("crop")),parent)
+     row["crop_source_image"]=map_path(record.get("crop_source_image",crop.get("source_image")),parent)
+     row["crop_source_sha256"]=record.get("crop_source_sha256",crop.get("source_sha256"))
+     row["crop_bbox"]=record.get("crop_bbox",crop.get("bbox"))

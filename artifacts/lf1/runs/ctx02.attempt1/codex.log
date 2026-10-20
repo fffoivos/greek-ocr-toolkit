@@ -1,0 +1,351 @@
+OpenAI Codex v0.159.2
+--------
+workdir: /private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/b1155dbd-56e0-4e2f-8bf5-349babd21b48/scratchpad/lf1_packs/dryrun/ctx02
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a155fd-994e-7362-ac24-1550690e58d7
+--------
+user
+You are running non-interactively as one blind reader in an OCR data-quality check. Nobody will answer questions during the run, so do not ask any: make the reasonable choice and finish the whole task in this turn.
+
+# Environment
+- Your working folder holds only items.jsonl and img/ before reading.
+- CARDS means ./items.jsonl, OUT means ./answers.jsonl, ZOOM means ./zoom/; cards.jsonl in the preserved protocol is an alias for items.jsonl, not another file to create.
+- See every crop with view_image. Use literal relative paths only in every view_image call; write each call explicitly, with no path loops or computed paths. Batch about 5 to 10 explicit calls per tool call.
+- ImageMagick (magick) is installed. Write every zoom once under a new name in zoom/; use only -filter point, -resize, montage/append. No -rotate, no font paths.
+- Create only answers.jsonl and zoom/**. Write answers with shell commands. No network or web search.
+- Input clarification: one stored label word has Hebrew letters; its word_scripts entry is Hebrew. The label is unchanged.
+
+# Protocol
+The following qualified protocol body is preserved verbatim. Resolve its CARDS/OUT/ZOOM and cards.jsonl aliases using Environment above.
+
+You are a blind label checker for an OCR training-data project. Each card is one printed text line, cropped from a scanned page (`crop`), plus a machine transcription of it (`google_text`). Your job is to decide, from the pixels, whether the transcription is a faithful literal reading of the printed line, and whether the crop is a usable single-line training image. You do not know which reader or source produced it; do not guess.
+
+## Input
+Cards: CARDS, a JSONL file. Each row has:
+- `card_id`;
+- `crop`: a path relative to the cards file's directory;
+- `google_text`;
+- `word_scripts`: a list of [word, script] pairs, where script is the Unicode script of that word's letters in google_text (Greek, Latin, Cyrillic, Mixed, or none).
+
+Open every crop with the view_image tool, which shows images. If a crop is small, make an enlarged copy with ImageMagick (`magick in.png -resize 300% out.png`) in your zoom folder. Do not use sips or Pillow.
+
+## What to check
+Compare the crop with google_text character by character. Check:
+- accents, breathings (ἀ vs ἁ), iota subscript (ᾳ), grave vs acute, circumflex, diaeresis;
+- final vs medial sigma;
+- punctuation, hyphens at line end, digits;
+- old Cyrillic letters (ѣ, і, ѳ, ѵ, ъ).
+
+**Scripts.** For every word, check that the printed word's script matches its `word_scripts` entry:
+- a printed Latin word labelled with Greek letters is an error (for example, printed "to" with label "το");
+- so is a Greek word labelled with Latin letters (for example, "o" for "ο", "x" for "χ");
+- so is a mixed-script word.
+
+## For each card, record
+- **letters:**
+  - "y" if every base letter, digit and word of the printed line is present, correct **and in the correct script** (diacritics ignored);
+  - "n" otherwise;
+  - "u" if the crop does not let you decide.
+- **marks:**
+  - "y" if all diacritics (accents, breathings, iota subscript, diaeresis) are also correct;
+  - "n" if any is wrong, missing or extra;
+  - "na" if the line has no diacritic-bearing script.
+
+  Judge marks even when letters is "n", whenever the line has diacritic-bearing script and the marks can be compared.
+- **crop_ok:**
+  - "y" if the crop shows exactly one printed text line, complete from its first to its last character, and any ink from other lines or columns is limited to thin ascender/descender slivers with no readable characters or whole letter bodies;
+  - "n" otherwise: readable characters or whole letter bodies from another line or column, or the line cut off at either end or through its letters.
+- **errors:** a list, empty if none, drawn from:
+  - "wrong_letter", "lookalike_script_letter", "missing_word_or_span", "extra_text";
+  - "wrong_mark", "missing_mark", "extra_mark";
+  - "punctuation", "hyphen", "digits";
+  - "merged_two_lines", "crop_clipped", "crop_overrun".
+- **detail:** the exact wrong parts as "printed → google" pairs, or "".
+
+## Output
+Write one JSON object per card, one per line, to OUT (with a shell command; overwrite). Rewrite OUT with all lines so far after every few cards:
+
+{"card_id":"c001","letters":"y","marks":"n","crop_ok":"y","errors":["missing_mark"],"detail":"ᾷ → ᾶ"}
+
+Every card must have exactly one line. Then reply with:
+- the number of cards;
+- letters y/n/u counts, marks y/n/na counts, crop_ok y/n counts;
+- the three most common error types;
+- one sentence on any systematic pattern.
+
+Open only cards.jsonl and the crop images. Never open key files or anything else.
+
+# LF1 owner questions (independent of the historical crop_ok)
+Keep all protocol answer fields, but ignore marks for LF1 decisions. Historical crop_ok is evidence only because it is stricter about neighbour ink than the owner standard.
+Answer every following question in owner_crop using yes, no, or uncertain. A yes records the named fault, not a replacement label.
+
+## one_central_line
+Owner wording: "there is exactly one central line of text".
+Question: Does the crop violate this requirement?
+
+## text_ne_visible_line
+Owner wording: "the label matches the visible line exactly, neither more nor less (text running past the crop, omitted visible spans, letters cut through, merged lines = fault)".
+Question: Does the crop violate this extent/segmentation requirement? Record character substitutions separately in letters/errors/where.
+
+## other_complete_line
+Owner wording: "no other line shows completely".
+Question: Does another line show completely?
+
+## gt2_whole_neighbour_words
+Owner wording: "other lines show at most 2 WHOLE words (100% visible); cut neighbour words and partial letter bodies are allowed".
+Question: Do other lines show more than 2 WHOLE words (100% visible)?
+
+## turned_or_clipped
+Owner wording: "Turned (rotated) or clipped crops fail."
+Question: Is this crop turned (rotated) or clipped?
+
+For a base-letter/digit/script/punctuation/hyphen text difference, add where as a list of {"label": "literal differing label substring", "printed": "what is printed"}. Use an empty string for an insertion/deletion side. Otherwise where is []. Do not use the marks field to decide a verdict.
+You may add reading as evidence only; it never replaces google_text and never decides the verdict by itself.
+Use segmentation_detail for crop evidence. Do not infer a crop fault solely from a character substitution.
+
+# Done when
+- answers.jsonl has exactly one valid JSON line per items.jsonl card, in the same order, with all preserved protocol fields and owner_crop/where.
+- You have checked count and order once with a command.
+- Reply with the protocol's short plain-text summary.
+
+deprecated: `[features].collab` is deprecated. Use `[features].multi_agent` instead.
+Enable it with `--enable multi_agent` or `[features].multi_agent` in config.toml. See https://developers.openai.com/codex/config-basic#feature-flags for details.
+codex
+I’ll inspect every crop, record the literal text differences and crop faults separately, and write and validate answers.jsonl.
+exec
+/bin/zsh -lc 'cat items.jsonl' in /private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/b1155dbd-56e0-4e2f-8bf5-349babd21b48/scratchpad/lf1_packs/dryrun/ctx02
+ succeeded in 0ms:
+{"card_id": "k7cff6042a0", "crop": "img/45d8053e7f72c371ac6f2f5e513673e3002654e67e2d8917c5b96d84ceefbe43.png", "google_text": "...»", "word_scripts": [["...»", "none"]]}
+{"card_id": "k013e125e2e", "crop": "img/b559edfd70458a582ce7a04650aebff345d24309dfd7ea2e2aa439b063f90bbb.png", "google_text": "СТЬ ТОГО БЕРЕГА", "word_scripts": [["СТЬ", "Cyrillic"], ["ТОГО", "Cyrillic"], ["БЕРЕГА", "Cyrillic"]]}
+{"card_id": "kf1de774c0d", "crop": "img/52f32afff5283392a4c4e654fa546db0c8ae3419aef29b6f7d7eebbe6f46bf08.png", "google_text": "Η του", "word_scripts": [["Η", "Greek"], ["του", "Greek"]]}
+{"card_id": "kba0e7c60b1", "crop": "img/966f5dc9a402879f14f2d8019435fb1aa5cab178f5f75b75708b18a0173d347e.png", "google_text": "P. Fourdrinier sculp.", "word_scripts": [["P.", "Latin"], ["Fourdrinier", "Latin"], ["sculp.", "Latin"]]}
+{"card_id": "kc0a9dc3ec9", "crop": "img/3026568dce82ac1e8cca8112c4cfa7bf1fa608ab84fe707c9d431ab6c78d3ae7.png", "google_text": "II. INDEX LOCORUM", "word_scripts": [["II.", "Latin"], ["INDEX", "Latin"], ["LOCORUM", "Latin"]]}
+{"card_id": "ka96693467a", "crop": "img/f82cd0d82ffba461223734fff2169822b9a3ae9e79aa715e7c1c3e1823bdbc7e.png", "google_text": "φέρ᾽, ἀντι.. κρατὶ περιβάλω σκότος.", "word_scripts": [["φέρ᾽,", "Greek"], ["ἀντι..", "Greek"], ["κρατὶ", "Greek"], ["περιβάλω", "Greek"], ["σκότος.", "Greek"]]}
+{"card_id": "k026589a2fe", "crop": "img/a9ce9aa8de44ada8429e632de8387c11cfb3d8aea826316a3d3c5475d8718ae5.png", "google_text": "CONTENTS.", "word_scripts": [["CONTENTS.", "Latin"]]}
+{"card_id": "ka62278ed83", "crop": "img/0f1df478562d820467a33c8b280d260a6fbd74fa26e9c6ffb372c4ec19b757a7.png", "google_text": "......................", "word_scripts": [["......................", "none"]]}
+{"card_id": "k29a7a20b77", "crop": "img/8f7b03c6d0058d87d1e2779ab3ca11284d042121a89ab09800441ad4068b21df.png", "google_text": "ייייייייייייייייייייייייייייייייייייין", "word_scripts": [["ייייייייייייייייייייייייייייייייייייין", "Hebrew"]]}
+{"card_id": "k4694c421b8", "crop": "img/44cdfc9da2bf5f9449a5a3361d7213624731a3b0f26c7a7540319c4e382bad6c.png", "google_text": "ΤΟΜΕΑΣ Β. πιιέπονται όλες οι χρήσεις των τομέων Α.Ε.Γ & Δ εκτός πρατηρίων βενζίνης, και στις πλευ εμπολικά καταστήματα και", "word_scripts": [["ΤΟΜΕΑΣ", "Greek"], ["Β.", "Greek"], ["πιιέπονται", "Greek"], ["όλες", "Greek"], ["οι", "Greek"], ["χρήσεις", "Greek"], ["των", "Greek"], ["τομέων", "Greek"], ["Α.Ε.Γ", "Greek"], ["&", "none"], ["Δ", "Greek"], ["εκτός", "Greek"], ["πρατηρίων", "Greek"], ["βενζίνης,", "Greek"], ["και", "Greek"], ["στις", "Greek"], ["πλευ", "Greek"], ["εμπολικά", "Greek"], ["καταστήματα", "Greek"], ["και", "Greek"]]}
+{"card_id": "k7634b1ee69", "crop": "img/20b4a9985fec45bb3b47088c025437d965aa46a5267c4182e5ff4b8e764bcd2b.png", "google_text": "254/6", "word_scripts": [["254/6", "none"]]}
+{"card_id": "kb9c1aba212", "crop": "img/c15c7c56b9bd9dea0e6a75444607cc333aa4f320d432567e4131b262eb12287e.png", "google_text": "της Ιεράς Μητροπόλεως Τρίκκης και Σταγών που περιλαμβά- νεται στο απόσπασμα της αρ. 11/16.12.86", "word_scripts": [["της", "Greek"], ["Ιεράς", "Greek"], ["Μητροπόλεως", "Greek"], ["Τρίκκης", "Greek"], ["και", "Greek"], ["Σταγών", "Greek"], ["που", "Greek"], ["περιλαμβά-", "Greek"], ["νεται", "Greek"], ["στο", "Greek"], ["απόσπασμα", "Greek"], ["της", "Greek"], ["αρ.", "Greek"], ["11/16.12.86", "none"]]}
+{"card_id": "k8b2f82d877", "crop": "img/8dc391b2e2596bd69575ea8d80081f47acc102fa1e58931d51e39dc26f856ba2.png", "google_text": "TRUBNER & Co. 60, PATERNOSTER ROW,", "word_scripts": [["TRUBNER", "Latin"], ["&", "none"], ["Co.", "Latin"], ["60,", "none"], ["PATERNOSTER", "Latin"], ["ROW,", "Latin"]]}
+{"card_id": "k44ac3d8fab", "crop": "img/8bf7526b6f086bd6d928ba8ea97806d39d2a01c246bb4aaccba54ff4c9312573.png", "google_text": "LIFE AND EPISTLES", "word_scripts": [["LIFE", "Latin"], ["AND", "Latin"], ["EPISTLES", "Latin"]]}
+{"card_id": "k36b9cb4874", "crop": "img/c042ad5d403b95f07691a258346b707b372d9e289ea9044b45ccf6c71b8f5dc3.png", "google_text": "φέρ᾽, ἀντι.. κρατὶ περιβάλω σκότος.", "word_scripts": [["φέρ᾽,", "Greek"], ["ἀντι..", "Greek"], ["κρατὶ", "Greek"], ["περιβάλω", "Greek"], ["σκότος.", "Greek"]]}
+{"card_id": "k0bc4daee6a", "crop": "img/80f2cc13b10737ed1f1b1e4eac1beeef566f7bbfd7dde9ae17aff8f628282ce3.png", "google_text": "φανεῖ καθηγητῇ, λέγω χάριτας τῆς παντοδαπῆς εὐνοίας καὶ ἀρωγῆς, ἧς παρ᾿ αὐτοῦ τοῖς", "word_scripts": [["φανεῖ", "Greek"], ["καθηγητῇ,", "Greek"], ["λέγω", "Greek"], ["χάριτας", "Greek"], ["τῆς", "Greek"], ["παντοδαπῆς", "Greek"], ["εὐνοίας", "Greek"], ["καὶ", "Greek"], ["ἀρωγῆς,", "Greek"], ["ἧς", "Greek"], ["παρ᾿", "Greek"], ["αὐτοῦ", "Greek"], ["τοῖς", "Greek"]]}
+{"card_id": "kdb2f5bf312", "crop": "img/946a46278f338e321ddd5e2b010e62f20fa66302be5b77ee7984648ac7f78052.png", "google_text": "Г. Ана: Гуліани рѣza y Mabmk: 1817,", "word_scripts": [["Г.", "Cyrillic"], ["Ана:", "Cyrillic"], ["Гуліани", "Cyrillic"], ["рѣza", "Mixed"], ["y", "Latin"], ["Mabmk:", "Latin"], ["1817,", "none"]]}
+{"card_id": "k6dbd9dac56", "crop": "img/9fb5317e6e30940b51fe4501ae943c28634008b5449101474666aa5705e3fd39.png", "google_text": "САВЕ ДЕЧАНЦА", "word_scripts": [["САВЕ", "Cyrillic"], ["ДЕЧАНЦА", "Cyrillic"]]}
+{"card_id": "k8c940ca662", "crop": "img/09d9c46ec25db037f9adf8af6a5f1ed2cda98a9136e62a066104bfb6d5b21de7.png", "google_text": "ΚΑΙΕΔΡΙ 1000000000000000", "word_scripts": [["ΚΑΙΕΔΡΙ", "Greek"], ["1000000000000000", "none"]]}
+{"card_id": "k420a975dd5", "crop": "img/901f66c4e90c0945fa03ad72114314aa84b41f2bcfce6f026d86cfa89019a5cf.png", "google_text": "deles", "word_scripts": [["deles", "Latin"]]}
+{"card_id": "k2ff2181f54", "crop": "img/0c9299b271d20effe58efedcf0e1ebd033ba5026c2623c35999ef3ae2eab3a18.png", "google_text": "φέρ᾽, ἀντι.. κρατὶ περιβάλω", "word_scripts": [["φέρ᾽,", "Greek"], ["ἀντι..", "Greek"], ["κρατὶ", "Greek"], ["περιβάλω", "Greek"]]}
+{"card_id": "k1beae0eab6", "crop": "img/eea9b440f4b9fecf44499b79545897f54393a18a29f1d2f9048e510d15a1bd11.png", "google_text": "MELA OF 10", "word_scripts": [["MELA", "Latin"], ["OF", "Latin"], ["10", "none"]]}
+{"card_id": "k508f83b54e", "crop": "img/0c9299b271d20effe58efedcf0e1ebd033ba5026c2623c35999ef3ae2eab3a18.png", "google_text": "φέρ᾽, ἀντι.. κρατὶ περιβάλω σκότος.", "word_scripts": [["φέρ᾽,", "Greek"], ["ἀντι..", "Greek"], ["κρατὶ", "Greek"], ["περιβάλω", "Greek"], ["σκότος.", "Greek"]]}
+{"card_id": "k8230dfd2b0", "crop": "img/813f5376de13add82629643a77e84b3eae127d9041fada175a6cdbe3d1f7a3c5.png", "google_text": "BULLETIN MENSUEL DE STATISTIQUE", "word_scripts": [["BULLETIN", "Latin"], ["MENSUEL", "Latin"], ["DE", "Latin"], ["STATISTIQUE", "Latin"]]}
+{"card_id": "kd22feee17f", "crop": "img/37566ae856a97eae7db6e1351e459997e81e97ad5add9a1c8629cef32e63e5d8.png", "google_text": "P1379", "word_scripts": [["P1379", "Latin"]]}
+{"card_id": "k9a17d7111f", "crop": "img/70e893981a4e8da114890f3c3760c78cd7f2502f84de7865a3b6c5a61032a211.png", "google_text": "* 10 de it so so so so so so so so so so so so so so so so so so so so so so so so so so so", "word_scripts": [["*", "none"], ["10", "none"], ["de", "Latin"], ["it", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"], ["so", "Latin"]]}
+{"card_id": "k4703d127f6", "crop": "img/7cd753d687e68a94286d8dca9e75b156bec2b3e8c457f8be3f5c0d60ea1aa709.png", "google_text": "παστάσεις. Προσάρτημα περιλαμβάνει τις πληροφορίες που προβλεπονται από την παραγρ. του", "word_scripts": [["παστάσεις.", "Greek"], ["Προσάρτημα", "Greek"], ["περιλαμβάνει", "Greek"], ["τις", "Greek"], ["πληροφορίες", "Greek"], ["που", "Greek"], ["προβλεπονται", "Greek"], ["από", "Greek"], ["την", "Greek"], ["παραγρ.", "Greek"], ["του", "Greek"]]}
+{"card_id": "k22dc5d314b", "crop": "img/15c2b4a3285362a3b8cb5e4295739e0638e60d7225f2d3a7c9d2758121cc1c82.png", "google_text": "Kede", "word_scripts": [["Kede", "Latin"]]}
+{"card_id": "kb77b15f07b", "crop": "img/abb0ba0995d99e8dfc6bbc09ff6430ba2b2335aac1060f19adf6b29a83fd39ca.png", "google_text": "------------", "word_scripts": [["------------", "none"]]}
+{"card_id": "kc73f668206", "crop": "img/af17791bdad45108c981cf99540676b2d618a4d7440b945162081002a13f804e.png", "google_text": "” καὶ", "word_scripts": [["”", "none"], ["καὶ", "Greek"]]}
+{"card_id": "k22916f15d6", "crop": "img/cdda677c55f3020d1d105869bdfebdc5299c1b89c9924a700e4a196850393a21.png", "google_text": "κόστους", "word_scripts": [["κόστους", "Greek"]]}
+{"card_id": "k1fd0235223", "crop": "img/57f581b8ad9278b80a93c2073a0dd3f301ded478090f9f365c4b21dd4bb78708.png", "google_text": "βιβλία", "word_scripts": [["βιβλία", "Greek"]]}
+{"card_id": "k194d022762", "crop": "img/891b5b9735939cda5201ee0450d0be3100b156bd23a81fca7b5062b146704c25.png", "google_text": "σας μία", "word_scripts": [["σας", "Greek"], ["μία", "Greek"]]}
+{"card_id": "kb329fa5203", "crop": "img/0233ba7982b3ea07d61a3cc1e4cec9a54902378dc87f1e7624385ae69cfeb844.png", "google_text": "τί ἄλλο", "word_scripts": [["τί", "Greek"], ["ἄλλο", "Greek"]]}
+{"card_id": "kb07cc79211", "crop": "img/97f3c4b62d3b410c657ca230ca87cfb2145d5a76b4579e722112627d05665bae.png", "google_text": "1936........", "word_scripts": [["1936........", "none"]]}
+{"card_id": "k15f7c69e77", "crop": "img/2a5398eeceac39fe23e152fe013fcbff009890abdcf58931ecc7f29de41dad76.png", "google_text": "λιππός", "word_scripts": [["λιππός", "Greek"]]}
+{"card_id": "k96c5154bd1", "crop": "img/bc646043f21e2393b58a765c2e39227f4bc4c6fbfbbfbba99e70b70604447fc3.png", "google_text": "του αρθ. 42ε παράγρ. 14 του Ν.2190/1920, δεν σχημάτισε πρόβλεψη για την πιθανή υποχρέωσή της για αποζημίωση του συνόλου του προσωπικού της λόγω εξόδου του από την υπηρεσία για συνταξιοδότηση, η οποία κατά την 31.12.1997 12.199", "word_scripts": [["του", "Greek"], ["αρθ.", "Greek"], ["42ε", "Greek"], ["παράγρ.", "Greek"], ["14", "none"], ["του", "Greek"], ["Ν.2190/1920,", "Greek"], ["δεν", "Greek"], ["σχημάτισε", "Greek"], ["πρόβλεψη", "Greek"], ["για", "Greek"], ["την", "Greek"], ["πιθανή", "Greek"], ["υποχρέωσή", "Greek"], ["της", "Greek"], ["για", "Greek"], ["αποζημίωση", "Greek"], ["του", "Greek"], ["συνόλου", "Greek"], ["του", "Greek"], ["προσωπικού", "Greek"], ["της", "Greek"], ["λόγω", "Greek"], ["εξόδου", "Greek"], ["του", "Greek"], ["από", "Greek"], ["την", "Greek"], ["υπηρεσία", "Greek"], ["για", "Greek"], ["συνταξιοδότηση,", "Greek"], ["η", "Greek"], ["οποία", "Greek"], ["κατά", "Greek"], ["την", "Greek"], ["31.12.1997", "none"], ["12.199", "none"]]}
+{"card_id": "ke69ed7d9b9", "crop": "img/e0247b1169a1e00dbc95cac845635ff111889ab39e3e197038de773a4c53b7d7.png", "google_text": "θε όσουε τη συμφωνία του περιεχομένου της Εκθέσεως διαχειρίσεως του Διοικητικού Συμβουλίου προς την τακτική Γενική Συνέλευση των μετόχων, με τις σχετικές Οικονομικές Καταστάσεις. Το Προσάρτημα περιλαμβάνει", "word_scripts": [["θε", "Greek"], ["όσουε", "Greek"], ["τη", "Greek"], ["συμφωνία", "Greek"], ["του", "Greek"], ["περιεχομένου", "Greek"], ["της", "Greek"], ["Εκθέσεως", "Greek"], ["διαχειρίσεως", "Greek"], ["του", "Greek"], ["Διοικητικού", "Greek"], ["Συμβουλίου", "Greek"], ["προς", "Greek"], ["την", "Greek"], ["τακτική", "Greek"], ["Γενική", "Greek"], ["Συνέλευση", "Greek"], ["των", "Greek"], ["μετόχων,", "Greek"], ["με", "Greek"], ["τις", "Greek"], ["σχετικές", "Greek"], ["Οικονομικές", "Greek"], ["Καταστάσεις.", "Greek"], ["Το", "Greek"], ["Προσάρτημα", "Greek"], ["περιλαμβάνει", "Greek"]]}
+{"card_id": "kadc32f6591", "crop": "img/e19fd0b7b44d6eed942eb8bfea971e4e88afe4a9d6c030ab9cd9b5a0b5bc145a.png", "google_text": "ὁ Cf. 1 Cor. (var. lect.).", "word_scripts": [["ὁ", "Greek"], ["Cf.", "Latin"], ["1", "none"], ["Cor.", "Latin"], ["(var.", "Latin"], ["lect.).", "Latin"]]}
+{"card_id": "k79f1171328", "crop": "img/0c2188ef91bb553d69aa1f936848feff6bd51c90492dfe50f57e804e895a7f59.png", "google_text": "edidit", "word_scripts": [["edidit", "Latin"]]}
+{"card_id": "kdf41709c8f", "crop": "img/a3aa171273878c42919eda87b9f9b1dc0f7dee46af810c4b17da6adc3a490ebe.png", "google_text": "πᾶνε", "word_scripts": [["πᾶνε", "Greek"]]}
+{"card_id": "k353f535290", "crop": "img/0c9299b271d20effe58efedcf0e1ebd033ba5026c2623c35999ef3ae2eab3a18.png", "google_text": "Xέρ᾽, ἀντι.. κρατὶ περιβάλω σκότος.", "word_scripts": [["Xέρ᾽,", "Mixed"], ["ἀντι..", "Greek"], ["κρατὶ", "Greek"], ["περιβάλω", "Greek"], ["σκότος.", "Greek"]]}
+{"card_id": "k19a68d7184", "crop": "img/b5b80b69d5f5a9f546e4035a5f362d5e5dd945139d62428e3fc78f44d553d75a.png", "google_text": "2. Γιὰ τὸν ὑπολογισμό (κατάρτιση) τοῦ δείκτη ἀξίας λιανικών πωλήσεων,", "word_scripts": [["2.", "none"], ["Γιὰ", "Greek"], ["τὸν", "Greek"], ["ὑπολογισμό", "Greek"], ["(κατάρτιση)", "Greek"], ["τοῦ", "Greek"], ["δείκτη", "Greek"], ["ἀξίας", "Greek"], ["λιανικών", "Greek"], ["πωλήσεων,", "Greek"]]}
+{"card_id": "k509f4cd323", "crop": "img/12760ddb20cf4dbcf2f50b9f2c32fb6220d672e4b62ffa20d249502d36cf4f3e.png", "google_text": "Κάτω ΒΟΛΟΥ", "word_scripts": [["Κάτω", "Greek"], ["ΒΟΛΟΥ", "Greek"]]}
+{"card_id": "k912239dbee", "crop": "img/6f284e76c44f9d86bcbbf1b8fe92404352ebc90a434b7873b02f2f8e2026256e.png", "google_text": "ПОСЛАНИЦА", "word_scripts": [["ПОСЛАНИЦА", "Cyrillic"]]}
+{"card_id": "k42bddc5372", "crop": "img/4a597520033293acefa69a75a756abf0e72b30b90436dd2cdccf74d31ae328be.png", "google_text": "Ευφροσύνης Μόσχου, ου, 5ua η καθορι καθορισμός ειδικών ορών ξωπεριορισμών δόμολα", "word_scripts": [["Ευφροσύνης", "Greek"], ["Μόσχου,", "Greek"], ["ου,", "Greek"], ["5ua", "Latin"], ["η", "Greek"], ["καθορι", "Greek"], ["καθορισμός", "Greek"], ["ειδικών", "Greek"], ["ορών", "Greek"], ["ξωπεριορισμών", "Greek"], ["δόμολα", "Greek"]]}
+{"card_id": "kf18a2de6b5", "crop": "img/cef4e25da7427544eda3dfb3ccb8b8a35d857dde0e3aaba361602e68b8eba463.png", "google_text": "εκείνου που την 31/12/1989 είχε συμπληρώσει τις προυποθέσεις συνταξιοδοτήσεως του. Περισσότερες πληροφορίες αναφέρονται", "word_scripts": [["εκείνου", "Greek"], ["που", "Greek"], ["την", "Greek"], ["31/12/1989", "none"], ["είχε", "Greek"], ["συμπληρώσει", "Greek"], ["τις", "Greek"], ["προυποθέσεις", "Greek"], ["συνταξιοδοτήσεως", "Greek"], ["του.", "Greek"], ["Περισσότερες", "Greek"], ["πληροφορίες", "Greek"], ["αναφέρονται", "Greek"]]}
+{"card_id": "ke7ba760c79", "crop": "img/540f41d4623d773f7e10355cbd6fed71f7ecc2bfc12f81669cff01fa12b63914.png", "google_text": "φέρ᾽, ἀντι.. κρατὶ περιβάλω σκότος.", "word_scripts": [["φέρ᾽,", "Greek"], ["ἀντι..", "Greek"], ["κρατὶ", "Greek"], ["περιβάλω", "Greek"], ["σκότος.", "Greek"]]}
+{"card_id": "k4c699bb899", "crop": "img/7c0bd46ced44e079e1797775e13c72c4a8749bc52eba15790a58c31ee0da3e15.png", "google_text": "πιθανη", "word_scripts": [["πιθανη", "Greek"]]}
+{"card_id": "k448cdc070d", "crop": "img/bd0c34af9a34b04454eee1fd60a9fb938b08348a649d18f53c740116843f6961.png", "google_text": "1) Ετήσιες οικονομικές καταστάσεις ισολογισμός, έκθεση διαχείρησις Διοικητικού Συμβουλίου και έκθεση ελεγκτών για την", "word_scripts": [["1)", "none"], ["Ετήσιες", "Greek"], ["οικονομικές", "Greek"], ["καταστάσεις", "Greek"], ["ισολογισμός,", "Greek"], ["έκθεση", "Greek"], ["διαχείρησις", "Greek"], ["Διοικητικού", "Greek"], ["Συμβουλίου", "Greek"], ["και", "Greek"], ["έκθεση", "Greek"], ["ελεγκτών", "Greek"], ["για", "Greek"], ["την", "Greek"]]}
+{"card_id": "k6d60f77f2c", "crop": "img/3f71ce13a2de600bb86596485aebceb4477afa928a3fa06b9829fba35705fcf0.png", "google_text": ", ποῦ", "word_scripts": [[",", "none"], ["ποῦ", "Greek"]]}
+{"card_id": "ka67fdb3b2f", "crop": "img/33bd79514428425056547f4069416f12a8312f31485d19814945fc714dc194b6.png", "google_text": ".....", "word_scripts": [[".....", "none"]]}
+{"card_id": "ke53184e2ca", "crop": "img/255239a8fb0bbae631d1b933f7bdac2f15afb6315fc9320b6fbdceeaf6894125.png", "google_text": "ΧΡΟΝΙΑ Α' - ΜΑΡΤΙΟΣ 1927 ΤΕΥΧΟΣ 40", "word_scripts": [["ΧΡΟΝΙΑ", "Greek"], ["Α'", "Greek"], ["-", "none"], ["ΜΑΡΤΙΟΣ", "Greek"], ["1927", "none"], ["ΤΕΥΧΟΣ", "Greek"], ["40", "none"]]}
+{"card_id": "k74721f1731", "crop": "img/866e0413ef534553ac2adbf85b4c9088e731ed6b65772143b11fca830692a879.png", "google_text": "12. και απολείς - Ολίδι και χρεώστες", "word_scripts": [["12.", "none"], ["και", "Greek"], ["απολείς", "Greek"], ["-", "none"], ["Ολίδι", "Greek"], ["και", "Greek"], ["χρεώστες", "Greek"]]}
+{"card_id": "k4a078a6a47", "crop": "img/542eaa99e919fd86b81ce0a5b82017b55b66cdd6a42ece17c7fcaa636484198b.png", "google_text": ".........................", "word_scripts": [[".........................", "none"]]}
+{"card_id": "k8d92813d7f", "crop": "img/e3cc6d88ccbf633772a422fe432d7236450c4db82d650076df573a71c46903a1.png", "google_text": "Η ἐριστική φιλολογία εἶναι ἕνα εἶδος ποὺ ἀκμάζει σὲ ὅλες τὶς ἐποχὲς καὶ σὲ ὅλες τὶς χῶρες. Στὴν Ἑλλάδα", "word_scripts": [["Η", "Greek"], ["ἐριστική", "Greek"], ["φιλολογία", "Greek"], ["εἶναι", "Greek"], ["ἕνα", "Greek"], ["εἶδος", "Greek"], ["ποὺ", "Greek"], ["ἀκμάζει", "Greek"], ["σὲ", "Greek"], ["ὅλες", "Greek"], ["τὶς", "Greek"], ["ἐποχὲς", "Greek"], ["καὶ", "Greek"], ["σὲ", "Greek"], ["ὅλες", "Greek"], ["τὶς", "Greek"], ["χῶρες.", "Greek"], ["Στὴν", "Greek"], ["Ἑλλάδα", "Greek"]]}
+
+exec
+/bin/zsh -lc 'mkdir -p zoom
+magick img/966f5dc9a402879f14f2d8019435fb1aa5cab178f5f75b75708b18a0173d347e.png -filter point -resize 500% zoom/04.png
+magick img/8dc391b2e2596bd69575ea8d80081f47acc102fa1e58931d51e39dc26f856ba2.png -filter point -resize 300% zoom/13.png
+magick img/b559edfd70458a582ce7a04650aebff345d24309dfd7ea2e2aa439b063f90bbb.png -filter point -resize 200% zoom/02.png' in /private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/b1155dbd-56e0-4e2f-8bf5-349babd21b48/scratchpad/lf1_packs/dryrun/ctx02
+ succeeded in 230ms:
+codex
+Several crops contain rotated text, multiple lines, or non-text graphics. I’m recording those separately from transcription errors and applying the owner’s more permissive rule for partial neighbour ink.
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json,subprocess
+c=[json.loads(s) for s in open('items.jsonl')]
+for i in [3,10,17,27,30,31,32,33,34,35,36,37,38,39,40,41,43,44,45,46,47,49,50,51,52,53,54,55,56]:
+ subprocess.run(['magick',c[i-1]['crop'],'-filter','point','-resize','300%',f'zoom/{i:02d}.png'],check=True)
+PY" in /private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/b1155dbd-56e0-4e2f-8bf5-349babd21b48/scratchpad/lf1_packs/dryrun/ctx02
+ succeeded in 1382ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+c=[json.loads(s) for s in open('items.jsonl')]
+# Each owner flag answers whether the named fault is present.
+spec=[
+('n','n','n',['missing_word_or_span','extra_text','merged_two_lines','crop_clipped'], 'φέρνουν στὸ νοῦ τοὺς θαυμαστούς στίχους τοῦ Σατωβρι- → ...»', [('...»','φέρνουν στὸ νοῦ τοὺς θαυμαστούς στίχους τοῦ Σατωβρι-')], 'yes yes no yes yes','Several readable rows, with top and bottom rows cut through.'),
+('y','na','y',[], '', [], 'no no no no no','Single complete title fragment; left margin contains the complete initial С.'),
+('n','n','n',['missing_word_or_span','merged_two_lines','crop_clipped'], 'ΚΡΑΤΙΚΗ ΕΥΘΥΝΗ.— Ὁ / οία τῶν πλημμυρῶν → του', [('του','ΚΡΑΤΙΚΗ ΕΥΘΥΝΗ.— Ὁ / οία τῶν πλημμυρῶν τοῦ')], 'yes yes no yes yes','Large initial Η spans two rows; text exits right and lower edges.'),
+('y','na','y',[], '', [], 'no no no no no','Single signature line with thin rules above and below.'),
+('y','na','y',[], '', [], 'no no no no no','Complete single heading.'),
+('n','y','n',['missing_word_or_span','merged_two_lines'], 'φέρ᾽, ἀντι.. κρατὶ περιβάλω σκότος. (second copy) → ∅', [('', 'φέρ᾽, ἀντι.. κρατὶ περιβάλω σκότος.')], 'yes yes yes yes no','Two full copies of the same line are visible.'),
+('y','na','y',[], '', [], 'no no no no no','Complete single heading.'),
+('y','na','y',[], '', [], 'no no no no no','Single row of printed dots.')]
+with open('answers.jsonl','w') as f:
+ for a,s in zip(c,spec):
+  l,m,k,e,d,w,o,seg=s
+  flags=dict(zip(['one_central_line','text_ne_visible_line','other_complete_line','gt2_whole_neighbour_words','turned_or_clipped'],o.split()))
+  json.dump(dict(card_id=a['card_id'],letters=l,marks=m,crop_ok=k,errors=e,detail=d,owner_crop=flags,where=[dict(label=x,printed=y) for x,y in w],segmentation_detail=seg),f,ensure_ascii=False);f.write('\\n')
+PY" in /private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/b1155dbd-56e0-4e2f-8bf5-349babd21b48/scratchpad/lf1_packs/dryrun/ctx02
+ succeeded in 0ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+c=[json.loads(s) for s in open('items.jsonl')]; rows=[json.loads(s) for s in open('answers.jsonl')]
+def add(i,l,m,k,e,d,w,o,seg):
+ rows.append(dict(card_id=c[i-1]['card_id'],letters=l,marks=m,crop_ok=k,errors=e.split() if e else [],detail=d,owner_crop=dict(zip(['one_central_line','text_ne_visible_line','other_complete_line','gt2_whole_neighbour_words','turned_or_clipped'],o.split())),where=[dict(label=x,printed=y) for x,y in w],segmentation_detail=seg))
+add(9,'n','na','n','extra_text lookalike_script_letter crop_overrun','map symbols → Hebrew label',[(c[8]['google_text'],'')],'yes yes no no yes','Map fragment with symbols, curves and cut markings; no central printed text line.')
+add(10,'n','y','n','wrong_letter missing_word_or_span merged_two_lines crop_clipped','Ἐπιτρέπονται → πιιέπονται; Α,Β,Γ → Α.Ε.Γ; πλευρές → πλευ',[('πιιέπονται','Ἐπιτρέπονται'),('Α.Ε.Γ','Α,Β,Γ'),('πλευ','πλευρές')],'yes yes no yes yes','Quarter-turned crop with two text rows; both extend beyond crop boundaries.')
+add(11,'n','na','n','wrong_letter digits crop_clipped','handwritten fragment → 254/6',[('254/6','')],'yes yes no no yes','Clipped handwriting and underline, with characters cut at left and top.')
+add(12,'n','y','n','missing_word_or_span merged_two_lines crop_clipped','πράξεώς του. → ∅',[('','πράξεώς του.')],'yes yes no yes yes','Two central rows plus a readable clipped row above; right text runs past crop.')
+add(13,'y','n','y','missing_mark','TRÜBNER → TRUBNER',[],'no no no no no','Single complete imprint line.')
+add(14,'y','na','y','','',[],'no no no no no','Single complete heading.')
+add(15,'y','y','n','crop_clipped','','','no yes no no yes','Line is rotated a quarter turn and clipped through the initial φ and final punctuation.')
+add(16,'y','y','y','','',[],'no no no no no','One complete Greek line.')
+add(17,'n','y','y','wrong_letter lookalike_script_letter punctuation','Λука → Ана; Зуліани → Гуліани; рѣза → рѣza; у → y; Млѣтѣ → Mabmk; 1817. → 1817,',[('Ана','Лука'),('Гуліани','Зуліани'),('рѣza','рѣза'),('y','у'),('Mabmk','Млѣтѣ'),('1817,','1817.')],'no no no no no','Single italic Cyrillic imprint below a thin border.')
+add(18,'y','na','y','','',[],'no no no no no','Single Cyrillic heading.')
+add(19,'n','na','n','wrong_letter digits extra_text crop_clipped','ΚΛΕΑΡΧΑ → ΚΑΙΕΔΡΙ; ornament → 1000000000000000',[('ΚΑΙΕΔΡΙ','ΚΛΕΑΡΧΑ'),('1000000000000000','')],'yes yes no no yes','Curving lettering in a clipped circular graphic, with decorative dots.')
+add(20,'n','n','n','missing_word_or_span merged_two_lines crop_clipped','deles, virtutis studentes, sapientiae vacantes et spiritales; rudimentarii, proficientes, perfecti, servi, merce- / narii filii. → deles',[('deles','deles, virtutis studentes, sapientiae vacantes et spiritales; rudimentarii, proficientes, perfecti, servi, merce- / narii filii.')],'yes yes no yes yes','Two Latin rows and clipped Greek row above; line starts and ends cut.')
+add(21,'n','y','y','missing_word_or_span','σκότος. → ∅',[('','σκότος.')],'no yes no no no','Complete single line; label omits its final word.')
+add(22,'n','na','n','wrong_letter digits crop_clipped','reversed curved seal lettering → MELA OF 10',[(c[21]['google_text'],'')],'yes yes no no yes','Faint reversed circular seal, cut through at left and bottom.')
+add(23,'y','y','y','','',[],'no no no no no','Single Greek line; only thin neighbour slivers.')
+add(24,'y','na','y','','',[],'no no no no no','Single complete French heading.')
+add(25,'y','na','y','','',[],'no no no no no','One handwritten identifier, fully visible.')
+with open('answers.jsonl','w') as f:
+ for r in rows: f.write(json.dumps(r,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/b1155dbd-56e0-4e2f-8bf5-349babd21b48/scratchpad/lf1_packs/dryrun/ctx02
+ succeeded in 0ms:
+codex
+I’ve viewed all distinct crops and am checking the smaller text at enlarged scale. The recurring issue is labels that cover only a small fragment of a crop containing several readable lines.
+exec
+/bin/zsh -lc 'magick img/542eaa99e919fd86b81ce0a5b82017b55b66cdd6a42ece17c7fcaa636484198b.png -filter point -resize 200% zoom/55count.png
+magick img/540f41d4623d773f7e10355cbd6fed71f7ecc2bfc12f81669cff01fa12b63914.png -filter point -resize 200% zoom/48.png
+magick img/09d9c46ec25db037f9adf8af6a5f1ed2cda98a9136e62a066104bfb6d5b21de7.png -filter point -resize 300% zoom/19.png
+magick img/e19fd0b7b44d6eed942eb8bfea971e4e88afe4a9d6c030ab9cd9b5a0b5bc145a.png -filter point -resize 300% zoom/39b.png' in /private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/b1155dbd-56e0-4e2f-8bf5-349babd21b48/scratchpad/lf1_packs/dryrun/ctx02
+ succeeded in 26ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+c=[json.loads(s) for s in open('items.jsonl')]; rows=[json.loads(s) for s in open('answers.jsonl')]
+def add(i,l,m,k,e,d,w,o,seg):
+ rows.append(dict(card_id=c[i-1]['card_id'],letters=l,marks=m,crop_ok=k,errors=e.split() if e else [],detail=d,owner_crop=dict(zip(['one_central_line','text_ne_visible_line','other_complete_line','gt2_whole_neighbour_words','turned_or_clipped'],o.split())),where=[dict(label=x,printed=y) for x,y in w],segmentation_detail=seg))
+add(26,'n','na','n','extra_text','ornamental border → entire label',[(c[25]['google_text'],'')],'yes yes no no no','A row of decorative curls, not a text line.')
+add(27,'n','n','n','missing_word_or_span merged_two_lines crop_clipped','Ο έλεγχός μας ... / Ορκωτών Λογιστών ... → ∅; καταστάσεις → παστάσεις',[('παστάσεις','καταστάσεις'),('','Ο έλεγχός μας έγινε σύμφωνα με τις διατάξεις του άρθρου 37'),('προβλεπονται','προβλέπονται')],'yes yes no yes yes','Multiple rows; label comes from a severely cut bottom row.')
+add(28,'n','na','y','wrong_letter','Rede → Kede',[('Kede','Rede')],'no no no no no','Single complete blackletter word.')
+add(29,'n','na','n','extra_text hyphen','continuous rule → ------------',[('------------','')],'yes yes no no no','Solid horizontal rule with irregular ink; no printed hyphens or text.')
+add(30,'n','n','n','missing_word_or_span merged_two_lines crop_clipped','σιμο αὐτὸ ἑλληνικὸ ὄργανο τῆς Ἀμερικῆς, σκοπεύει νὰ ἐκ- → ” καὶ',[(c[29]['google_text'],'σιμο αὐτὸ ἑλληνικὸ ὄργανο τῆς Ἀμερικῆς, σκοπεύει νὰ ἐκ-')],'yes yes no yes yes','Central full row plus substantial upper and lower neighbour bodies; horizontally cut text.')
+add(31,'n','n','n','missing_word_or_span merged_two_lines crop_clipped','κρίνουμε κατάλληλες. βάσει των αρχών και κανόνων ελεγκτικής ... / πληροφορίες και επεξηγήσεις που ζητήσαμε ... → κόστους',[(c[30]['google_text'],'κρίνουμε κατάλληλες. βάσει των αρχών και κανόνων ελεγκτικής')],'yes yes no yes yes','Two readable rows and additional clipped rows; label is only a tiny fragment.')
+add(32,'n','n','n','missing_word_or_span merged_two_lines crop_clipped','Στοχασμοὶ παράταιροι. (Π. Χάρη: τὰ δικαιώματα καὶ τὰ δῶρα → βιβλία',[(c[31]['google_text'],'Στοχασμοὶ παράταιροι. (Π. Χάρη: τὰ δικαιώματα καὶ τὰ δῶρα')],'yes yes no yes yes','Readable upper row and cut lower row; label is from lower text.')
+add(33,'n','n','n','missing_word_or_span merged_two_lines crop_clipped','ἀπ᾽ αὐτές. Τὸ γάλα ὅμως MONT-BLANC (Ἄλπεις), εἶναι κάτι τι ἀλλοι- → ∅',[('','ἀπ᾽ αὐτές. Τὸ γάλα ὅμως MONT-BLANC (Ἄλπεις), εἶναι κάτι τι ἀλλοι-')],'yes yes no yes yes','Label covers only first two words of a multirow crop; edges cut through neighbour rows.')
+add(34,'n','n','n','missing_word_or_span merged_two_lines crop_clipped','Οὔτε εἶχα ἀνάγκη νὰ ρωτήσω γιὰ νὰ τὸ μάθω... → τί ἄλλο',[(c[33]['google_text'],'Οὔτε εἶχα ἀνάγκη νὰ ρωτήσω γιὰ νὰ τὸ μάθω...')],'yes yes no yes yes','Central line complete vertically; neighbouring rows cut through, with many readable bodies.')
+add(35,'y','na','n','crop_clipped','','','no yes no no yes','Number and dotted leader; last leader dot is cut by right edge.')
+add(36,'n','n','n','missing_word_or_span merged_two_lines crop_clipped','ἐστιν αἴτιος· εἰ γὰρ ἐκεῖνος ἦγεν ἡσυχίαν, → ∅',[('','ἐστιν αἴτιος· εἰ γὰρ ἐκεῖνος ἦγεν ἡσυχίαν,')],'no yes no no yes','Label omits most of central line; partial neighbour letter bodies at top and bottom.')
+add(37,'n','y','n','extra_text merged_two_lines crop_clipped','∅ → 12.199',[('12.199','')],'yes yes no yes yes','Central long line with readable rows above and below, all clipped at edges; spurious date tail in label.')
+add(38,'n','n','n','wrong_letter missing_word_or_span merged_two_lines crop_clipped','Επαληθεύσαμε → θε όσουε',[('θε όσουε','Επαληθεύσαμε')],'yes yes no yes yes','Quarter-turned two-row crop; text clipped at start and neighbouring row.')
+add(39,'n','n','n','wrong_letter lookalike_script_letter extra_mark missing_word_or_span merged_two_lines crop_clipped','b → ὁ; 4.10 → ∅',[('ὁ','b'),('','4.10')],'yes yes no no yes','Three short rows, with top and bottom rows cut through. (var. lect.) is above Cf. 1 Cor.')
+add(40,'n','na','n','missing_word_or_span merged_two_lines crop_clipped','et Latinas fecit J. B. Caraccioli. (Galland. → ∅',[('','et Latinas fecit J. B. Caraccioli. (Galland.')],'yes yes no yes yes','Label omits most of central Latin row; readable cut rows above and below.')
+add(41,'n','n','n','missing_word_or_span crop_clipped','πᾶνε οἱ παλιοὶ → πᾶνε',[('','οἱ παλιοὶ')],'no yes no no yes','Single row but final word continues into clipped right boundary; missing label span.')
+add(42,'n','y','y','wrong_letter lookalike_script_letter','φέρ᾽ → Xέρ᾽',[('X','φ')],'no no no no no','Complete central line with only thin neighbour slivers; substitution alone causes no crop fault.')
+add(43,'y','n','n','wrong_mark merged_two_lines crop_clipped','ὑπολογισμὸ → ὑπολογισμό; λιανικῶν → λιανικών',[],'no no no yes yes','Central line is complete; readable clipped neighbour words occur above and below.')
+add(44,'n','n','n','wrong_letter missing_word_or_span merged_two_lines crop_clipped','ΕΛΛΗΝΙΚΟΝ ΩΔΕΙΟΝ ΧΙΟΥ / ΒΟΛΟΥ → Κάτω ΒΟΛΟΥ',[('Κάτω','ΕΛΛΗΝΙΚΟΝ ΩΔΕΙΟΝ ΧΙΟΥ')],'yes yes no yes yes','Several printed rows and columns, with mirrored show-through; label represents only a fragment.')
+add(45,'y','na','y','','',[],'no no no no no','Single complete Cyrillic title.')
+add(46,'n','n','n','wrong_letter lookalike_script_letter missing_word_or_span merged_two_lines crop_clipped','διά → 5ua; καὶ περιορισμῶν → ξωπεριορισμών; δομήσεως → δόμολα',[('5ua','διά'),('ξωπεριορισμών','καὶ περιορισμῶν'),('δόμολα','δομήσεως')],'yes yes no yes yes','Rotated handwritten multirow fragment crossed by rules, cut at edges.')
+add(47,'n','n','n','missing_mark missing_word_or_span merged_two_lines crop_clipped','προϋποθέσεις → προυποθέσεις; numerous other visible rows → ∅',[],'yes yes yes yes yes','Quarter-turned paragraph with many complete other rows; label is one row from it, not the entire visible extent.')
+add(48,'u','n','n','crop_clipped','upper parts of letters and marks are cut away → complete label',[],'no yes no no yes','Crop cuts horizontally through the target row; many upper letter parts and accents are absent.')
+add(49,'n','n','n','missing_word_or_span merged_two_lines crop_clipped','περίπου για τις οποίες η Εταιρεία δεν έχει διενεργήσει καμία πρόβλεψη → πιθανη',[(c[48]['google_text'],'περίπου για τις οποίες η Εταιρεία δεν έχει διενεργήσει καμία πρόβλεψη')],'yes yes no yes yes','Multiple long rows with clipped top and bottom rows; label is a tiny end fragment.')
+add(50,'n','y','n','wrong_letter missing_word_or_span merged_two_lines crop_clipped','διαχείρισις → διαχείρησις; χρήση 1989. → ∅',[('διαχείρησις','διαχείρισις'),('','χρήση 1989.')],'yes yes no yes yes','Label merges two printed rows; second row starts with clipped Διοικητικού and omits printed ending.')
+add(51,'n','n','n','missing_word_or_span extra_text merged_two_lines crop_clipped','littéraire, de la langue écrite· Μᾶς θυμίζουν αὐτὰ του τὰ λό- → , ποῦ',[(c[50]['google_text'],'littéraire, de la langue écrite· Μᾶς θυμίζουν αὐτὰ του τὰ λό-')],'yes yes no yes yes','Central mixed Latin/Greek row with readable rows cut above and below; label belongs to lower fragment.')
+add(52,'y','na','y','','',[],'no no no no no','Single row of five dots.')
+add(53,'n','y','y','wrong_letter lookalike_script_letter digits','4ο → 40',[('40','4ο')],'no no no no no','Complete issue heading, ending in raised ordinal ο.')
+add(54,'n','n','n','wrong_letter missing_word_or_span merged_two_lines crop_clipped','λοιποί ... → και απολείς - Ολίδι',[('και απολείς - Ολίδι','λοιποί')],'yes yes no yes yes','Quarter-turned fragment with at least three rows; lower rows and line ends clipped.')
+add(55,'y','na','y','','',[],'no no no no no','Single row of twenty-five dots.')
+add(56,'y','n','n','missing_mark merged_two_lines','Ἡ → Η',[],'yes yes yes yes no','Large initial spans two complete printed rows; transcription concatenates them.')
+# Normalize empty where placeholders.
+for r in rows:
+ if r['where']=='': r['where']=[]
+with open('answers.jsonl','w') as f:
+ for r in rows: f.write(json.dumps(r,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/b1155dbd-56e0-4e2f-8bf5-349babd21b48/scratchpad/lf1_packs/dryrun/ctx02
+ succeeded in 0ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json,collections
+cards=[json.loads(s) for s in open('items.jsonl')]
+rows=[json.loads(s) for s in open('answers.jsonl')]
+rows[18]['detail']='ΚΛΕΑΡΙΑ → ΚΑΙΕΔΡΙ; ornament → 1000000000000000'
+rows[18]['where'][0]['printed']='ΚΛΕΑΡΙΑ'
+rows[46]['where']=[{'label':'','printed':'από 1/1/1990 έγινε αύξηση του μετοχικού κεφαλαίου της εταιρίας'}, {'label':'','printed':'στο προσάρτημα.'}]
+rows[55]['errors']=['wrong_mark','merged_two_lines']
+rows[55]['detail']='ἐριστικὴ → ἐριστική'
+# The main row in card 43 is complete; neighbouring rows are cut, not the target.
+rows[42]['owner_crop']['turned_or_clipped']='yes'
+with open('answers.jsonl','w') as f:
+ for r in rows: f.write(json.dumps(r,ensure_ascii=False)+'\\n')
+assert len(cards)==len(rows)
+assert [r['card_id'] for r in rows]==[c['card_id'] for c in cards]
+assert len(set(r['card_id'] for r in rows))==len(rows)
+for r in rows:
+ assert r['letters'] in ['y','n','u']
+ assert r['marks'] in ['y','n','na']
+ assert r['crop_ok'] in ['y','n']
+ assert len(r['owner_crop'])==5 and all(x in ['yes','no','uncertain'] for x in r['owner_crop'].values())
+ assert isinstance(r['where'],list)
+ for w in r['where']: assert set(w)=={'label','printed'} and all(isinstance(v,str) for v in w.values())
+print('Count and order validated:',len(rows))
+for k in ['letters','marks','crop_ok']: print(k,dict(collections.Counter(r[k] for r in rows)))
+print('Top errors:',collections.Counter(e for r in rows for e in r['errors']).most_common(3))
+PY" in /private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/b1155dbd-56e0-4e2f-8bf5-349babd21b48/scratchpad/lf1_packs/dryrun/ctx02
+ succeeded in 0ms:
+Count and order validated: 56
+letters {'n': 36, 'y': 19, 'u': 1}
+marks {'n': 23, 'na': 21, 'y': 12}
+crop_ok {'n': 36, 'y': 20}
+Top errors: [('crop_clipped', 31), ('merged_two_lines', 26), ('missing_word_or_span', 25)]
+
+codex
+Wrote answers.jsonl; validated all 56 cards in input order.
+
+Letters: y=19, n=36, u=1.
+Marks: y=12, n=23, na=21.
+Crop_ok: y=20, n=36.
+
+Most common errors: crop_clipped (31), merged_two_lines (26), missing_word_or_span (25).
+
+Systematic pattern: many labels cover only a fragment of crops containing multiple readable or clipped lines.
+tokens used
+78,672
+Wrote answers.jsonl; validated all 56 cards in input order.
+
+Letters: y=19, n=36, u=1.
+Marks: y=12, n=23, na=21.
+Crop_ok: y=20, n=36.
+
+Most common errors: crop_clipped (31), merged_two_lines (26), missing_word_or_span (25).
+
+Systematic pattern: many labels cover only a fragment of crops containing multiple readable or clipped lines.

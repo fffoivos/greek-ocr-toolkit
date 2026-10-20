@@ -35,7 +35,7 @@ parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--keys',nargs='*',help='Rerun selected pages, retaining completed results for other pages')
 args=parser.parse_args()
 summary=json.loads((OUT/'summary.json').read_text()) if args.keys and (OUT/'summary.json').exists() else {}
-for f in sorted((ROOT/'docs/tables/annotations').glob('*.json')):
+for f in sorted((ROOT/'docs/records/tables/annotations').glob('*.json')):
  if args.keys and f.stem not in args.keys:continue
  key=f.stem;start=time.monotonic();print('START',key,flush=True)
  try:

@@ -7,7 +7,7 @@ def add_parser(commands):
     sub = p.add_subparsers(dest='harvest_command', required=True)
     p = sub.add_parser('pilot')
     p.add_argument('--stage', choices=('prepare','sample','label','report','all'), default='all')
-    p.add_argument('--out', type=Path, default=Path('docs/harvest/pilot_v1'))
+    p.add_argument('--out', type=Path, default=Path('docs/records/harvest/pilot_v1'))
     p.add_argument('--big', type=Path, default=Path('docs/harvest/harvest_big/t13c'))
     p.add_argument('--stack-export', type=Path, default=Path('docs/harvest/pilot/_stack_52cee3b'))
     p.add_argument('--source-repo', type=Path, default=DEFAULT_SOURCE)

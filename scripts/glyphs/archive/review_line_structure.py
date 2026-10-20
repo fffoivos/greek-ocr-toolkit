@@ -19,6 +19,7 @@ from PIL import Image
 
 ROOT=Path(__file__).resolve().parents[3]
 sys.path.insert(0,str(ROOT))
+from greekocr.ops.data_root import input_path as _data_input
 from greekocr.glyphs.line_structure import (
     ADDRESS, _table_structure, _crosses, build_structure, join_pieces, render_structure,
 )
@@ -26,7 +27,7 @@ from greekocr.glyphs.page_text_lines import CURVES
 
 
 def read(path):
-    return json.loads(path.read_text())
+    return json.loads(_data_input(path).read_text())
 
 
 def write(path,value):
@@ -34,7 +35,7 @@ def write(path,value):
 
 
 def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(_data_input(path).read_bytes()).hexdigest()
 
 
 def _area(b):
@@ -121,8 +122,8 @@ def main():
     parser.add_argument('--pages',type=Path,default=ROOT/'.astra/pages')
     parser.add_argument('--baseline',type=Path,default=ROOT/'.astra/q1-baseline')
     parser.add_argument('--out',type=Path,default=ROOT/'.astra/out')
-    parser.add_argument('--annotations',type=Path,default=ROOT/'docs/tables/annotations')
-    parser.add_argument('--report',type=Path,default=ROOT/'docs/reviews/PAGE_LINES_Q1_COORDINATES.md')
+    parser.add_argument('--annotations',type=Path,default=ROOT/'docs/records/tables/annotations')
+    parser.add_argument('--report',type=Path,default=ROOT/'docs/records/reviews/PAGE_LINES_Q1_COORDINATES.md')
     args=parser.parse_args();args.out.mkdir(parents=True,exist_ok=True)
     audit=[]
     for path in sorted(args.pages.glob('*.png')):

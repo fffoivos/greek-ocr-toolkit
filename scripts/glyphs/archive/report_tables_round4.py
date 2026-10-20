@@ -146,7 +146,7 @@ def main():
       'Evidence: [acceptance summary](../../.astra/out/acceptance/summary.json), [delivery audit](../../.astra/out/acceptance/delivery-audit.json), [integration summary](../../.astra/out/integration/summary.json), [artifact/regression audit](../../.astra/out/regression.json), [durable compact receipt](../tables/round4-summary.json). Per-label destinations, omissions, final TableItems, per-mode forward hashes and annotation hashes remain under `.astra/out/acceptance/`.','',
       '## Commit handoff','',
       'The sandbox refused creation of the worktree `index.lock` during `git add` (`Operation not permitted`), so no commit was made. The requested fallback is [page-lines-round4-tables.patch](../../.astra/page-lines-round4-tables.patch), with [commit-page-lines-round4-tables.sh](../../.astra/commit-page-lines-round4-tables.sh). The script verifies branch `astra/page-lines-4`, base revision, an empty staging area, every file hash, and reverse patch applicability before staging the explicit file list and committing with the requested Co-Authored-By and Claude-Session footers. It does not push. The patch is checked and replayed against a temporary copy of its HEAD source files, with byte-for-byte equality verified.','']
-    report=ROOT/'docs/reviews/PAGE_LINES_ROUND4_TABLES_20261009.md'
+    report=ROOT/'docs/records/reviews/PAGE_LINES_ROUND4_TABLES_20261009.md'
     report.write_text('\n'.join(text))
     # Compact committed evidence; large source images/line arrays stay in .astra.
     compact=dict(status='PARTIAL',versions={p:importlib.metadata.version(p) for p in ('docling','docling-core','docling-ibm-models')},
@@ -157,9 +157,9 @@ def main():
         frozen=a[key]['frozen'],fused_controls=a[key].get('fused_controls',[]),integration={k:v for k,v in runs[key].items() if k!='ocr_records'}) for name,key in PAGES.items()},
       receipts={str(p.relative_to(ROOT)):sha(p) for p in [report,OUT/'acceptance/summary.json',OUT/'acceptance/delivery-audit.json',
         OUT/'integration/summary.json',OUT/'regression.json',OUT/'tests-all-final.log',OUT/'acceptance/fused-controls-audit.json',
-        *sorted((ROOT/'docs/tables/annotations').glob('*.json')),
+        *sorted((ROOT/'docs/records/tables/annotations').glob('*.json')),
         ROOT/'greekocr/glyphs/table_lines.py',ROOT/'greekocr/deploy/docling_plugin/model.py',ROOT/'greekocr/deploy/docling_plugin/options.py']})
-    (ROOT/'docs/tables/round4-summary.json').write_text(json.dumps(compact,indent=2)+'\n')
+    (ROOT/'docs/records/tables/round4-summary.json').write_text(json.dumps(compact,indent=2)+'\n')
     print(report)
 
 

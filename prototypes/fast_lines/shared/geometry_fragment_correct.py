@@ -35,7 +35,7 @@ def envelope(items,shape,path=None,height=None):
     return polygon.tolist(),old,new,(x0,y0,x1,y1)
 
 
-def run(gray,original_items,items=None,*,witness=None,rendering=None,forbidden_regions=()):
+def run(gray,original_items,items=None,*,witness=None,rendering=None,forbidden_regions=(),field_cache=None,local_filter=False):
     """Conditional correction. `items` must carry stable original `source_ids`.
 
     Omitting items means the unmodified original list. Precomputed witness and
@@ -46,14 +46,14 @@ def run(gray,original_items,items=None,*,witness=None,rendering=None,forbidden_r
     if any('source_ids' not in q for q in items):raise ValueError('current items require original source_ids')
     if any(any(i<0 or i>=len(original_items) for i in q['source_ids']) for q in items):raise ValueError('source index out of range')
     counts=Counter(i for q in items for i in q['source_ids'])
-    eligible={q['source_ids'][0]:j for j,q in enumerate(items) if len(q['source_ids'])==1 and counts[q['source_ids'][0]]==1}
+    eligible={q['source_ids'][0]:j for j,q in enumerate(items) if not q.get('page_field') and len(q['source_ids'])==1 and counts[q['source_ids'][0]]==1}
     reused=dict(witness=witness is not None,rendering=rendering is not None)
     witness=candidates(original_items,size) if witness is None else witness
     pairs=[q for q in witness['pairs'] if q['line'] in eligible and q['fragment'] in eligible]
     decisions=[];joins=[];output=list(items)
     if pairs:
         selected={q['line'] for q in pairs}
-        rendering=render_contacts(gray,original_items,'explicit_fast',7,selected) if rendering is None else rendering
+        rendering=render_contacts(gray,original_items,'explicit_fast',7,selected,field_cache=field_cache,local_filter=local_filter) if rendering is None else rendering
         lines={q['line']:q for q in rendering['lines']};valid=[]
         # Resolve ownership against ALL original hypotheses, even a removed
         # alternative. Removal cannot make an ambiguous fragment suddenly safe.

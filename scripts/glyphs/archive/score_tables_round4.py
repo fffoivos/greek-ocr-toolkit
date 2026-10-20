@@ -23,7 +23,7 @@ def main():
     from scripts.glyphs.archive.evaluate_tables_round4 import geometry
     integration=read(OUT/'integration/summary.json');acceptance=read(OUT/'acceptance/summary.json')
     summary={}
-    for f in sorted((ROOT/'docs/tables/annotations').glob('*.json')):
+    for f in sorted((ROOT/'docs/records/tables/annotations').glob('*.json')):
         ann=read(f);key=f.stem
         doc=read(OUT/f'integration/{key}.document.json');run=integration[key]
         records=run['ocr_records'];assert len(records)==1 and records[0]['status']=='replaced'

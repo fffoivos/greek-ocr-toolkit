@@ -1,5 +1,7 @@
 # Vendored source inventory
 
+For current navigation, use the [documentation index](shared/DOCUMENTATION_INDEX.md) and [line-segmentation implementation map](A_ocr_development/reference/LINE_SEGMENTATION.md). This inventory preserves source provenance and the Q3 relocation record; current worker status belongs in the [coordinator handoff](records/research/round8/LOOP_HANDOFF.md).
+
 Snapshot: 8 October 2026. Origin commit is repository HEAD at capture. Modified and untracked files are explicitly identified; their source SHA-256 binds the exact captured bytes, not an invented committed version.
 
 Implementation Python changes are limited to imports and import-hook strings. Non-import AST hashes were compared before and after relocation. Ported test harnesses additionally relocate recorded fixture roots; the Docling port selects six unchanged offline contract functions and relocates plugin imports. Resources, Rust, shells and Docling plugin are byte-identical. Generated wrappers and namespace initializers are new code.
@@ -40,9 +42,9 @@ place. Q3's exact comparison and stage-equivalence runners are in `scripts/pages
 The original capture inventory below records source provenance. Later intentional
 transformations have updated captured-file hashes in `origins.json`; the Q3
 plugin maps its detector options onto the shared page API. See
-[PAGES_GUIDE.md](PAGES_GUIDE.md), [PAGES_PIPELINE.md](PAGES_PIPELINE.md),
-[PAGES_OUTPUT_FORMAT.md](PAGES_OUTPUT_FORMAT.md), and
-[the Q3 review](reviews/PAGE_LINES_Q3_CLEANUP_API.md).
+[PAGES_GUIDE.md](A_ocr_development/reference/PAGES_GUIDE.md), [PAGES_PIPELINE.md](A_ocr_development/reference/PAGES_PIPELINE.md),
+[PAGES_OUTPUT_FORMAT.md](A_ocr_development/reference/PAGES_OUTPUT_FORMAT.md), and
+[the Q3 review](records/reviews/PAGE_LINES_Q3_CLEANUP_API.md).
 
 | Vendored path | Absolute origin | Origin commit | Source state | Transform |
 | --- | --- | --- | --- | --- |
@@ -61,7 +63,7 @@ plugin maps its detector options onto the shared page API. See
 | `greekocr/_vendor/bench/e2_bakeoff.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/bench/e2_bakeoff.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | Python import paths and hook strings relocated |
 | `greekocr/_vendor/bench/e2_cllg_contract.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/bench/e2_cllg_contract.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | Python import paths and hook strings relocated |
 | `greekocr/_vendor/bench/e2_models.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/bench/e2_models.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | Python import paths and hook strings relocated |
-| `greekocr/_vendor/bench/e2_native.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/bench/e2_native.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | T6 optional confidence protocol; plain behavior preserved (docs/T6_VENDOR_UPDATE.json) |
+| `greekocr/_vendor/bench/e2_native.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/bench/e2_native.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | T6 optional confidence protocol; plain behavior preserved (docs/records/verify_20261008/T6_VENDOR_UPDATE.json) |
 | `greekocr/_vendor/bench/e2_parity.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/bench/e2_parity.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | Python import paths and hook strings relocated |
 | `greekocr/_vendor/bench/e2_reader_parity.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/bench/e2_reader_parity.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | Python import paths and hook strings relocated |
 | `greekocr/_vendor/bench/e2_teachers.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/bench/e2_teachers.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | Python import paths and hook strings relocated |
@@ -134,7 +136,7 @@ plugin maps its detector options onto the shared page API. See
 | `greekocr/_vendor/scripts/fetch/o4c_record_fixtures.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/scripts/fetch/o4c_record_fixtures.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | untracked | Python import paths and hook strings relocated |
 | `greekocr/_vendor/scripts/fetch/parliament_pdf_cache.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/scripts/fetch/parliament_pdf_cache.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | byte-identical |
 | `greekocr/_vendor/scripts/fetch/r2_cllg_env.sh` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/scripts/fetch/r2_cllg_env.sh` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | byte-identical |
-| `greekocr/_vendor/scripts/fetch/r2_cllg_worker.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/scripts/fetch/r2_cllg_worker.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | T6 optional confidence protocol; plain behavior preserved (docs/T6_VENDOR_UPDATE.json) |
+| `greekocr/_vendor/scripts/fetch/r2_cllg_worker.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/scripts/fetch/r2_cllg_worker.py` | b7818f3f4bfcd9353bd894038fa589459a8e4d2f | HEAD | T6 optional confidence protocol; plain behavior preserved (docs/records/verify_20261008/T6_VENDOR_UPDATE.json) |
 | `greekocr/_vendor/seed/node_scripts/build_parity_crops.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/seed/node_scripts/build_parity_crops.py` | c9362bb486be161920467c67053cc9afa9cd3cac | HEAD | byte-identical |
 | `greekocr/_vendor/seed/node_scripts/fetch_parliament_s2.py` | `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/seed/node_scripts/fetch_parliament_s2.py` | c9362bb486be161920467c67053cc9afa9cd3cac | HEAD | byte-identical |
 | `greekocr/_vendor/seed/node_scripts/node_cllg_bakeoff.sh` | `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/seed/node_scripts/node_cllg_bakeoff.sh` | c9362bb486be161920467c67053cc9afa9cd3cac | HEAD | byte-identical |
@@ -693,7 +695,7 @@ The coordinator supplied four original text-layer crops (`_old.png`) and their v
 
 ## T6 confidence worker update
 
-The two CLLG implementation files above now support optional confidence records. Their original source identity is retained in `greekocr/_vendor/origins.json`; `docs/T6_VENDOR_UPDATE.json` binds exact before/after byte and non-import AST hashes and the complete diff. Plain string-list JSON output is regression-tested byte for byte, including Unicode. Model loading, transforms and prediction remain unchanged; the worker source hash changes. No actual reader model or GPU was run.
+The two CLLG implementation files above now support optional confidence records. Their original source identity is retained in `greekocr/_vendor/origins.json`; `docs/records/verify_20261008/T6_VENDOR_UPDATE.json` binds exact before/after byte and non-import AST hashes and the complete diff. Plain string-list JSON output is regression-tested byte for byte, including Unicode. Model loading, transforms and prediction remain unchanged; the worker source hash changes. No actual reader model or GPU was run.
 | `tests/fixtures/fonts/GFSDidot-Regular.ttf` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/assets/fonts/GFSDidot-Regular.ttf` | 6f54bfc4b3de088dbe55de9e525328a34daeaff3 | HEAD | byte-identical |
 | `tests/fixtures/fonts/XCharter-Regular.otf` | `/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr/assets/fonts/XCharter-Regular.otf` | 6f54bfc4b3de088dbe55de9e525328a34daeaff3 | HEAD | byte-identical |
 | `tests/fixtures/fonts/PROVENANCE.json` | `/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit/tests/fixtures/fonts/PROVENANCE.json` | none (new, toolkit-authored 8 Oct 2026) | new | new |
@@ -1213,7 +1215,7 @@ New service reader, Anemi-first catalogue runner, three-engine comparison and sy
 | `prototypes/harvest/transkribus_failed_lines.py` | T12 implementation, documentation or synthetic fixture | `b2b22d91f6d39f10c6a221515d6b1f21c83d3ede5d0c50688f403f3610af6643` |
 | `scripts/harvest/validate_three_engines.py` | T12 implementation, documentation or synthetic fixture | `3aa787df938a5dfc516c9c38e14fc11071df0c288b2bfc6a63a6cff29e1f6d90` |
 | `tests/test_transkribus.py` | T12 implementation, documentation or synthetic fixture | `98776d7604541852c558fb45193dfa3e90e4c06315f612f122ef2d11cc6d4af6` |
-| `docs/READERS_TRANSKRIBUS.md` | T12 implementation, documentation or synthetic fixture | `50bbc101934c5a8d92f035c1dcffbfed86dd663b6f72cc3b75d9f55ba1813b87` |
+| `docs/B_training_data/a_google_ocr/readers/READERS_TRANSKRIBUS.md` | T12 implementation, documentation or synthetic fixture | `50bbc101934c5a8d92f035c1dcffbfed86dd663b6f72cc3b75d9f55ba1813b87` |
 | `tests/data/transkribus/README.md` | T12 implementation, documentation or synthetic fixture | `d6389fdf685b5c66ceae3d75d4c2e3aa756ab8a3d286eab864bb316bc7f7ef78` |
 | `tests/data/transkribus/credits.json` | T12 implementation, documentation or synthetic fixture | `8c27649f5ca398b4365fa1c037a17904500eb66e63ed6653e87174c11ea92fc8` |
 | `tests/data/transkribus/page.xml` | T12 implementation, documentation or synthetic fixture | `7b6e01dfeddb3575602a9430cd377ea7e323cfca70f56fe89708b52bf432001c` |
@@ -1223,7 +1225,7 @@ New service reader, Anemi-first catalogue runner, three-engine comparison and sy
 | `scripts/generate_api_docs.py` | T12 integration change | `598fb6e6a24f3f5bc5fdb490dafac1883b2b9a81a82c77f5b4523c70db67327c` |
 | `tests/test_docai.py` | T12 integration change | `99dcf9af677fe0c25bf2ed09c7e898b3b477129a6d9d3f4df5193a043de70407` |
 
-`docs/API.md` is regenerated from the typed registry. The existing failed-line review generator is reused. See [READERS_TRANSKRIBUS.md](READERS_TRANSKRIBUS.md), [THREE_ENGINES_v1.md](harvest/THREE_ENGINES_v1.md), [local review](harvest/three_engines_review.html), [receipt](harvest/transkribus_failed_lines/receipt.json) and [validation](harvest/transkribus_failed_lines/validation.json). Generated provider responses, native images, layout probes and bounded recovery attempts are bound by their receipts and image/response SHA envelopes.
+`docs/API.md` is regenerated from the typed registry. The existing failed-line review generator is reused. See [READERS_TRANSKRIBUS.md](B_training_data/a_google_ocr/readers/READERS_TRANSKRIBUS.md), [THREE_ENGINES_v1.md](records/harvest/THREE_ENGINES_v1.md), [local review](harvest/three_engines_review.html), [receipt](records/harvest/transkribus_failed_lines/receipt.json) and [validation](records/harvest/transkribus_failed_lines/validation.json). Generated provider responses, native images, layout probes and bounded recovery attempts are bound by their receipts and image/response SHA envelopes.
 
 ## T13c H1 Anemi harvest pilot (12 October 2026)
 
@@ -1235,17 +1237,17 @@ NFD tiering, observed rare substitutions and record validation), `pipeline.py`
 The top-level CLI registers harvest; `greekocr.pages` is untouched.
 
 The exact line-finder snapshot is exported under
-`docs/harvest/pilot/_stack_52cee3b/prototypes/fast_lines/` from
+`docs/records/harvest/pilot/_stack_52cee3b/prototypes/fast_lines/` from
 `52cee3bcc882e7426bdc1018d892cd9b1bf9feac`. `pilot_v1/stack_verification.json`
 checks all 256 files against Git blob identities; ONNX models come from the
 named worktree and their SHA-256 is on each record. No Git metadata is written.
-The amended fetcher and upstream patch are under `docs/harvest/pilot/` because
+The amended fetcher and upstream patch are under `docs/records/harvest/pilot/` because
 this session cannot write the source fetch repo or external data destination.
 
-Outputs: `docs/harvest/PILOT_v1.md`, `pilot_review.html` with adjacent
+Outputs: `docs/records/harvest/PILOT_v1.md`, `pilot_review.html` with adjacent
 `pilot_review_images/`, and `pilot_v1/` records, summary, page receipts, Google
 receipts, cost, sample, character counts, timings, failure crops and tests.
-Image data stays under `docs/harvest/harvest_big/`; records contain paths.
+Image data stays under `docs/records/harvest/harvest_big/`; records contain paths.
 The earlier broader pilot is preserved in `pilot/previous_t13/`.
 
 
@@ -1268,8 +1270,8 @@ Fixture custody and every file hash are in
 and its `manifest.json`: four unchanged reviewer page renders (both column
 pages, the neighbour page and the bordered prose page), one clean polytonic crop,
 and an offline two-function fetch-selection fixture. Tests use repository-relative
-fixture paths. Fix 1 replay outputs and test logs are under `docs/harvest/fix1/`;
-`docs/harvest/pilot_v1/` and the supplied external archive remain unchanged.
+fixture paths. Fix 1 replay outputs and test logs are under `docs/records/harvest/fix1/`;
+`docs/records/harvest/pilot_v1/` and the supplied external archive remain unchanged.
 
 ## H1 Fix 2 (12 October 2026)
 
@@ -1308,9 +1310,9 @@ threshold/cache/output assertions are updated in `tests/test_harvest_fix1.py`.
 single surrounding frame. Large-cell tests cover both row and column divisions.
 
 Results, input-custody receipt, independent artifact recount and the **143
-passed** test log are under `docs/harvest/fix2/`. The before/after and all 500
+passed** test log are under `docs/records/harvest/fix2/`. The before/after and all 500
 sampled-line reason counts are in the “Fix 2 (offline re-gate)” addendum of
-[`docs/harvest/PILOT_v1.md`](harvest/PILOT_v1.md). Replay source-code hashes are
+[`docs/records/harvest/PILOT_v1.md`](records/harvest/PILOT_v1.md). Replay source-code hashes are
 bound in `fix2/summary.json`.
 
 
@@ -1322,7 +1324,7 @@ The explicit `--run` driver uses the frozen 40/40/20 tier sample; all 200 single
 
 No N qualifies: Vision identical 63% / 63% / 60%, DocAI 82% / 81% / 76% at N=10/20/40; merged/lost are zero throughout. Median NFD CER is zero; splits are Vision 2/1/0 and DocAI 0/0/1. The task does not promote montage reads.
 
-Artifacts: [report](harvest/MONTAGE_v1.md), [100-crop review](harvest/montage_review.html), [sample](harvest/montage_v1/sample.json), [maps/manifest](harvest/montage_v1/manifest.json), [600 comparisons](harvest/montage_v1/comparisons.jsonl), [summary](harvest/montage_v1/summary.json), [cost/call receipt](harvest/montage_v1/receipt.json), [offline validation](harvest/montage_v1/validation.json), [test results](harvest/montage_v1/tests.xml), [gallery QA limits](harvest/montage_v1/gallery_qa.json). Per-engine line/symbol assignment audits are in `docs/harvest/montage_v1/assignments/`. Bulk PNGs and unchanged raw/parsed Google responses are ignored under `docs/harvest/harvest_big/montage_v1/`, inside this writable workspace. Original single inputs remain at the supplied external `glossapi-ocr-local/.../harvest_big/pilot_t13c/` root.
+Artifacts: [report](records/harvest/MONTAGE_v1.md), [100-crop review](records/harvest/montage_review.html), [sample](records/harvest/montage_v1/sample.json), [maps/manifest](records/harvest/montage_v1/manifest.json), [600 comparisons](records/harvest/montage_v1/comparisons.jsonl), [summary](records/harvest/montage_v1/summary.json), [cost/call receipt](records/harvest/montage_v1/receipt.json), [offline validation](records/harvest/montage_v1/validation.json), [test results](records/harvest/montage_v1/tests.xml), [gallery QA limits](records/harvest/montage_v1/gallery_qa.json). Per-engine line/symbol assignment audits are in `docs/records/harvest/montage_v1/assignments/`. Bulk PNGs and unchanged raw/parsed Google responses are ignored under `docs/records/harvest/harvest_big/montage_v1/`, inside this writable workspace. Original single inputs remain at the supplied external `glossapi-ocr-local/.../harvest_big/pilot_t13c/` root.
 
 Validation: 32 new T14 tests; **247 total passed** across montage, existing harvest gates, Google readers and typed/documented API. Offline raw replay verifies all 600 comparisons and native pixels in all 18 maps, without new network calls. Static checks verify 100 cards, 100 crop paths and every local link. The first montage was viewed at native resolution. Desktop/narrow browser rendering and dynamic filter execution remain unverified: Chromium launch was denied by the macOS sandbox, and computer use was not approved for Firefox.
 
@@ -1336,12 +1338,226 @@ Validation: 32 new T14 tests; **247 total passed** across montage, existing harv
 
 ## T14b montage controls (12 October 2026)
 
-The explicit control samples 15 T14 Vision N=20 identical crops and 15 differing crops, including the reported asterisk case; seeded selection and original hashes are frozen in [sample.json](harvest/montage_v1/determinism/sample.json). `greekocr/harvest/montage.py` adds only the optional `grey_rule=False` layout; default rule layout remains byte-compatible. New `greekocr/harvest/montage_controls.py` provides exact NFD and apostrophe-unified letters+marks comparisons plus minimum-edit char-kind histograms. Public signatures/examples and regeneration entries are in `docs/API.md` and `scripts/generate_api_docs.py`.
+The explicit control samples 15 T14 Vision N=20 identical crops and 15 differing crops, including the reported asterisk case; seeded selection and original hashes are frozen in [sample.json](records/harvest/montage_v1/determinism/sample.json). `greekocr/harvest/montage.py` adds only the optional `grey_rule=False` layout; default rule layout remains byte-compatible. New `greekocr/harvest/montage_controls.py` provides exact NFD and apostrophe-unified letters+marks comparisons plus minimum-edit char-kind histograms. Public signatures/examples and regeneration entries are in `docs/API.md` and `scripts/generate_api_docs.py`.
 
-`scripts/harvest/montage_controls.py --run` uses an isolated response directory to deliberately bypass the historical cache for one new read per crop/reader, then reads two no-rule N=20 images (20+10 crops). Persisted reservations and successful control-cache reuse prevent repeated requests. **60 single + 4 montage = 64 fresh successful calls; USD 0.0960 list-price estimate, below USD 0.50.** A local metadata exception after the first successful pair was fixed and resumed from those responses; there were no additional API attempts. All new raw/parsed Google responses, adapter ledgers, budgets, single readings, images/maps and assignments are stored under the requested `docs/harvest/montage_v1/determinism/` directory. Original external pilot records, crops, cached raw responses and T14 comparisons remain SHA-verified unchanged.
+`scripts/harvest/montage_controls.py --run` uses an isolated response directory to deliberately bypass the historical cache for one new read per crop/reader, then reads two no-rule N=20 images (20+10 crops). Persisted reservations and successful control-cache reuse prevent repeated requests. **60 single + 4 montage = 64 fresh successful calls; USD 0.0960 list-price estimate, below USD 0.50.** A local metadata exception after the first successful pair was fixed and resumed from those responses; there were no additional API attempts. All new raw/parsed Google responses, adapter ledgers, budgets, single readings, images/maps and assignments are stored under the requested `docs/records/harvest/montage_v1/determinism/` directory. Original external pilot records, crops, cached raw responses and T14 comparisons remain SHA-verified unchanged.
 
 Both single controls are 30/30 exact and letters+marks identical, including raw text. No-rule exact agreement is **16/30 Vision (53.3%) / 22/30 DocAI (73.3%)**; letters+marks is **18/30 (60.0%) / 25/30 (83.3%)**. Both readers have zero merged/lost/split/rejected crops. The Vision asterisk persists, with the same crop-relative symbol box inside the native crop; its attribution to a grey separator is unsupported. The control is outcome-stratified and regrouped, so its rates are not population estimates or a separator-only causal comparison. **Adoption remains none; N=20 stays an experimental candidate.** Observed 100% repeatability keeps the baseline-minus-three-point threshold at 97%.
 
-Artifacts: [Controls addendum](harvest/MONTAGE_v1.md#controls), [sample](harvest/montage_v1/determinism/sample.json), [plan](harvest/montage_v1/determinism/plan.json), [new singles](harvest/montage_v1/determinism/singles.jsonl), [no-rule manifest](harvest/montage_v1/determinism/norule/manifest.json), [300 comparisons](harvest/montage_v1/determinism/comparisons.jsonl), [summary](harvest/montage_v1/determinism/summary.json), [asterisk geometry](harvest/montage_v1/determinism/asterisk_geometry.json), [control receipt](harvest/montage_v1/determinism/receipt.json), [parent receipt](harvest/montage_v1/receipt.json), [validation](harvest/montage_v1/determinism/validation.json), [277-test JUnit result](harvest/montage_v1/determinism/tests.xml), [complete file/hash inventory](harvest/montage_v1/determinism/inventory.json). Per-crop readings are under `determinism/singles/`; raw/parsed responses and ledgers under `determinism/google/`; no-rule images, maps and line-assignment audits under `determinism/norule/`.
+Artifacts: [Controls addendum](records/harvest/MONTAGE_v1.md#controls), [sample](records/harvest/montage_v1/determinism/sample.json), [plan](records/harvest/montage_v1/determinism/plan.json), [new singles](records/harvest/montage_v1/determinism/singles.jsonl), [no-rule manifest](records/harvest/montage_v1/determinism/norule/manifest.json), [300 comparisons](records/harvest/montage_v1/determinism/comparisons.jsonl), [summary](records/harvest/montage_v1/determinism/summary.json), [asterisk geometry](records/harvest/montage_v1/determinism/asterisk_geometry.json), [control receipt](records/harvest/montage_v1/determinism/receipt.json), [parent receipt](records/harvest/montage_v1/receipt.json), [validation](records/harvest/montage_v1/determinism/validation.json), [277-test JUnit result](records/harvest/montage_v1/determinism/tests.xml), [complete file/hash inventory](records/harvest/montage_v1/determinism/inventory.json). Per-crop readings are under `determinism/singles/`; raw/parsed responses and ledgers under `determinism/google/`; no-rule images, maps and line-assignment audits under `determinism/norule/`.
 
-`tests/test_montage_controls.py` adds 30 fully offline cases; 277 cases pass across controls, existing montage/harvest contracts, Google readers and API coverage. `scripts/harvest/validate_montage_controls.py` independently verifies all new raw receipts, native pixels, pure-white gaps, assignment replay, both reference sets, histograms and main-worktree Git metadata. The no-flag driver also rebuilt all metrics with zero additional calls. `scripts/harvest/validate_montage.py` accepts a separate current replay-source binding while retaining the original T14 source hashes; its replay verified all 600 historical comparisons and all 18 historical native maps with zero network calls. This task made no `.git` writes. Main HEAD/index/branch metadata remained unchanged; the final [Git audit](harvest/montage_v1/determinism/git_audit.json) records concurrent `ff-plan` worktree/ref/reflog and shared-object changes, consistent with the commit recorded in its reflog.
+`tests/test_montage_controls.py` adds 30 fully offline cases; 277 cases pass across controls, existing montage/harvest contracts, Google readers and API coverage. `scripts/harvest/validate_montage_controls.py` independently verifies all new raw receipts, native pixels, pure-white gaps, assignment replay, both reference sets, histograms and main-worktree Git metadata. The no-flag driver also rebuilt all metrics with zero additional calls. `scripts/harvest/validate_montage.py` accepts a separate current replay-source binding while retaining the original T14 source hashes; its replay verified all 600 historical comparisons and all 18 historical native maps with zero network calls. This task made no `.git` writes. Main HEAD/index/branch metadata remained unchanged; the final [Git audit](records/harvest/montage_v1/determinism/git_audit.json) records concurrent `ff-plan` worktree/ref/reflog and shared-object changes, consistent with the commit recorded in its reflog.
+
+## T14c flush montage (13 October 2026)
+
+`greekocr/harvest/montage.py` adds optional `layout="flush"`: native pixels, contiguous bands with zero gaps/rules/outer padding, left alignment, and per-crop right padding filled from the median of its brightest ceil(50%) luminance pixels. Half-integral medians round upward in 8-bit padding. The frozen sample has 82 crops whose measured shade is 255; those use their measured white shade, with no unconditional white fallback. `background_shade` and `group_flush_crops` are typed/documented public helpers. Grouping stably sorts `(shade, native height)`, preserves frozen T14 order for ties, then cuts consecutive N=10/20 groups. Default rule and optional no-rule gap layouts regenerate byte-identically.
+
+`scripts/harvest/montage_flush.py --prepare` is offline; `--run` uses a shared 60-call / USD 0.50 ceiling and persistent reservations with no automatic retries. Original cached single responses are reused (zero new single calls). Because T14b covered only 30 selected lines at N=20, this task expands the original-order no-rule control to all 100 lines at N=10/20: **30 flush + 30 expanded no-rule = 60 successful uncached calls, USD 0.0900 conservative list-price estimate**. The rule table reuses historical T14 reads. Flush changes neighbors as well as layout; results assess their combined effect.
+
+Neither flush N qualifies. Exact identity for Vision/DocAI is **56%/58% at N=10** and **59%/53% at N=20**; letters+marks is 63%/63% and 64%/59%. Merged/lost/split crops are Vision 16/8/3 and DocAI 56/31/0 at N=10; Vision 19/10/1 and DocAI 57/35/0 at N=20. Across 400 flush crop-reader-size evaluations: **148 merged, 84 lost, 4 split**, counted independently. The unchanged T14 rule counts any reported box touching two bands as merged, even with >=70% overlap in one. Every crop remains in the identity denominator. Flush is worse than both gap layouts except Vision N=20, which is +1 point against no-rule but -4 points against rule. No production default is changed.
+
+Artifacts: [Flush addendum](records/harvest/MONTAGE_v1.md#flush-layout), [grouping](records/harvest/montage_v1/flush/grouping.json), [plan](records/harvest/montage_v1/flush/plan.json), [manifest](records/harvest/montage_v1/flush/manifest.json), [1,200 comparisons](records/harvest/montage_v1/flush/comparisons.jsonl), [summary](records/harvest/montage_v1/flush/summary.json), [native first N=10 preview](records/harvest/montage_v1/flush/preview_n10.png), [receipt](records/harvest/montage_v1/flush/receipt.json), [parent receipt](records/harvest/montage_v1/receipt.json), [test results](records/harvest/montage_v1/flush/tests.xml), [offline replay](records/harvest/montage_v1/flush/validation.json), [Git audit](records/harvest/montage_v1/flush/git_audit.json), [complete file/hash inventory](records/harvest/montage_v1/flush/inventory.json). Maps and line/symbol assignments are under `flush/maps/{flush,norule}/` and `flush/assignments/{flush,norule}/`. All new bulk PNGs, raw/parsed responses, reservations and uncached adapter ledgers are ignored under `docs/records/harvest/harvest_big/montage_v1/t14c/`. Historical T14/T14b results and external pilot records/crops/cached raw responses remain SHA-verified unchanged.
+
+`tests/test_montage_flush.py` adds **27 offline cases**: exact brightest-half medians/ties/odd counts, native L/RGB/mixed pixels, color-preserving luminance estimation, zero gaps/rules, own-background padding, half-integral rounding, contiguous band maps, stable shade/height sorting/source order/groups/tails, height/encoded-byte splitting, adjacent straddle merge/lost above 70%, and invalid layout/mode/group/ID refusal. **304 tests passed** with existing montage/harvest/Google-reader/API contracts. `scripts/harvest/validate_montage_flush.py` independently checks sorted native pixels, all groups, 1,200 comparisons, every line/symbol assignment, 60 unique raw-bound uncached API receipts, reservations/cost, and unchanged inputs. It regenerates all 18 historical ruled PNGs and both historical no-rule control PNGs byte-identically. No-flag rebuild and replay perform zero service calls and require no ADC. The native preview was visually inspected. This task performs no `.git` writes; metadata changes, if any, are recorded in the audit.
+
+| Source file | Purpose | SHA-256 |
+| --- | --- | --- |
+| `greekocr/harvest/montage.py` | Flush renderer, shade estimate and stable grouping | `cd90daf20c02f856954abe7d4222b16c85f24b1f28933c637f7c2bf509e4eff5` |
+| `scripts/harvest/montage_flush.py` | Budgeted experiment and offline report rebuild | `0584092be63b3e697812f104cd15b1638ef175d7f41daceb53324aa674e5859d` |
+| `scripts/harvest/validate_montage_flush.py` | Independent pixel, metric, custody and API-receipt replay | `f9fb5540e9bac3c5448582e13e0cee68f95914ff743b42d0c4663e54adacbdce` |
+| `tests/test_montage_flush.py` | 27 offline renderer and grouping cases | `88c8b8f57a9b41686295e2baf5ec565a4b60d12ac02fac127a1b537c7817efeb` |
+| `scripts/generate_api_docs.py` | Public helper examples preserving existing registry edits | `0794df606d0e825850b86ae84a85e6db31bd0cf23189feaaba151abe7e956104` |
+| `scripts/harvest/validate_montage_controls.py` | Current replay-source binding preserves original T14b source hashes | `ff2402e5132e97ceae1fdfd81d50a5e02282324e526ae1432c82796518b3168a` |
+
+Historical T14 and T14b validators also replayed their original 600 and 300 comparisons with zero service calls. Separate current replay-source bindings in the old receipts retain their historical source hashes while allowing the optional flush extension.
+
+
+## T15 real-page reads (13 October 2026)
+
+Exactly the frozen 500 pilot sampled lines span **253 real pages**. All 253 PDFs match their recorded fetch/record SHA-256 hashes, and all 253 pypdfium2 re-renders at 200 DPI, grayscale L, scale 200/72 and PNG compress_level=1 match the archived native pilot PNG bytes. Original external records, crops, raw responses and cache receipts remain unchanged. Full unstraightened pages alone were submitted, using the original reader settings: **506 successful uncached page calls (253 per reader), USD 0.759 conservative list-price reservations**, within USD 2.00 and the exact 506-call plan. Zero new crop calls, zero retries, persistent at-most-once reservations and bounded three-page concurrency. `--prepare`, the no-flag rebuild and validator require no ADC and perform no service calls.
+
+Mapping uses DocAI reported lines and Vision symbol-break line unions. For the sampled polygons only, mean returned-box height inside the actual polygon band over shared x must be >=70%, and horizontal overlap must be >=50% of the shorter width. Positive polygon intersection with two sampled targets marks both merged and withholds the box, even if only one qualifies. Zero unique assignments is lost; >=2 is split, with independent flags and the unchanged pilot list-return x-order join. One DocAI response has a recorded deskew transform and different dimensions; its line/symbol polygon vertices are inverse-mapped to native page coordinates before the box assignment, with the raw response unchanged. Eight offline cases verify matrix formats, normalized-only vertices, transform composition and fail-closed frame handling. The report separately measures conservative box-touch flags; these are not proof that the reader physically merged two transcriptions.
+
+Page/crop exact NFD identity is **Vision 43.0% (215/500), DocAI 53.4% (267/500)**; letters+marks is **49.2% / 60.2%**. Merged/lost/split lines are **105/112/18** and **108/139/9**, respectively. The same-500 strict tier-1 yield falls from **37.6% to 27.6%**; letters agreement falls from **50.4% to 36.4%**. There are 487 usable crop pairs and 312 usable page pairs. Decade and page-class tables, symbol-weighted confidence means, the separate original pilot substitution rule, cost and limitations are in the report. This fails the prior 97% preservation / zero merged-lost substitute gate; OCR accuracy remains for the owner to judge.
+
+The self-contained blind HTML contains exactly 30 changed lines (10 Vision-only, 10 DocAI-only, 10 both), independent seeded random A/B order per reader, inline base64 straight crops, and a separate key. Ten largest summed NFD changes include a native page region +/-2 detected same-column rows beside the straight crop. The key and source/stratum labels are absent from the HTML. Six native geometry overlays illustrate failures outside the blind set. Browser-rendered layout remains unverified: Playwright browser executables are absent and computer use denied Firefox. Offline validation decodes all 50 inline images and checks their native pixels, all readings/orders, cards and context regions.
+
+Artifacts: [Report](records/harvest/PAGE_READS_v1.md), [frozen 500 lines and baseline hashes](records/harvest/page_reads_v1/sample.json), [253-page render manifest](records/harvest/page_reads_v1/manifest.json), [budget plan](records/harvest/page_reads_v1/plan.json), [506 raw-bound assignments](records/harvest/page_reads_v1/assignments/), [1,000 reader comparisons](records/harvest/page_reads_v1/comparisons.jsonl), [overall/decade/class metrics](records/harvest/page_reads_v1/summary.json), [blind review](records/harvest/page_reads_v1/blind_review.html), [separate blind key](records/harvest/page_reads_v1/blind_key.json), [failure geometry](records/harvest/page_reads_v1/failure_examples.json), [cost receipt](records/harvest/page_reads_v1/cost_receipt.json), [API response receipts](records/harvest/page_reads_v1/page_response_receipts.json), [source and artifact receipt](records/harvest/page_reads_v1/receipt.json), [338-test result](records/harvest/page_reads_v1/tests.xml), [complete offline replay](records/harvest/page_reads_v1/validation.json), [QA boundary](records/harvest/page_reads_v1/gallery_qa.json), [Git audit](records/harvest/page_reads_v1/git_audit.json), [complete file/hash inventory](records/harvest/page_reads_v1/inventory.json). Bulk native PNGs, raw/parsed API responses, adapter ledgers and reservations are ignored under `docs/records/harvest/harvest_big/page_reads_v1/`.
+
+**338 tests passed**, including 34 new mapping/blind/metric/frame cases and the existing 304 montage/harvest/Google-reader/API cases. The complete offline replay verifies every assignment and metric, all raw/cache receipts and baseline hashes, all 506 unique reservations, page rendering, 30 blind cards and ten native contexts. No `.git` writes: the audit compares all Git-file size/mtime metadata from before preparation to final validation.
+
+| Source file | Purpose | SHA-256 |
+| --- | --- | --- |
+| `greekocr/harvest/page_reads.py` | Native polygon assignment, same-line harvest metrics and blind review builder | `964e7d2dbaa71ba6a07a8766ca4d01e7a42b6543a020f0674e5acec69d81e6ec` |
+| `scripts/harvest/page_reads.py` | Byte-verified page rendering, 506-call budget, evidence and report driver | `c9208ef0121cb20486958e61c21a73f3acc0e45144ed65a182448a0c8404b0c3` |
+| `scripts/harvest/validate_page_reads.py` | Offline full replay, original-input custody, API receipts and blind image checks | `5eb93c76a17721d4d7c35b21cd2e44ec9ea676487e05dd40c152b57895133b43` |
+| `tests/test_page_reads.py` | 34 offline mapping, metrics, frame and blind builder tests | `40e7e624f0030d9de9fa0d4bd8a4fb591c21054604be7a65481a46f2f2858a41` |
+| `scripts/generate_api_docs.py` | Public page-helper examples and existing API registry | `52f318440d2efa717379fb0fa29964b55cfaf6eb4417c16caa9391641413c85c` |
+| `docs/API.md` | Regenerated public API including five new page helpers | `589da5d6d9b91303523aded09ac0f7f52e1bba896fd1a80b142f21c53f5a48d4` |
+
+
+## T16 Anemi round 1 owner screening (14 October 2026)
+
+The exact 150 wave-3 IDs were joined to their two pilot pages. **79 books selected: 64 full and 15 reduced; 61 OUT_TYPE and 10 OUT_SCAN**, with both-cause books counted once under scan. The DocAI symbol-confidence bottom-quintile cut is **0.9352457086159099** and the letters+marks exact line-agreement cut is **0.4350161117078411** (inclusive ties). Individual substitution-fingerprint shares above 5% and non-Greek/mixed-block shares above 5% also exclude a book. Every book’s pilot coverage, title flag, signals, thresholds, exact borderline values and reasons are printed in [SELECTION.md](records/harvest/round1/SELECTION.md). Cached full-page reads cover 142 books / 253 pages; no new OCR calls were made.
+
+Equal nominal decade budgets, clipped to surviving capacities and the 16-page cap (8 for reduced books), yielded **881 planned slots**, below the approximate 2,000-page target after mandatory cuts. Five multi-volume proposal counts describe the first attachment; planning uses the sum of source-declared volume lengths and excludes the pilot by volume/local identity. Seed 20261014 spreads positions over 8%–95%, with 0–2 page nudges. Each slot has only its next two physical neighbours as replacement candidates.
+
+**1,000 single-page PDFs fetched and gated; 860 accepted; 53 accepted replacements; 79 fetched replacement attempts; 21 exhausted slots.** Forty retained PDFs from the superseded first-volume plan are explicitly unselected; all remain SHA-bound and physically gated in the manifest. The physical gate failed on 101 pages; selection and physical-gate rejections are separate, overlapping fields. Fetch chunks took **35.01 minutes**, **28.565 pages/minute**; total from first Anemi request through final artifact validation was **46.50 minutes**, excluding earlier selection preparation. All **1026 recorded requests returned HTTP 200**; minimum request-start gap **2.000024 seconds**, with the fetcher’s persisted rate state, memory-only credentials/cookies and Anemi-only HTTPS origin checks. Zero Vision, Document AI or Transkribus calls.
+
+The exact original T13c gate source is archived at [pilot_core.py](records/harvest/round1/pilot_core.py), SHA-256 `55c2efd673ce5bca8492e4f5a3fda60ec6c6f26f1def1ca3f265c4459ad8a0e1`; all **300 original pilot gate decisions replay exactly**. Stack source/model hashes match the frozen pilot. The historical page gate has no page-level photometric/show-through cuts; separately recorded T16 guards use original pilot feature definitions and conservative pilot-calibrated limits. The relative-faintness suppression share is a proxy, not proof of show-through. PDF decoding and rendering share a lock; gating uses native unstraightened 200-DPI grayscale PNGs.
+
+Owner artifacts: [look.html index](records/harvest/round1/look.html), seven self-contained inline-image parts (largest **23.76 MB**), [manifest](records/harvest/round1/manifest.json), [summary](records/harvest/round1/summary.json), [selection/positions](records/harvest/round1/selection.json), [visual observation](records/harvest/round1/observations.json), [gallery metadata](records/harvest/round1/gallery.json), [gate replay](records/harvest/round1/pilot_gate_replay.json), [offline validation](records/harvest/round1/validation.json), [44-test receipt](records/harvest/round1/tests.xml), [file/hash inventory](records/harvest/round1/inventory.json), [Git audit](records/harvest/round1/git_audit.json). Inline review images are downscaled WebP at most 1200 × 1600; `<details>` expands the complete page inline. All 150 book rows are in decade/title order within selected and removed groups; removed books have one original pilot image each. There are **931 inline images**. Red borders mark accepted replacements. The selected 1868 American-Greek Committee report is visibly flagged because fetched page 41 contains English outside its Greek pilot pages. Owner language/type review remains necessary before OCR page reads.
+
+Bulk PDFs, native PNGs, public viewer descriptors, transport/receipt ledgers, the gate-result cache and QA preview are ignored under `docs/records/harvest/harvest_big/round1/`. The existing T13c amended fetcher is copied locally with explicit index selection and metadata-bound resumable selection union; upstream files were read only. The read-only validator independently replays book signals/cuts, allocation/positions, PDF/receipt/native-PNG hashes, all selection/replacement dispositions, source bindings, rate gaps and inline-image counts/dimensions/links/file sizes. **44 offline tests passed**. Native and review-image pixels were inspected; browser layout remains unverified because macOS sandbox Mach-port permission blocked Chromium startup, as recorded in [gallery_qa.json](records/harvest/round1/gallery_qa.json).
+
+This task performs no `.git` writes. Main HEAD/index/main-ref/main-reflog contents match their before snapshots. The shared audit records changes to other worktrees, `astra` refs/reflogs and shared objects during the long run; those are preserved as observed.
+
+
+## T17 round-1 accepted-page reads, 1860–1880 (14 October 2026)
+
+Only the owner-approved `harvest_accepted=true` round-1 pages were read: **343 pages / 33 books**, comprising 127 pages / 9 books in the 1860s, 90 / 6 in the 1870s and 126 / 18 in the 1880s. The frozen selection and manifest hashes are in [plan.json](records/harvest/round1/reads_d1/plan.json). Decades 1890–1930 were excluded. Both readers used the original T15 bindings on the unchanged native 200-DPI grayscale PNGs: **686 successful uncached calls (343 per reader), USD 1.029 conservative list-price reservations**, within USD 2.00. Persistent pre-call reservations, raw/cache receipts and locks enforce at-most-once calls with zero retries; offline rebuild/replay needs no ADC and makes no service calls. No line crops were cut.
+
+The records retain **14,082 DocAI line layouts**, including 799 lines shorter than three letters that are excluded from counts. The **13,283 counted lines** contain **5,840 tier 1, 1,961 tier 2 and 5,482 tier 3**: **7,801 provisional labels / 58.73% yield**, with symbol-weighted DocAI confidence **0.944280919**. Tier 1 is strict cleaned NFD equality; tier 2 is unchanged T14b letters+marks equality after spacing-apostrophe unification; both labels use DocAI text. Disagreements, rejected and unresolved attachments stay unlabelled. No edit-distance or substitution promotion is applied. DocAI symbol confidences use original text-anchor custody; page bboxes use the T15 native-transform helper. This cohort has zero lost pages, zero empty reads and zero transform cases.
+
+Vision symbol-break unions are first assigned by the T15 overlap/touch rule. Ambiguous nearby boxes use recorded mutual unique text alignment (L/M similarity >=.75, margins >=.10); Vision boxes are never shared or silently split. Of counted lines, **3,286 use box overlap, 9,274 use text alignment and 723 remain unresolved**. Geometry supplies 2,195 labels and fallback supplies 5,606; text-based matching can select for agreement, so both methods are visible. The unchanged pilot list-return handling joins side-by-side pieces in x order and retains rejection for stacked/obstructed/foreign output. Yield and confidence are provisional agreement measurements, not owner accuracy approval.
+
+Artifacts: [READS_D1.md](records/harvest/round1/READS_D1.md), [records.jsonl](records/harvest/round1/reads_d1/records.jsonl), [summary](records/harvest/round1/reads_d1/summary.json), [343 raw-bound page assignments](records/harvest/round1/reads_d1/assignments/), [cost receipt](records/harvest/round1/reads_d1/cost_receipt.json), [receipt](records/harvest/round1/reads_d1/receipt.json), [failure examples](records/harvest/round1/reads_d1/failure_examples.json), [review selection](records/harvest/round1/reads_d1/review_selection.json), self-contained [1860s](records/harvest/round1/reads_d1/review_1860.html), [1870s](records/harvest/round1/reads_d1/review_1870.html) and [1880s](records/harvest/round1/reads_d1/review_1880.html) reviews. Each of 33 books has its lower median-yield page: numbered green DocAI boxes on the left, numbered tier-colored text on the right, folded Vision text for tier 2 and both readings for tier 3. Images are inline WebP, <=1200x1600. Every accepted page has a native-size numbered PNG and adjacent UTF-8 text in ignored `docs/records/harvest/harvest_big/round1/reads_d1_look/<decade>/<year>_<title>_<id>/pNNNN.{png,txt}`. Bulk raw responses and adapter/budget ledgers are ignored under `docs/records/harvest/harvest_big/round1/google/`.
+
+**182 offline tests passed**, including 33 new T17 cases and existing T15/T16/Google-reader contracts. [Tests](records/harvest/round1/reads_d1/tests.xml), [offline replay](records/harvest/round1/reads_d1/validation.json), [visual QA](records/harvest/round1/reads_d1/gallery_qa.json), [Git audit](records/harvest/round1/reads_d1/git_audit.json), [complete file/hash inventory](records/harvest/round1/reads_d1/inventory.json). Replay verifies all raw/cache hashes, 686 unique uncached adapter/reservation receipts, every assignment/record/metric, all 343 native overlay rasters/text files, and all 33 median-page inline images and HTML contents. Three overlays were visually inspected, including a facing-page spread. Browser-rendered layout remains unverified: automatic approval review rejected Firefox inspection; the Playwright Chromium executable is absent. Owner review remains pending.
+
+T17 performs no `.git` writes or Git commands. The metadata audit observed concurrent main/index/reflog changes; the main reflog records separate round-1 rescue commits and the T18 brief. Those changes are preserved, and T17's frozen selection/manifest bindings remain unchanged.
+
+| Source file | Purpose | SHA-256 |
+| --- | --- | --- |
+| `greekocr/harvest/round1_reads.py` | Offline strict tiers, Vision attachment, symbol custody and numbered reviews | `c2295f288eca872a81eab9be40c0132de2b83e809e8fcd253896f22e33d1bca4` |
+| `scripts/harvest/round1_reads.py` | Frozen approved scope and explicit budgeted page calls | `4f40f2e49cfd6be5c76f13d0ce97f6f39729ddef0c36ebd5c8f2fe5c15829f2b` |
+| `scripts/harvest/build_round1_reads.py` | Offline records, review artifacts, report and receipts | `1793cd85c73032c0f2c028f1f4a5c1d0077b2feba99d49bdf4ebbf64b40dc1c5` |
+| `scripts/harvest/validate_round1_reads.py` | Scope, raw/ledger, assignment and review replay | `f12c51251aaca6441dd1451c1071c1b9433f7bfc108fedeb874457411ca90d51` |
+| `tests/test_round1_reads.py` | 33 offline T17 contract cases | `eeeaf03689d31dfad4cb1c3ff848d8f1f5cf67eacc58866c5f131ac67789777d` |
+
+
+## T18 round-1 owner rescue fetch (14 October 2026)
+
+Only the **51 explicit owner rescues** were resolved from the frozen T16 selection. `stay_out`, `pending_owner_look_1880s` and the bad-scan removals were not fetched. Allocation is 16 pages for each of the 10 rescued 1860s/1870s books and 13 for the other 41: **693 slots**. Seeded 8–95% positions, pilot exclusions, original physical neighbours +1/+2, the frozen pilot gate and all T16 quality guards are unchanged.
+
+**799 single-page PDFs fetched and gated; 672 accepted; 72 accepted replacements; 106 replacement attempts; 21 exhausted slots.** Fetch/gate chunks took **27.96 minutes**, 28.578 fetched pages/minute. All **803 Anemi requests returned HTTP 200**; minimum observed shared request-start gap 1.999815 seconds. The existing T16 HTTP lock, rate state, transfer ledger and throttle policy are shared directly. Credentials/cookies remained in memory. **Zero Google/other OCR service calls.** Receipt-bound PDF/gate caches are resumable; a completed resume/publication made zero new network requests.
+
+The [combined manifest](records/harvest/round1/manifest_all.json) is one accepted-only list of **1,532 rows: 860 T16 + 672 rescue**, tagged `origin: t16|rescue`, preserving every source row and rejecting duplicate book/page identities. All **672 native 200-DPI grayscale PNGs** are under ignored `docs/records/harvest/harvest_big/round1_look/accepted/<decade>s/RESCUED_<year>_<title40>_<id6>/pNNNN[_REPL].png`. The original Finder folder/README was located in the archived pilot workspace and read only. Its naming rule replays exactly on all 79 original accepted-book names. Pre-task folders were untouched.
+
+**63 offline tests passed** (19 new rescue cases + 44 T16). Complete offline validation independently checks all 799 PDF/receipt/native-image bindings and source rasters, quality flags and stack/gate hashes, every slot/replacement chain, the exact union and every Finder copy. Two native pages were visually inspected; this is sample evidence, with owner type/language review still pending. The T16 selection/manifest inputs remain unchanged. Main HEAD/index/ref/reflog contents match the before snapshot; one other R8-stack worktree index change was observed and preserved. No Git mutations were performed by T18.
+
+Artifacts: [RESCUE_FETCH.md](records/harvest/round1/RESCUE_FETCH.md), [manifest](records/harvest/round1/rescue/manifest.json), [summary](records/harvest/round1/rescue/summary.json), [allocation](records/harvest/round1/rescue/selection.json), [Finder receipts](records/harvest/round1/rescue/look_manifest.json), [validation](records/harvest/round1/rescue/validation.json), [tests](records/harvest/round1/rescue/tests.xml), [resume](records/harvest/round1/rescue/resume_check.json), [Git audit](records/harvest/round1/rescue/git_audit.json), [file/hash inventory](records/harvest/round1/rescue/inventory.json). Bulk PDF, native raster, descriptor, receipt and gate caches are ignored under `docs/records/harvest/harvest_big/round1/rescue/`.
+
+| Source file | Purpose | SHA-256 |
+| --- | --- | --- |
+| `greekocr/harvest/round1_rescue.py` | Offline rescue allocation, accepted-only union and Finder naming | `da7d6684aeb0325b097404a5021711545a0683d81e694e4f64a9cf69642a0b60` |
+| `scripts/harvest/round1_rescue.py` | Isolated T16 acquisition adapter, resumable gate custody and publication | `038f9bbf164887c1f3927f554309dcede8954620c8db7bee16dfa5be759a913b` |
+| `scripts/harvest/validate_round1_rescue.py` | Offline receipt, raster, gate, slot, rate and union replay | `c664cc560d92ba47403e42246065a194545c8acf20efabcbde952c683377908a` |
+| `tests/test_round1_rescue.py` | 19 offline rescue allocation, union and naming cases | `b4bb085bfedb0f43aec3dbb42af429187db2ceb8a3068c1835904ab49298d0d2` |
+
+
+<!-- T19:begin -->
+## T19 remaining round-1 DocAI reads (14 October 2026)
+
+**1189 unread accepted pages; 60979 provider lines; 57099 counted; 1112 tall; 4119 low confidence.** 517 T16 pages in 1890–1930 plus all 672 rescue pages. DocAI only, 1189 unique uncached page receipts; USD 1.7835 conservative list-price cost against USD 3.00. No retries, crop reads, Vision calls or Git mutations.
+
+Artifacts: [READS_REST.md](records/harvest/round1/READS_REST.md), [records](records/harvest/round1/reads_rest/records.jsonl), [combined d1/rest records](records/harvest/round1/records_all.jsonl), [per-page assignments](records/harvest/round1/reads_rest/assignments/), [summary](records/harvest/round1/reads_rest/summary.json), [receipt](records/harvest/round1/reads_rest/receipt.json), [raw/cache/file hashes](records/harvest/round1/reads_rest/inventory.json), [cost receipt](records/harvest/round1/reads_rest/cost_receipt.json), [failures/transforms](records/harvest/round1/reads_rest/failure_examples.json). Raw responses remain under ignored `docs/records/harvest/harvest_big/round1/google/`.
+
+The reusable `scripts/harvest/compile_page_reads.py` rebuilds the approved native-page diptychs from any records file. Every rest page is in ignored `reads_rest_compiled/<decade>s/[RESCUED_]<year>_<title40>_<id6>/pNNNN.jpg`; all 343 d1 JPEGs were regenerated. [Three-page byte/layout equivalence](records/harvest/round1/reads_rest/layout_equivalence.json) confirms exact original JPEG bytes and zero text-position delta, including tall/low-confidence examples. [Sample visual QA](records/harvest/round1/reads_rest/visual_qa.json) is separate from owner accuracy review.
+
+**217 offline tests passed**. [Replay validation](records/harvest/round1/reads_rest/validation.json) reconciles the entire scope, assignments, raw/cache bindings, unique provider receipts, preserved d1 fields, batch tags and all compiled hashes/dimensions/text positions. T17 records, shared budget and Vision adapter ledger remain byte-identical. [Git metadata audit](records/harvest/round1/reads_rest/git_audit.json) records any concurrent activity; this task made no `.git` writes.
+
+| Source file | Purpose | SHA-256 |
+| --- | --- | --- |
+| `scripts/harvest/round1_reads_rest.py` | T19 offline records, explicit reader controls, rendering or validation | `0794d7d8d008b7b7dda57dddf43731f0288783131115e410fc5625ce88e0b456` |
+| `scripts/harvest/build_round1_reads_rest.py` | T19 offline records, explicit reader controls, rendering or validation | `c41cde82cc52b64e94c84f17462c94da6511fa0fb04093f9efebb0e6ace0c527` |
+| `scripts/harvest/compile_page_reads.py` | T19 offline records, explicit reader controls, rendering or validation | `7eee06e48d41f9365114ee02b5c35b39edc473892a370fbbb6b1e06ab80b2d12` |
+| `scripts/harvest/validate_round1_reads_rest.py` | T19 offline records, explicit reader controls, rendering or validation | `0650168809d2bd94b38fcfb4cb4d9845dfadada03e0210cec286eaa3f275592b` |
+| `tests/test_round1_reads_rest.py` | T19 offline records, explicit reader controls, rendering or validation | `0fe7c981122323895d199f71edf408d55356706f9d4ac916e1645b31891d1480` |
+| `tests/test_compile_page_reads.py` | T19 offline records, explicit reader controls, rendering or validation | `37d33b19af3cfa5e4852547e7e3523ad1d98c380bc1d0de0ac524cc6b81f2c91` |
+
+<!-- T19:end -->
+
+## T20 Wave 0 admission and native crops (15 October 2026)
+
+New offline code consumes the immutable round-1 DocAI records, page manifest and title metadata. 61,882 admitted / 13,179 rejected; 49,951 train / 3,365 dev / 8,566 test; 221 O5 exclusions. 20 held-out books, with the single available 1930s book documented as the sole decade-capacity exception. 61,882 native grey crops passed complete hash/geometry/pixel validation. **353 offline tests passed**, including 86 new cases.
+
+Artifacts: [admission report](records/harvest/round1/ADMISSION.md), [input/source/output hash inventory](records/harvest/round1/admission_inventory.json), [full validation](records/harvest/round1/admission_validation.json), [test receipt](records/harvest/round1/admission_tests.json), [visual QA](records/harvest/round1/admission_visual_qa.json), [Git metadata audit](records/harvest/round1/admission_git_audit.json). Crops and five class sheets live under the existing ignored `docs/records/harvest/harvest_big/round1/` path. The empty Cyrillic sheet and sampled source-box/label alignment issues are explicit; owner accuracy review remains pending.
+
+| Source file | Purpose | SHA-256 |
+|---|---|---|
+| `greekocr/harvest/admission.py` | Pure script inventory, all admission gates, page checks, seeded holds, O5 and crop geometry | `e32ba0429908bc405e0b2c2bb26d97cdec5f923733d708deaea018b65cb90a50` |
+| `scripts/harvest/admit_round1.py` | Local crop/artifact/contact-sheet builder | `e623d5f006e8d1da6c15fcc6b855690b6c7ddda7e7ff18175536170171b3fec0` |
+| `scripts/harvest/validate_round1_admission.py` | Full offline admission/split/geometry/hash/native-pixel replay | `6c15da9ea28f5800a025d2a686667549c32daf6fab535f00452f2c91b1517281` |
+| `tests/test_harvest_admission.py` | 80 synthetic admission, inventory, split, O5 and geometry cases | `1c6355a2184d3c701d0a62ef22e55cdf750d6172eb1403506e05bf5ff56abbbb` |
+| `tests/test_round1_admission_outputs.py` | 6 synthetic output, custody, contact-sheet and native-pixel cases | `78d06bfdd10a8071d18fdab282807b9806f166777c1db0892758cb2ed57fd939` |
+
+
+<!-- T21:begin -->
+## T21 — Vouli Wave 1 (15 October 2026)
+
+1126 pages rendered / 779 accepted / 779 read; 48169 DocAI lines; 37367 admitted crops; USD 1.1580; 230 offline tests passed.
+
+Entrypoints: `python -m scripts.harvest.vouli render-gate|run|build|validate|publish`; only `run` uses the network. Reader is DocAI only, unchanged T19 binding, at-most-once image SHA ledger, USD 2.50 ceiling. The unchanged `greekocr/harvest/admission.py` handles all T20 line rules. The combined training pool applies cross-wave hold-out exclusions and the ≤40% polytonic-source cap.
+
+[Report](records/harvest/vouli/READS.md), [records](records/harvest/vouli/records.jsonl), [admitted](records/harvest/vouli/admitted.jsonl), [rejected](records/harvest/vouli/rejected.jsonl), [summary](records/harvest/vouli/admission_summary.json), [books/page counts](records/harvest/vouli/books.json), [hold-outs](records/harvest/vouli/holdout_books.json), [training pool](records/harvest/vouli/train_pool.jsonl), [training exclusions](records/harvest/vouli/train_pool_exclusions.jsonl), [validation](records/harvest/vouli/validation.json), [tests](records/harvest/vouli/tests.xml), [complete file/hash inventory](records/harvest/vouli/inventory.json). Bulk PDF, rendered page, Google raw/cache, crop, compiled JPEG and sheet files remain under ignored `docs/records/harvest/harvest_big/vouli/`.
+
+<!-- T21:end -->
+
+<!-- T22:begin -->
+## T22 — Anemi Wave 2 (15 October 2026)
+
+50 new books; 781 fetched / 613 accepted / 613 read; 29943 DocAI lines; 24430 native crops; USD 0.9195; 214 offline tests passed.
+
+`python -m scripts.harvest.round2 select|fetch-gate|plan|read-watch|run|build|validate|publish`; fetch-gate uses Anemi; read-watch (optional overlap) and run use Document AI. Unchanged T16 gate/T20 admission/T21 read mapping; seeded selection/hold-outs; at-most-once page SHA reads. Compiled bad pages retain visible red rejection headings. Bulk PDFs, PNGs, Google caches, crops and JPEGs remain ignored under `harvest_big/round2/`.
+
+[Selection](records/harvest/round2/SELECTION.md), [reads](records/harvest/round2/READS.md), [records](records/harvest/round2/records.jsonl), [admitted](records/harvest/round2/admitted.jsonl), [rejected](records/harvest/round2/rejected.jsonl), [summary](records/harvest/round2/admission_summary.json), [hold-outs](records/harvest/round2/holdout_books.json), [training pool](records/harvest/round2/train_pool.jsonl), [validation](records/harvest/round2/validation.json), [tests](records/harvest/round2/tests.xml), [hash inventory](records/harvest/round2/inventory.json).
+
+Sample [visual QA](records/harvest/round2/visual_qa.json) documents retained crop defects and three visibly verified bad-page headers; native context/crop evidence is under `harvest_big/round2/qa/`.
+
+<!-- T22:end -->
+
+
+<!-- T23:begin -->
+## T23 — Parliament Wave 3 (15 October 2026)
+
+72 of 104 requested volumes (eight missing source years); 1153 rendered / 705 accepted / 690 read pages; 95438 DocAI lines; 85042 admitted crops; USD 1.0575; 270 tests.
+
+`python -m scripts.harvest.parliament select-fetch-gate|run|build|validate|publish`; network only for fetch/gate and run. Seeded chronological selection and year-stratified hold-out; CC BY 4.0 raw-only; ORIGINAL PDFs bounded to 250 MB and deleted after sampling; frozen T16 gate/T20 admission/T21 DocAI mapping; at-most-once SHA ledger and USD 2.50 cap.
+
+[Selection](records/harvest/parliament/SELECTION.md), [reads](records/harvest/parliament/READS.md), [records](records/harvest/parliament/records.jsonl), [admitted](records/harvest/parliament/admitted.jsonl), [rejected](records/harvest/parliament/rejected.jsonl), [summary](records/harvest/parliament/admission_summary.json), [hold-outs](records/harvest/parliament/holdout_books.json), [training pool](records/harvest/parliament/train_pool.jsonl), [validation](records/harvest/parliament/validation.json), [tests](records/harvest/parliament/tests.xml), [hash inventory](records/harvest/parliament/inventory.json). Raw caches, page PNGs, UUID8 crops, compiled JPEGs and class sheets remain ignored under harvest_big/parliament/.
+
+<!-- T23:end -->
+
+<!-- T24:begin -->
+## T24c — Open Archives Wave 4
+
+T24c: done | docs: 89/173 | pages: 1443/917/917 | lines: 30788 | admitted: 25606 | mono: 22128 | cs: 2254 | train: 19797 | dev: 1083 | test: 4726 | usd: 1.38 | tests: 269 passed
+
+Entrypoint: `python -m scripts.harvest.openarchives prepare|acquire|plan|read|build|validate|publish`. [Policy](../greekocr/harvest/openarchives.py), [runner](../scripts/harvest/openarchives.py), [outputs/validation](../scripts/harvest/openarchives_outputs.py), [tests](../tests/test_openarchives.py). [Report](records/harvest/openarchives/READS.md), [selection](records/harvest/openarchives/SELECTION.md), [records](records/harvest/openarchives/records.jsonl), [summary](records/harvest/openarchives/admission_summary.json), [hold-outs](records/harvest/openarchives/holdout_books.json), [validation](records/harvest/openarchives/validation.json), [hash inventory](records/harvest/openarchives/inventory.json). Bulk PNGs, crops, raw DocAI responses, compiled JPEGs and class sheets remain under harvest_big/openarchives/. Original preflight folders and Wave 5 candidates retained.
+<!-- T24:end -->
+
+## T25 — Wave 5 mixed and Latin collection
+
+Seeded three-part acquisition and frozen admission: [policy](../greekocr/harvest/mixed.py), [runner](../scripts/harvest/mixed.py), [outputs and verification](../scripts/harvest/mixed_outputs.py), [offline tests](../tests/test_mixed.py). 81 sources; 782 read pages; 33114 admitted crops. [Report](records/harvest/mixed/READS.md), [selection](records/harvest/mixed/SELECTION.md), [file inventory](records/harvest/mixed/inventory.json). Bulk crops, pages, responses and class sheets are under harvest_big/mixed.
+
+## T26 — Wave 6 Cyrillic collection
+
+13 Internet Archive items; 566 DocAI-read pages; 13683 admitted crops. [Policy](../greekocr/harvest/cyrillic.py), [runner](../scripts/harvest/cyrillic.py), [outputs/validation](../scripts/harvest/cyrillic_outputs.py), [tests](../tests/test_cyrillic.py). [Report](records/harvest/cyrillic/READS.md), [records](records/harvest/cyrillic/records.jsonl), [summary](records/harvest/cyrillic/admission_summary.json), [hold-outs](records/harvest/cyrillic/holdout_books.json), [validation](records/harvest/cyrillic/validation.json), [inventory](records/harvest/cyrillic/inventory.json). Bulk PNGs, compressed raw responses, native crops, compiled JPEGs and class sheets remain ignored under harvest_big/cyrillic.
+
+## T27 — Wave 7 Wikisource dual labels
+
+20 Greek / 10 Russian selected works, test/dev only. [Policy](../greekocr/harvest/wikisource.py), [collector](../scripts/harvest/wikisource.py), [outputs](../scripts/harvest/wikisource_outputs.py), [offline tests](../tests/test_wikisource.py). [Selection](records/harvest/wikisource/SELECTION.md), [reads/status](records/harvest/wikisource/READS.md), [summary](records/harvest/wikisource/admission_summary.json), [O5 audit](records/harvest/wikisource/label_in_holdout.json), [inventory](records/harvest/wikisource/inventory.json). Source HTTP caches and raw proofread wikitext are ignored under harvest_big/wikisource. T27e status: complete; 400/400 scan pages read, 12356 admitted. T27e imports coordinator JPEGs with receipt/selection binding and recorded downscale factors; zero Wikimedia requests and no text refetch. Frozen gates flag only; all obtained pages are read under the USD 0.80 cap. Grey pages have a 3500 px long-side cap; raw responses omit embedded images.
+## T28 — Collection plan v1 close-out
+
+Offline union of eight wave artifact deliveries, all eight now with crops, including the completed T27e Wikisource delivery. The wave-5 lexicon is repaired by page; global train/hold-out label exclusions include Wikisource human, Google and saved audit labels. Crop existence, sampled SHA/dimensions and source shares are checked across the whole pool. Original wave artifacts remain unchanged. Historical Google reservations include round-1 DocAI and Vision ledgers; no T28 calls or Git writes.
+
+[Merge policy](../greekocr/harvest/collection.py), [offline builder](../scripts/harvest/collection.py), [unit tests](../tests/test_collection.py), [output readback tests](../tests/test_collection_outputs.py). Run `.venv/bin/python -m scripts.harvest.collection --help` for the local builder. [Owner report](records/harvest/collection/COLLECTION_REPORT.md), [merged rows](records/harvest/collection/admitted_all.jsonl), [global rejections](records/harvest/collection/rejected_global.jsonl), [split repair audit](records/harvest/collection/split_repairs.json), [train](records/harvest/collection/manifest_train.json), [dev](records/harvest/collection/manifest_dev.json), [test](records/harvest/collection/manifest_test.json), [import-real JSONL](records/harvest/collection/import_real_all.jsonl), [provenance](records/harvest/collection/data_provenance.json), [validation](records/harvest/collection/validation.json), [tests](records/harvest/collection/tests.xml), [file/hash inventory](records/harvest/collection/INVENTORY.md), [Git audit](records/harvest/collection/git_audit.json), [execution close-out](records/harvest/collection/EXECUTION_STATE.md), [Finder sheet index](harvest/harvest_big/collection/SHEETS.md). The report distinguishes the requested seven-field JSON arrays from the importer's required JSONL/document/split contract and includes current Wikisource CER and alignment coverage, source/mix/target gaps, and saved shortfall evidence.
+
+## CLEAN4R codec v2 origin reconciliation
+
+`greekocr/_vendor/codec/v2.json` is the byte-identical ADM5c artifact introduced at
+`sol/recut-v1@c9fbf9a847eeaa96317344993c702eaff5d4d981`. Its original absolute path
+and SHA-256 `94485f72eac0aaf2324dc60b1c02110b271d362a79c440e2ce6bf6f4604997b9`
+are recorded in [the producing census](records/harvest/collection/v2/ADMISSION_CENSUS_20261017.md).
+The original commit blob has that same SHA-256; no codec bytes were regenerated.

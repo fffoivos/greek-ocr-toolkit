@@ -4,6 +4,7 @@ Paths are relative to the manifest. Synthetic recipes are hashed from HEAD blobs
 not the index or working copy. Real shard inventories must match exactly.
 """
 from __future__ import annotations
+from greekocr.ops.data_root import input_path as _data_input
 
 import argparse
 import copy
@@ -26,7 +27,7 @@ class MixError(ValueError):
 
 def sha256(path):
     h = hashlib.sha256()
-    with Path(path).open('rb') as f:
+    with _data_input(Path(path)).open('rb') as f:
         for block in iter(lambda: f.read(1 << 20), b''):
             h.update(block)
     return h.hexdigest()

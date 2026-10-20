@@ -7,11 +7,12 @@ from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
 ROOT=Path(__file__).resolve().parents[3];sys.path.insert(0,str(ROOT))
+from greekocr.ops.data_root import input_path as _data_input
 OUT=ROOT/'.astra/out/orientation_eval'
-REPORT=ROOT/'docs/reviews/PAGE_LINES_ROUND4_ORIENTATION_GUIDES_20261009.md'
+REPORT=ROOT/'docs/records/reviews/PAGE_LINES_ROUND4_ORIENTATION_GUIDES_20261009.md'
 
 
-def read(p):return json.loads(p.read_text())
+def read(p):return json.loads(_data_input(p).read_text())
 def pct(x):return '—' if x is None else f'{100*x:.1f}%'
 def table(lines,headers,rows):
     lines.extend(['','| '+' | '.join(headers)+' |','|'+'|'.join('---' for _ in headers)+'|'])

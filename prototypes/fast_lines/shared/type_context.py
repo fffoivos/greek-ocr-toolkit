@@ -36,9 +36,9 @@ def overlaps_exclusion(polygon,regions):
     return False
 
 
-def recover(gray,items,detector,*,excluded_regions=(),grid_items=None,lattice_evidence=None,version=4):
+def recover(gray,items,detector,*,excluded_regions=(),grid_items=None,lattice_evidence=None,dense_slots=None,version=4,tone_samples=None,glyph_samples=()):
     """Stack entry: no Q8 calls; caller runs final separator on additions if needed."""
     from .type_recovery import run
     return run(gray,items,detector,version=version,skip_initial_separator=True,final_separators=False,
                grid_items=grid_view(items) if grid_items is None else grid_items,
-               lattice_evidence=lattice_evidence,excluded_regions=excluded_regions)
+               lattice_evidence=lattice_evidence,dense_slots=dense_slots,excluded_regions=excluded_regions,tone_samples=tone_samples,glyph_samples=glyph_samples)

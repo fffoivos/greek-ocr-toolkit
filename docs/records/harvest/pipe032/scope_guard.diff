@@ -1,0 +1,638 @@
+diff --git a/docs/harvest/line_pipeline/README.md b/docs/harvest/line_pipeline/README.md
+index ce905719c..519c99b66 100644
+--- a/docs/harvest/line_pipeline/README.md
++++ b/docs/harvest/line_pipeline/README.md
+@@ -1,33 +1,33 @@
+ Canonical documentation: [B.c — line-data pipeline](../../B_training_data/c_pipeline/README.md).
+ 
+-# B — line-data pipeline 0.3
++# B — line-data pipeline 0.3.2
+ 
+ This is the organising document for creation of OCR training data: **B.a** acquires pages and Google observations; **B.b** supplies segmentation, filtering and qualified correction evidence; **B.c** binds those inputs and makes auditable row decisions; **B.d** supplies owner review sheets and returned decisions. See [Google page reads](../../B_training_data/a_google_ocr/README.md), [sources and split custody](../../B_training_data/a_google_ocr/SOURCES.md), [the corrected graph](../../B_training_data/c_pipeline/pipeline.mmd) and [Clariden runbook](../../B_training_data/c_pipeline/RUNBOOK_CLARIDEN.md).
+ 
+-Documentation for `cleanup/20261019`, inspected 19 October 2026. All source paths are repository-relative. This describes the **top-level implemented code**, with historical deployed bundles identified separately. Nothing was executed, trained, deployed or released by this documentation task.
++Documentation updated for PIPE032 on 20 October 2026. All source paths are repository-relative. This describes the **top-level implemented code**, with historical deployed bundles identified separately. PIPE032 validation is recorded in `docs/records/harvest/pipe032/REPORT.md`; no census, reader or Slurm run is part of this change.
+ 
+ ## Authority and version drift
+ 
+-`greekocr/harvest/line_pipeline.py` declares `PIPELINE_VERSION = "0.3"`. `docs/harvest/line_pipeline/tool_versions.json` supplies named tool generations and exact component hashes/digests. Versions count documented methods, not commits or measured accuracy.
++`greekocr/harvest/line_pipeline.py` declares `PIPELINE_VERSION = "0.3.2"`. `docs/harvest/line_pipeline/tool_versions.json` supplies named tool generations and exact component hashes/digests. Versions count documented methods, not commits or measured accuracy.
+ 
+ | Component | Current manifest version | Scope |
+ |---|---|---|
+ | Inventory | 0.1 | Raw text scripts, words, characters, marks, punctuation and counts |
+ | Content gate | **0.3** | Mixed-script DROP, unexpected-script HOLD, raw-text length/cell rules before native work |
+-| Segmentation | **0.9-s4** | Crop-only neighbour gate, clockwise tall-crop normalization, curved main-row measurement; all-component small-segment branch |
++| Segmentation | **0.13 (0.9-s5)** | Crop-only neighbour gate, clockwise tall-crop normalization, curved main-row measurement; all-component small-segment branch |
+ | Polytonic | **0.7 / SF7** | Seven named generations; saved `candidate_pre_audit` release is proposal-only |
+ | Cyrillic | **0.3 / RU1** | Historical Russian word-final `ь→ъ` only |
+-| Numerics | **0.2 / N1** | Assisted separator corrections; rejected automatic candidate remains disabled |
++| Numerics | **0.3 / N1** | Assisted separator corrections; rejected automatic candidate remains disabled |
+ | Dashes | **0.1** | Tags only, no general repair release |
+ | Content repair | 0.2 | Independent evidence bound to exact row/content/profile |
+-| Composer | 0.2 | Compatible raw-parent spans, coverage and conflict checks |
++| Composer | 0.3 | Compatible raw-parent spans, coverage and conflict checks |
+ | Final eligibility | **0.3** | Cell exemption matches early gate; content/confidence/codec/CTC/split checks remain |
+-| Census orchestration | **0.5** | Durable inventory, bounded parallel native execution, protected frozen-parent aliases |
++| Census orchestration | **0.7** | Durable inventory, bounded parallel native execution, protected frozen-parent aliases |
+ | Codec | **v2** | `greekocr/_vendor/codec/v2.json`, NFD atoms; SHA256 `94485f72eac0aaf2324dc60b1c02110b271d362a79c440e2ce6bf6f4604997b9` |
+ 
+-The superseded pipeline README called segmentation 0.5 and census 0.3; its graph labelled pipeline 0.2 and segmentation 0.5. Those descriptions are retained only as dated records. This README and adjacent `pipeline.mmd` are corrected replacements; the superseded originals are preserved in `docs/records/harvest/line_pipeline_legacy/`. The JS policy file's “0.8” comment describes its unchanged three-rule functions; current native geometry and S4 orchestration in `crop-tools.py`, `line_pipeline_native.py` and `service.mjs` make the complete tool **0.9-s4**.
++The superseded pipeline README called segmentation 0.5 and census 0.3; its graph labelled pipeline 0.2 and segmentation 0.5. Those descriptions are retained only as dated records. This README and adjacent `pipeline.mmd` are corrected replacements; the superseded originals are preserved in `docs/records/harvest/line_pipeline_legacy/`. The JS policy file's “0.8” comment describes its unchanged three-rule functions; current native geometry and S4 orchestration in `crop-tools.py`, `line_pipeline_native.py` and `service.mjs` make the complete tool **0.13 (0.9-s5)**.
+ 
+-There are two additional integration discrepancies. The archived census03 `integration_fixes.diff` adds (1) digit/separator/digit numeric-adjacency negatives and (2) union of `final_policy.heldout_crop_sha256` into deduplication. **Both are absent from the inspected top-level code.** `automatic_result()` still uses `not any(c in text for c in ".-·")`; `Ledger.deduplicate()` protects only registered dev/test crop hashes. The archived census04 package preserves the repaired census03 code, but is a separate 0.8 deployment. Neither its results nor its external-crop protection can be attributed to the current top-level build. This document records the discrepancy and changes no code.
++The census_03 integration fixes are present at this HEAD: digit/separator/digit numeric-adjacency negatives in `automatic_result()`, and the union of `final_policy.heldout_crop_sha256` into deduplication. PIPE032 leaves both behaviors unchanged.
+ 
+ ## Entry points and responsibility
+ 
+@@ -63,7 +63,7 @@ Correction declarations bind tool, parent ID, parent-manifest SHA, artifact path
+ 
+ The execute path validates runtime and selected Node/predictor paths, component hashes, parent SHA and exact row counts; rehashes parents after registration; rejects duplicate parent IDs/row IDs and changed observations. SQLite stores every canonical payload and raw inventory **before filtering**. Inventories include letter/script/character counts, mixed words, numeric/mark/punctuation counts, raw codepoint count, NFC character count and raw-text SHA. Page summaries are calculated from all registered rows.
+ 
+-`--execute` absent returns a reporting-only `preflight` object and does **not** prove that inputs validate. `--validate-inputs-only` on the execute path performs real registration and correction indexing without native filtering; its receipt explicitly has no admission decisions. The code rejects ordinary native processing on Darwin unless an explicit test/local interface is supplied. This document ran neither path.
++`--execute` absent returns a reporting-only `preflight` object and does **not** prove that inputs validate. `--validate-inputs-only` on the execute path performs real registration and correction indexing without native filtering; its receipt explicitly has no admission decisions. The code rejects ordinary native processing on Darwin unless an explicit test/local interface is supplied. PIPE032 runs only offline fixtures, never a live census.
+ 
+ ### 2. Content gate 0.3, before crop identity and native segmentation
+ 
+@@ -78,7 +78,7 @@ Then apply the shared **raw-text** rule (`short_line_exclusion`):
+ 
+ Early exclusions fill downstream route statuses as `not_run_due_to_prior_exclusion`; census preparation also skips native measurement/cache entries. Incomplete declared expectations hold as `expectations_unresolved`. After the gate, an unbound crop holds as `crop_identity_unresolved`.
+ 
+-### 3. Native segmentation 0.9-s4
++### 3. Native segmentation 0.13 (0.9-s5)
+ 
+ Existing crop bytes must match `crop_sha256`; reconstruction is permitted only from a bound source image/SHA and frozen box with exactly matching encoded crop SHA. Verified-crop context is optional diagnostic evidence, not an additional source-availability veto.
+ 
+@@ -87,7 +87,7 @@ Existing crop bytes must match `crop_sha256`; reconstruction is permitted only f
+ The accepted three rules execute in order:
+ 
+ 1. **Other rows:** another complete row or >2 whole neighbour words drops. Cut-off groups do not count. A whole word requires letter-body evidence and **each** body ≥95% visible; a complete row uses the existing votes/body/visibility/coverage criteria. Reasons include `gate: second complete line`, `gate: too many whole neighbour words`; no main row ordinarily yields `gate: no main row found` UNCERTAIN.
+-2. **Output versus box:** main-row ink is measured along its existing base curve for non-small crops (S3); the unchanged predictor gives expected length. Keep `(characters+1)/(expected+1)` in inclusive **[0.5,1.5]**. Failure reasons are prefixed `length: Too little OCR output...` or `length: Too much OCR output...`; unavailable boxes/predictions are UNCERTAIN.
++2. **Output versus box:** main-row ink is measured along its existing base curve for non-small crops (S3); the unchanged predictor gives expected length. Keep `(characters+1)/(expected+1)` in inclusive **[0.30,2.00]**. Failure reasons are prefixed `length: Too little OCR output...` or `length: Too much OCR output...`; unavailable boxes/predictions are UNCERTAIN.
+ 3. **Padding:** crop height ≤ upright box height + **1.5 × row-frame height**; equivalently combined padding/row-frame height ≤1.5. Too much padding drops; unavailable target height/padding is UNCERTAIN. There is no additional legacy tall-box veto.
+ 
+ **S4 branch:** `characters≤8` and crop aspect≤6 uses the axis-aligned box of **all extracted components** in the processed crop frame, including components outside a main-row assignment. Here `character_count()` counts NFC nonspace characters excluding combining marks and control-category characters; it is not a letter-only count. `service.mjs::decide()` lets the specific no-main-row abstention defer to length/padding, while retaining positive complete-line/whole-word drops. Empty components still leave the box unavailable. This definition is distinct from the gate's cell branch: cells have no ≤8-character condition. Non-small crops retain S3 behavior.
+@@ -98,7 +98,13 @@ Native verdicts bind tool version, raw-text SHA and row identity; `DROP` maps to
+ 
+ After segmentation KEEP, route polytonic Greek whenever declared orthography is neither monotonic nor modern, **including missing-mark candidates**; Cyrillic whenever present; numerics for digits; dashes for `-–—−`; content repair for residual content or reviewed-profile issues. Orthography comes from metadata, not the recognized script name.
+ 
+-Successful result statuses are `applied`, `verified_no_change`, and dash-only `tag_only`. Unresolved/proposal/failed records hold as `correction_unresolved`; original producer holds clear edits and remain unresolved. RU1 edits require declared Russian plus `historical_russian` and are limited to word-final `ь→ъ`. N1 edits allow only `-`/`.`→`·`. Modern declared Russian/Serbian or historical Russian without eligible final soft sign can produce explicit scope/candidate negatives. The current numeric automatic-negative is the stricter **no `.`, `-`, or `·` anywhere** condition described above; do not substitute the archived adjacency patch in this description. Dash results only tag positions; no general repair is enabled.
++Successful result statuses are `applied`, `verified_no_change`, and dash-only `tag_only`. Unresolved/proposal/failed records hold as `correction_unresolved`; original producer holds clear edits and remain unresolved. RU1 edits require declared Russian plus `historical_russian` and are limited to word-final `ь→ъ`. N1 edits allow only `-`/`.`→`·`. Modern declared Russian/Serbian or historical Russian without eligible final soft sign can produce explicit scope/candidate negatives. The numeric automatic-negative requires no digit/separator/digit candidate (`\d\s*[.\-·]\s*\d`). Dash results only tag positions; no general repair is enabled.
++
++`config.routes_out_of_scope` is a list of correction tool names, default `[]`, bound into the run hash and passed to `Pipeline` alongside `final_policy`. Unknown names and `content_repair` are rejected: anomaly resolution is never optional. After the gate and segmentation, a needed out-of-scope route bypasses its corrector, ledger lookup and automatic result. Its route record is `tool`, `status="not_applied_out_of_scope"`, `edits=[]`, `reason="route out of scope for this release"`, and `release_scope` equal to the configured list. This is not a successful correction. It contributes no edits, unresolved obligation, candidate-scope recheck or `content_repair.resolved_by` entry. In-scope missing/sparse results still HOLD as `correction_unresolved` with `missing qualified tool result`; gate-excluded routes remain `not_run_due_to_prior_exclusion`.
++
++**Coordinator decision, 20 October, under the owner's end-to-end mandate; not an owner ruling:** census_05 uses `routes_out_of_scope=["polytonic"]`. SF7 remains `candidate_pre_audit`; routed Greek labels retain the raw Google text for that route, with all in-scope edits and final checks still applied. SF7 enters when its audit passes. This avoids treating absent/unqualified SF7 evidence as a release-wide loss of polytonic supply (census_03 held 113,176 v2-train rows; W1/W2 have no polytonic ledger). The setting is explicit per run; the default remains fully in scope.
++
++Segmentation version `0.13` restores `version == "0." + str(iteration_count)` for its 13 existing documented iterations. `label="0.9-s5"` preserves the display name. Composer adds iteration 3 for declared route scope; census adds iteration 7 for scope binding and exports. No segmentation rule or verifier changes.
+ 
+ ### 5. Validate and compose qualified raw-parent spans
+ 
+@@ -112,11 +118,11 @@ Recompute routes after compatible edits, with at most `len(TOOLS)+1` orchestrati
+ 
+ Unassigned split or unresolved canonical edition holds as `split_or_edition_identity_unresolved`. Reuse the same raw-text length check from stage 2. For **cells**, >1 letter/digit is the only length/shape requirement: no prose `short_line`, nonletter-fraction or four-digit/60% numeric-shape gate. For **non-cell declared numeric roles**, require ≥4 decimal digits and ≥60% digits/separators (defaults); other non-cells allow at most one-third nonletters among nonspace characters (`nonletter_fraction`). An exact numeric-text exemption at the early gate does not itself change the final declared content role.
+ 
+-All rows retain final content checks, available mean confidence ≥0.89 (`low_confidence`), NFD codec membership (`codec_unencodable`), and held-out edition protection (`heldout_edition` for train). No independent inherited `tall_box` check runs. If supplied, CTC output steps must accommodate NFD atoms plus adjacent identical-atom repeats (`ctc_infeasible`); with `require_ctc_steps`, missing steps HOLD as `ctc_steps_unavailable`. This is an input/output contract, not a training-architecture selection. Measured final failures DROP; checks marked unresolved HOLD; otherwise row disposition is ADMIT.
++Final eligibility reads nothing new: [`line_pipeline.py:337–380`](../../../greekocr/harvest/line_pipeline.py#L337-L380) (`final_eligibility`) accepts only row, final text/inventory, expectations, codec and policy; it never consults the polytonic route or release scope. All rows retain final content checks, available mean confidence ≥0.89 (`low_confidence`), NFD codec membership (`codec_unencodable`), and held-out edition protection (`heldout_edition` for train). No independent inherited `tall_box` check runs. If supplied, CTC output steps must accommodate NFD atoms plus adjacent identical-atom repeats (`ctc_infeasible`); with `require_ctc_steps`, missing steps HOLD as `ctc_steps_unavailable`. This is an input/output contract, not a training-architecture selection. Measured final failures DROP; checks marked unresolved HOLD; otherwise row disposition is ADMIT.
+ 
+ ### 8. Global train deduplication and evaluation retention
+ 
+-In deterministic parent/id order, group ADMIT train rows by exact crop SHA. A crop shared with registered dev/test drops as `heldout_crop_identity`; differing final labels for one train crop hold **all** members as `same_crop_conflicting_labels`; repeated same-label observations after the first drop as `duplicate_training_observation`, recording the retained identity. `pre_dedup_disposition` retains provenance. Top-level external held-out-crop hook is absent as noted above. Configured held-out editions and non-train registered editions still feed edition checks.
++In deterministic parent/id order, group ADMIT train rows by exact crop SHA. A crop shared with registered dev/test drops as `heldout_crop_identity`; differing final labels for one train crop hold **all** members as `same_crop_conflicting_labels`; repeated same-label observations after the first drop as `duplicate_training_observation`, recording the retained identity. `pre_dedup_disposition` retains provenance. Configured `final_policy.heldout_crop_sha256` is unioned with observed held-out crops. Configured held-out editions and non-train registered editions still feed edition checks.
+ 
+ ### 9. Publish a complete generation and pending obligations
+ 
+@@ -127,11 +133,11 @@ In deterministic parent/id order, group ADMIT train rows by exact crop SHA. A cr
+ | `ledger.sqlite` | WAL-backed canonical observations, raw inventory, measurement cache, correction releases/results, durable phases and decisions |
+ | `progress.json`, `runtime.json` | Progress/disposition counters; native attempts/reuse, unavailable/error counts, worker/prefetch settings and timing; not population accuracy |
+ | `decisions.jsonl` | One decision for every registered row, including explicit UNPROCESSED. **It is not a complete copy of every source row**; raw payloads live in the ledger and other exports. |
+-| `admission_records.jsonl` | Compatibility records: row/parent/split, pass, final label, crop SHA, source/class, pipeline version and full decision |
++| `admission_records.jsonl` | Compatibility records: row/parent/split, pass, final label, crop SHA, source/class, pipeline version, full decision and `corrections_not_applied` (sorted routed out-of-scope tool names, otherwise `[]`); their status remains `not_applied_out_of_scope` in the embedded route record |
+ | `admitted_train.jsonl` | Only post-dedup ADMIT train rows, with canonical payload, final text and decision |
+ | `evaluation_diagnostics.jsonl` | Every **non-train** row, including unassigned, with original canonical row plus diagnostics/decision; retains the original dev/test cohorts |
+ | `pending_polytonic.jsonl`, `pending_cyrillic.jsonl`, `pending_numerics.jsonl`, `pending_content_repair.jsonl` | Scheduled unresolved/proposal/failed routes with raw `label`/`text`, crop/script fields, expectations, required binding and recheck obligation. There is no pending-dashes file. |
+-| `generations/gN-<uuid>/summary.json`, output files | Immutable generation, output hashes, phase completion and accounting |
++| `generations/gN-<uuid>/summary.json`, output files | Immutable generation, output hashes, phase completion and accounting; `corrections_not_applied` counts routed rows per out-of-scope tool by final disposition |
+ | `CURRENT.json` | Publication status, generation/export ID, run-binding SHA and summary path/SHA; authoritative publication receipt |
+ 
+ Any changed decision invalidates publication before mutation and advances the generation. Census `complete` requires inventory, rows, dedup and committed export phases plus zero UNPROCESSED/INFRA_ERROR rows. A completed census may contain HOLD/DROP and proposal-only evidence; completion is not training readiness or accuracy qualification.
+@@ -151,13 +157,13 @@ Strict PNG reconstruction on Clariden uses private **zlib-ng 2.3.3 compatibility
+ | census_01, job 3693052 | FAILED during registration on legacy val/reserved aliases; zero native decisions. Preserved failed attempt. | `docs/harvest/line_pipeline/clariden/{CENSUS_01_STATUS.md,census_01-failure-log.txt}` |
+ | census_02, job 3693110 | Completed historical segmentation **0.5** population: **17,036 DROP / 423,499 KEEP / 151,931 UNCERTAIN**, total 592,466. Pipeline final: **0 ADMIT / 17,036 DROP / 575,430 HOLD**. Whole job elapsed 01:46:11; six-hour request. | `segeval1/{HANDOFF.md,draw_receipt.json,cells/HANDOFF.md}` under `docs/records/harvest/collect_v3_admission/`; later census03 handoff accounting. |
+ | census_03, job 3695426 | **Completed**, normal, whole job 01:49:40; census step 01:49:19. Later handoff records **65,900 historical v2 train admissions**; W1/W2 still unassigned, 142,959 split-only candidates. This used segmentation 0.5 and repaired metadata/correction ledgers. | `docs/records/harvest/seg_census/remote_evidence/accounting_and_config.txt`; `docs/records/harvest/seg_census/HANDOFF_SEGCENSUS1.md` |
+-| census_04_seg08, package `bb1ea164338b3068` | **Deployed/verified/test-only; no submission** in final b2 receipt. 338/338 remote hashes match, three VERIFY_OK results, six smoke/full mode-i scheduler dry checks. Frozen package uses segmentation **0.8**, gate/final **0.2**, not current 0.9-s4/0.3. No real split pinned. | `docs/records/harvest/seg_census/{receipt.json,receipt_b2.json,HANDOFF_SEGCENSUS1.md,b2_evidence/remote_readback.tsv}` |
++| census_04_seg08, package `bb1ea164338b3068` | **Deployed/verified/test-only; no submission** in final b2 receipt. 338/338 remote hashes match, three VERIFY_OK results, six smoke/full mode-i scheduler dry checks. Frozen package uses segmentation **0.8**, gate/final **0.2**, not current 0.13 (0.9-s5)/0.3. No real split pinned. | `docs/records/harvest/seg_census/{receipt.json,receipt_b2.json,HANDOFF_SEGCENSUS1.md,b2_evidence/remote_readback.tsv}` |
+ 
+ Census02 immutable export: `g1-1c775230225d4bbea5871d4fae2475da`, 8,168,706,501 bytes, SHA `568d4759257787086ee8c0780cd0d4cf633c5ebf7b355d519d6053ff8c42764a`, under `$W/filter_pipeline_20261018/attempts/census_02/census/generations/`. Its segmentation counts are **before** review exclusions. SEGEVAL's 16,736 DROP / 416,241 KEEP / 151,645 UNCERTAIN are the smaller sampling pools after exclusions, not whole-census totals.
+ 
+ Census03 frozen export: `g1-a21c3b465ca94eee80cb5bd34b336d69`, 8,900,374,978 bytes, SHA `b2355093affcb54e6fdcd7733212909c348c5a1971ed2de545000deece1cb98d`. Its early `remote_evidence/HANDOFF.md` says “prepared, not executed” and predicts 65,900; that timestamped prediction is superseded by later completed accounting and the package handoff. The root census02 status snapshot likewise says RUNNING because it was captured near launch; it does not override the completed export.
+ 
+-Census03 imports 235,257 SF7, 556,245 N1 and 19,898 RU1 canonical records, retaining scope negatives and holds. SF7's 605 raw-edit corrections remain candidate-pre-audit. W1/W2 SF7 absence never becomes no-change evidence. Metadata/protection/ledger fixes explain the historical result; **no whole-population result for the top-level 0.9-s4 + gate 0.3 build is established by these receipts**.
++Census03 imports 235,257 SF7, 556,245 N1 and 19,898 RU1 canonical records, retaining scope negatives and holds. SF7's 605 raw-edit corrections remain candidate-pre-audit. W1/W2 SF7 absence never becomes no-change evidence. Metadata/protection/ledger fixes explain the historical result; **no whole-population result for the top-level 0.13 (0.9-s5) + gate 0.3 build is established by these receipts**.
+ 
+ Clariden has three measured job kinds: **regression**, **parity**, and **census** (filter + correction import + composition/admission/dedup/export). Imported corrections are not separate reader jobs. `filter_worker.sbatch` is the earlier thin adapter with inventory/prepare/qualify/census/census-preflight modes; archived census04 separates the three bounded jobs. Follow the [runbook](../../B_training_data/c_pipeline/RUNBOOK_CLARIDEN.md) for their different defaults and verify→smoke→full boundaries.
+ 
+diff --git a/docs/harvest/line_pipeline/tool_versions.json b/docs/harvest/line_pipeline/tool_versions.json
+index 4f5ef47b6..cb521c4b5 100644
+--- a/docs/harvest/line_pipeline/tool_versions.json
++++ b/docs/harvest/line_pipeline/tool_versions.json
+@@ -2,6 +2,7 @@
+   "schema": "ocr-filter-tool-versions-v1",
+   "versioning": "0.n: documented named method generations, not commit count, accuracy or number of individual edits. Rejected generations remain in history. Previously undocumented patch rounds are not invented; exact source hashes identify patches within a named generation.",
+   "coordinator_decisions": {
++    "polytonic_release_scope": "20 Oct: census_05 runs with polytonic out of scope under the owner's end-to-end mandate; routed rows retain raw Google labels for polytonic, with other in-scope edits and checks unchanged; SF7 enters when its audit passes; coordinator decision, not an owner ruling",
+     "segmentation_s5": "0.30–2.00 adopted under the owner's end-to-end mandate (you don't have to wait for me, resolve these end to end); coordinator ledger 19 Oct 21:34; reported to owner: frozen the configuration at 0.9-s4 measurement, gate 0.3, band 0.30–2.00, one band for everything; no objection reported since; coordinator decision, not an owner ruling"
+   },
+   "owner_decisions": {
+@@ -52,9 +53,9 @@
+       "scope": "assisted separator corrections; failed automatic candidate is disabled",
+       "components": {
+         "greek-ocr-toolkit-secondary/artifacts/n1/n1_v1_w1.jsonl": "94fb67c1aab9f2ec3bf5d47bc36508b7e700508cd27391f70ebfc26f8d73230e",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline.py": "003b4085a7135d94d87d5d57e40544933f1185585b71bed978bb301884720ae1"
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline.py": "9c6f8ead156429011d03384e50b37d899bea5ba34df7e807fc1682b1f01bfa68"
+       },
+-      "digest": "01741d2a8ca76841b521c1acd998d31709104de7063d25fa6fa8c4a111b8ac35"
++      "digest": "f1b5c0aa990b76dac5f757af9fdf16bc0374dc3fc1dd98f64979c021b5bed2b9"
+     },
+     "dashes": {
+       "version": "0.1",
+@@ -64,12 +65,12 @@
+       "iteration_count": 1,
+       "scope": "tag only",
+       "components": {
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline.py": "003b4085a7135d94d87d5d57e40544933f1185585b71bed978bb301884720ae1"
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline.py": "9c6f8ead156429011d03384e50b37d899bea5ba34df7e807fc1682b1f01bfa68"
+       },
+-      "digest": "3a91cb3edd18a70acbac26c014d23841c1f7a396509aa77e3d87a63249c3e850"
++      "digest": "a3c42b877f00e3798909213e43ef5f2f0682571b1fa04a33b284aa198ebef2fb"
+     },
+     "segmentation": {
+-      "version": "0.9-s5",
++      "version": "0.13",
+       "documented_iterations": [
+         "29fa466 crop guides",
+         "5d664bf font normalized",
+@@ -88,16 +89,17 @@
+       "iteration_count": 13,
+       "scope": "0.9-s5: one length band 0.30–2.00 for all rows; S4 measurement, small path, mode 2, padding 1.5 and gate unchanged",
+       "components": {
+-        "greek-ocr-toolkit-main-next/greekocr/glyphs/components.py": "ffe88b72ae758f49610a0ea0d14b799c147821a899a30abdfb61cf8734be7831",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline_native.py": "e7dbe6c47061529953102b1af93422b593460e7510b22e27dbde69bcfbf052b7",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/filtering_assets/segmentation-policy.js": "5888fe704e6170b51081d6fa4200a725d2b29f0c70301f238faf7b32088b5b99",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/filtering_assets/crop-tools.py": "0adb60b62bebdb910dfa8cbba56eb64ae0325fe8f14290b4c72dbea866913b97",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/filtering_assets/font-models.json": "fb3f28f7d90c2b638bfe9c72ab42dcf060d59939a7ab410fc2e1cf6d898965de",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/filtering_assets/service.mjs": "8a222c1c50550f9ade8250fc3de1e2972e56dae0ce3e6ab915caa0052161b32f",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py": "1dd618bc2d884cf2490498456653f49b0276944f3bde83d38e26e633031eb641",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py": "038bd46af4535e6de6af58e11c4b7496e03e0434094cc8cd6b48668e2199ad77"
++        "greek-ocr-toolkit-pipe032/greekocr/glyphs/components.py": "ffe88b72ae758f49610a0ea0d14b799c147821a899a30abdfb61cf8734be7831",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline_native.py": "e7dbe6c47061529953102b1af93422b593460e7510b22e27dbde69bcfbf052b7",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/filtering_assets/segmentation-policy.js": "5888fe704e6170b51081d6fa4200a725d2b29f0c70301f238faf7b32088b5b99",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/filtering_assets/crop-tools.py": "0adb60b62bebdb910dfa8cbba56eb64ae0325fe8f14290b4c72dbea866913b97",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/filtering_assets/font-models.json": "fb3f28f7d90c2b638bfe9c72ab42dcf060d59939a7ab410fc2e1cf6d898965de",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/filtering_assets/service.mjs": "8a222c1c50550f9ade8250fc3de1e2972e56dae0ce3e6ab915caa0052161b32f",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py": "1dd618bc2d884cf2490498456653f49b0276944f3bde83d38e26e633031eb641",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py": "038bd46af4535e6de6af58e11c4b7496e03e0434094cc8cd6b48668e2199ad77"
+       },
+-      "digest": "b193b5b19c580a0a79f00a009a6c1decf27d9698910e73ba6a11173998c91658"
++      "digest": "86c85a6f1d9eb8e7b8327d0e84a77f58403fa9259c0743e5421b995abe46c1a6",
++      "label": "0.9-s5"
+     },
+     "content_gate": {
+       "version": "0.3",
+@@ -109,10 +111,10 @@
+       "iteration_count": 3,
+       "scope": "existing toolkit primitives with new orchestration",
+       "components": {
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline.py": "003b4085a7135d94d87d5d57e40544933f1185585b71bed978bb301884720ae1",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline_census.py": "9f346b5395eb20c75b1446ec0dd5f6d9f33a399495461557d27c6ada8c4af399"
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline.py": "9c6f8ead156429011d03384e50b37d899bea5ba34df7e807fc1682b1f01bfa68",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline_census.py": "27fc81b380de5fc60c4edf2110571c8ede38bedc120f9cec1ad15aa33924aad8"
+       },
+-      "digest": "eea77a978d8cd3fee04d80f6ae138eabb170dee3a84b64524ab292cc60496f15"
++      "digest": "244d2b2e9dd48b145d480773e77126d25e154561edbc8319d56b4796870dea20"
+     },
+     "content_repair": {
+       "version": "0.2",
+@@ -123,24 +125,25 @@
+       "iteration_count": 2,
+       "scope": "evidence-backed external repair interface; missing evidence holds",
+       "components": {
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline.py": "003b4085a7135d94d87d5d57e40544933f1185585b71bed978bb301884720ae1",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline_census.py": "9f346b5395eb20c75b1446ec0dd5f6d9f33a399495461557d27c6ada8c4af399"
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline.py": "9c6f8ead156429011d03384e50b37d899bea5ba34df7e807fc1682b1f01bfa68",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline_census.py": "27fc81b380de5fc60c4edf2110571c8ede38bedc120f9cec1ad15aa33924aad8"
+       },
+-      "digest": "eea77a978d8cd3fee04d80f6ae138eabb170dee3a84b64524ab292cc60496f15"
++      "digest": "244d2b2e9dd48b145d480773e77126d25e154561edbc8319d56b4796870dea20"
+     },
+     "composer": {
+-      "version": "0.2",
++      "version": "0.3",
+       "documented_iterations": [
+         "first integrated graph implementation",
+-        "Astra review: composed coverage, producer binding and atomic exports"
++        "Astra review: composed coverage, producer binding and atomic exports",
++        "PIPE032: declared routes_out_of_scope bypass correction lookup and automatic results; retain explicit non-success route evidence"
+       ],
+-      "iteration_count": 2,
++      "iteration_count": 3,
+       "scope": "existing toolkit primitives with new orchestration",
+       "components": {
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline.py": "003b4085a7135d94d87d5d57e40544933f1185585b71bed978bb301884720ae1",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline_census.py": "9f346b5395eb20c75b1446ec0dd5f6d9f33a399495461557d27c6ada8c4af399"
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline.py": "9c6f8ead156429011d03384e50b37d899bea5ba34df7e807fc1682b1f01bfa68",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline_census.py": "27fc81b380de5fc60c4edf2110571c8ede38bedc120f9cec1ad15aa33924aad8"
+       },
+-      "digest": "eea77a978d8cd3fee04d80f6ae138eabb170dee3a84b64524ab292cc60496f15"
++      "digest": "244d2b2e9dd48b145d480773e77126d25e154561edbc8319d56b4796870dea20"
+     },
+     "final_eligibility": {
+       "version": "0.3",
+@@ -152,38 +155,39 @@
+       "iteration_count": 3,
+       "scope": "existing toolkit primitives with new orchestration",
+       "components": {
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline.py": "003b4085a7135d94d87d5d57e40544933f1185585b71bed978bb301884720ae1",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline_census.py": "9f346b5395eb20c75b1446ec0dd5f6d9f33a399495461557d27c6ada8c4af399"
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline.py": "9c6f8ead156429011d03384e50b37d899bea5ba34df7e807fc1682b1f01bfa68",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline_census.py": "27fc81b380de5fc60c4edf2110571c8ede38bedc120f9cec1ad15aa33924aad8"
+       },
+-      "digest": "eea77a978d8cd3fee04d80f6ae138eabb170dee3a84b64524ab292cc60496f15"
++      "digest": "244d2b2e9dd48b145d480773e77126d25e154561edbc8319d56b4796870dea20"
+     },
+     "census": {
+-      "version": "0.6",
++      "version": "0.7",
+       "documented_iterations": [
+         "first integrated graph implementation",
+         "Astra review: composed coverage, producer binding and atomic exports",
+         "bounded parallel native workers for CSCS",
+         "profiled CSCS throughput tuning with bounded queue lookahead and node-scale worker qualification",
+         "parent-confirmed collection-v2 legacy evaluation split aliases with retained lineage",
+-        "census_03 integration: union configured heldout_crop_sha256 with observed held-out crops"
++        "census_03 integration: union configured heldout_crop_sha256 with observed held-out crops",
++        "PIPE032: bind release correction scope; export corrections_not_applied and count routed rows by tool and disposition"
+       ],
+-      "iteration_count": 6,
++      "iteration_count": 7,
+       "scope": "existing toolkit primitives with new orchestration",
+       "components": {
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline.py": "003b4085a7135d94d87d5d57e40544933f1185585b71bed978bb301884720ae1",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline_census.py": "9f346b5395eb20c75b1446ec0dd5f6d9f33a399495461557d27c6ada8c4af399",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline_sources.py": "d84f024f755d23543bd0b0601f14e2e7adae5d1eaadbc325e636bff3d628788e",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline_parallel.py": "52aef74eb01e17669dc068c8532c7008c251e8d1b5308f8e38790c613db0197e",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline_native.py": "e7dbe6c47061529953102b1af93422b593460e7510b22e27dbde69bcfbf052b7",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline_runtime.py": "8687f59c0986eff6a3f008c890385724a880c0e6356d6e059d61ec192386d483",
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/geometry_observations.py": "ba3ff4c9a6777f4c1c587eaf7ee1770d73ad0b5088d0ff3e333f09671f012570",
+-        "greek-ocr-toolkit-main-next/scripts/harvest/clariden/worker.py": "8c8109606e50bf6b26f74d95436e555bc3bac0984ed5c584600fa2602b2ea5c7",
+-        "greek-ocr-toolkit-main-next/scripts/harvest/clariden/bootstrap.py": "7ec4b9ddb4a7ad87631992f834ab9a0f52ce6a42e2f6226103ad9a839695dc18",
+-        "greek-ocr-toolkit-main-next/scripts/harvest/clariden/filter_crop_paths.py": "04247e96e82db502c7da154f70360f8f4a17b2a9620bb26df9d8bca781ae7110",
+-        "greek-ocr-toolkit-main-next/scripts/harvest/clariden/filter_worker.sbatch": "3b30cf18b1d72207000d0532afed44cfa9961982dc84dbd950d66de2b716153c",
+-        "greek-ocr-toolkit-main-next/scripts/harvest/clariden/package.py": "cd4b9d0ae23e405ed61c81abb1a37029ce43abf456390abd2167df5b9b613da5"
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline.py": "9c6f8ead156429011d03384e50b37d899bea5ba34df7e807fc1682b1f01bfa68",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline_census.py": "27fc81b380de5fc60c4edf2110571c8ede38bedc120f9cec1ad15aa33924aad8",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline_sources.py": "d84f024f755d23543bd0b0601f14e2e7adae5d1eaadbc325e636bff3d628788e",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline_parallel.py": "52aef74eb01e17669dc068c8532c7008c251e8d1b5308f8e38790c613db0197e",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline_native.py": "e7dbe6c47061529953102b1af93422b593460e7510b22e27dbde69bcfbf052b7",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline_runtime.py": "8687f59c0986eff6a3f008c890385724a880c0e6356d6e059d61ec192386d483",
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/geometry_observations.py": "ba3ff4c9a6777f4c1c587eaf7ee1770d73ad0b5088d0ff3e333f09671f012570",
++        "greek-ocr-toolkit-pipe032/scripts/harvest/clariden/worker.py": "8c8109606e50bf6b26f74d95436e555bc3bac0984ed5c584600fa2602b2ea5c7",
++        "greek-ocr-toolkit-pipe032/scripts/harvest/clariden/bootstrap.py": "7ec4b9ddb4a7ad87631992f834ab9a0f52ce6a42e2f6226103ad9a839695dc18",
++        "greek-ocr-toolkit-pipe032/scripts/harvest/clariden/filter_crop_paths.py": "04247e96e82db502c7da154f70360f8f4a17b2a9620bb26df9d8bca781ae7110",
++        "greek-ocr-toolkit-pipe032/scripts/harvest/clariden/filter_worker.sbatch": "3b30cf18b1d72207000d0532afed44cfa9961982dc84dbd950d66de2b716153c",
++        "greek-ocr-toolkit-pipe032/scripts/harvest/clariden/package.py": "cd4b9d0ae23e405ed61c81abb1a37029ce43abf456390abd2167df5b9b613da5"
+       },
+-      "digest": "f46d788222c041be5f23f2d7310d847df8ba9ee2c373f6f17c5e0104a3f0d270"
++      "digest": "03e6d58369f88019bc6d64ea53ecd55ad19445c7d9a079770422529f40ebfbc3"
+     },
+     "inventory": {
+       "version": "0.1",
+@@ -193,9 +197,9 @@
+       "iteration_count": 1,
+       "scope": "existing toolkit inventory primitives",
+       "components": {
+-        "greek-ocr-toolkit-main-next/greekocr/harvest/line_pipeline.py": "003b4085a7135d94d87d5d57e40544933f1185585b71bed978bb301884720ae1"
++        "greek-ocr-toolkit-pipe032/greekocr/harvest/line_pipeline.py": "9c6f8ead156429011d03384e50b37d899bea5ba34df7e807fc1682b1f01bfa68"
+       },
+-      "digest": "3a91cb3edd18a70acbac26c014d23841c1f7a396509aa77e3d87a63249c3e850"
++      "digest": "a3c42b877f00e3798909213e43ef5f2f0682571b1fa04a33b284aa198ebef2fb"
+     }
+   }
+ }
+diff --git a/greekocr/harvest/line_pipeline.py b/greekocr/harvest/line_pipeline.py
+index af8c92393..2354e7972 100644
+--- a/greekocr/harvest/line_pipeline.py
++++ b/greekocr/harvest/line_pipeline.py
+@@ -7,7 +7,7 @@ from __future__ import annotations
+ 
+ from collections import Counter
+ from copy import deepcopy
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
+ from difflib import SequenceMatcher
+ import hashlib
+ import json
+@@ -18,11 +18,17 @@ import unicodedata as ud
+ from . import admission as adm
+ from .text_primitives import codec_letter_script
+ 
+-PIPELINE_VERSION = "0.3.1"
++PIPELINE_VERSION = "0.3.2"
+ TOOLS = ("polytonic", "cyrillic", "numerics", "dashes", "content_repair")
+ SUCCESS = frozenset({"applied", "verified_no_change", "tag_only"})
+ 
+ 
++def validate_routes_out_of_scope(value):
++    if not isinstance(value, list) or any(t not in TOOLS or t == "content_repair" for t in value):
++        raise ValueError("routes_out_of_scope must be a list of correction tools excluding content_repair")
++    return list(value)
++
++
+ def canonical(value):
+     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+ 
+@@ -382,8 +388,10 @@ class Pipeline:
+     policy: dict
+     segmenter: object
+     corrector: object
++    routes_out_of_scope: list = field(default_factory=list)
+ 
+     def __post_init__(self):
++        self.routes_out_of_scope = validate_routes_out_of_scope(self.routes_out_of_scope)
+         self.toolchain_digest=digest(canonical(self.versions))
+         self.toolchain_versions={name:tool["version"] for name,tool in self.versions.items()}
+ 
+@@ -436,6 +444,12 @@ class Pipeline:
+             if not new:
+                 break
+             for tool in sorted(new):
++                if tool in self.routes_out_of_scope:
++                    result = dict(tool=tool, status="not_applied_out_of_scope", edits=[],
++                        reason="route out of scope for this release", release_scope=list(self.routes_out_of_scope))
++                    results[tool] = result
++                    out["routes"][tool] = result
++                    continue
+                 result = self.corrector(row, tool, expected)
+                 if result is None:
+                     result = automatic_result(row, tool, expected, self.versions[tool]["version"], self.versions[tool]["digest"],observed_text=text)
+@@ -449,7 +463,7 @@ class Pipeline:
+                 results[tool] = result
+                 out["routes"][tool] = result
+             scheduled |= new
+-            unresolved = [dict(reason="correction_unresolved", tool=t, status=r["status"]) for t, r in results.items() if r["status"] not in SUCCESS and t != "content_repair"]
++            unresolved = [dict(reason="correction_unresolved", tool=t, status=r["status"]) for t, r in results.items() if r["status"] not in SUCCESS | {"not_applied_out_of_scope"} and t != "content_repair"]
+             if unresolved:
+                 return finish("HOLD", unresolved)
+             try:
+@@ -490,7 +504,7 @@ class Pipeline:
+             if content_issues(text, final_inv, expected, self.codec):
+                 return finish("HOLD", [dict(reason="content_repair_unresolved")])
+             out["routes"]["content_repair"] = dict(results["content_repair"],status="verified_no_change",
+-                evidence=dict(resolved_by=sorted(t for t in results if t!="content_repair"), verification="final script/character re-inventory cleared original suspicion"))
++                evidence=dict(resolved_by=sorted(t for t in results if t!="content_repair" and results[t]["status"]!="not_applied_out_of_scope"), verification="final script/character re-inventory cleared original suspicion"))
+         if row["split"] == "unassigned" or row.get("edition_identity_status", "bound") != "bound":
+             return finish("HOLD", [dict(reason="split_or_edition_identity_unresolved")])
+         failures = final_eligibility(row, text, final_inv, expected, self.codec, self.policy)
+diff --git a/greekocr/harvest/line_pipeline_census.py b/greekocr/harvest/line_pipeline_census.py
+index ac8ff943b..f4f6db059 100644
+--- a/greekocr/harvest/line_pipeline_census.py
++++ b/greekocr/harvest/line_pipeline_census.py
+@@ -14,7 +14,7 @@ import sys
+ import time
+ import uuid
+ 
+-from .line_pipeline import Pipeline, canonical, digest, inventory, identity, validate_row, orthography_for, SUCCESS, validate_result, preserve_holds, russian_eligible, expectations, validate_segmentation, content_gate_exclusion
++from .line_pipeline import Pipeline, PIPELINE_VERSION, canonical, digest, inventory, identity, validate_row, orthography_for, SUCCESS, validate_result, preserve_holds, russian_eligible, expectations, validate_segmentation, content_gate_exclusion, validate_routes_out_of_scope
+ from .line_pipeline_adapters import adapt_legacy
+ from .line_pipeline_native import file_sha, NativeWorker
+ from .line_pipeline_sources import canonicalize
+@@ -149,13 +149,18 @@ class Ledger:
+             FROM observations o LEFT JOIN decisions d USING(parent,id)
+             GROUP BY o.parent,o.split,o.source,o.role,o.script,d.disposition""")]
+         reasons, statuses, availability = Counter(), Counter(), Counter()
++        scope_counts = {t: Counter() for t in json.loads(self.db.execute("SELECT value FROM run WHERE key='binding'").fetchone()[0]).get("config", {}).get("routes_out_of_scope", [])}
+         for (payload,) in self.db.execute("SELECT payload FROM decisions"):
+             d=json.loads(payload)
+             for reason in d.get("reasons",[]):reasons[reason["reason"]]+=1
+-            for tool,result in d.get("routes",{}).items():statuses[tool+":"+result["status"]]+=1
++            for tool,result in d.get("routes",{}).items():
++                statuses[tool+":"+result["status"]]+=1
++                if result["status"] == "not_applied_out_of_scope":
++                    scope_counts.setdefault(tool, Counter())[d["disposition"]] += 1
+             for stage in d.get("stages",[]):
+                 if stage["stage"]=="segmentation":availability[stage["result"].get("availability","measured")]+=1
+-        summary.update(overlapping_reason_counts=dict(reasons),route_status_counts=dict(statuses),segmentation_availability=dict(availability),by_stratum=breakdown)
++        summary.update(overlapping_reason_counts=dict(reasons),route_status_counts=dict(statuses),segmentation_availability=dict(availability),by_stratum=breakdown,
++            corrections_not_applied={t: dict(counts) for t, counts in scope_counts.items()})
+         return summary
+ 
+ 
+@@ -203,7 +208,8 @@ class Ledger:
+                 handles["admission_records"].write(canonical(dict(row_id=i,parent_id=parent,split=split,
+                     **{"pass":d["disposition"]=="ADMIT"},label=d.get("final_text",row["raw_text"]),crop_sha256=row["crop_sha256"],
+                     source=row["source"],primary_class=row.get("primary_class",row.get("content_role")),
+-                    pipeline_version="0.3",disposition=d["disposition"],decision=d))+"\n")
++                    pipeline_version=PIPELINE_VERSION,disposition=d["disposition"],decision=d,
++                    corrections_not_applied=sorted(t for t, r in d.get("routes", {}).items() if r["status"] == "not_applied_out_of_scope")))+"\n")
+                 if split!="train":handles["evaluation_diagnostics"].write(canonical(dict(row=row,decision=d))+"\n")
+                 elif d["disposition"]=="ADMIT":handles["admitted_train"].write(canonical(dict(row,final_text=d["final_text"],decision=d))+"\n")
+                 for tool,r in d.get("routes",{}).items():
+@@ -323,6 +329,7 @@ def verify_versions(versions, component_roots=None):
+ 
+ 
+ def run(config, out, *, execute=False, allow_local=False, retry_errors=False, retry_holds=False, segmenter_factory=None, validate_inputs_only=False):
++    config = dict(config, routes_out_of_scope=validate_routes_out_of_scope(config.get("routes_out_of_scope", [])))
+     if not execute:
+         return dict(status="preflight",parents=config["parents"],correction_artifacts=config.get("corrections",[]),processing_started=False)
+     if platform.system()=="Darwin" and not allow_local and segmenter_factory is None:
+@@ -412,7 +419,7 @@ def run(config, out, *, execute=False, allow_local=False, retry_errors=False, re
+         if observation.error:raise observation.error
+         if observation.result is None:raise RuntimeError("native observation was not prepared")
+         return observation.result
+-    pipeline=Pipeline(codec,versions,metadata,policy,segmentation,corrector)
++    pipeline=Pipeline(codec,versions,metadata,policy,segmentation,corrector,config["routes_out_of_scope"])
+     def pending_rows():
+         # Payload iteration and all SQLite access happen on this thread only.
+         ids=ledger.db.execute("SELECT parent,id FROM observations ORDER BY parent,id").fetchall()
+diff --git a/scripts/harvest/build_filter_versions.py b/scripts/harvest/build_filter_versions.py
+index cea93ca96..b968ebb8f 100644
+--- a/scripts/harvest/build_filter_versions.py
++++ b/scripts/harvest/build_filter_versions.py
+@@ -16,7 +16,7 @@ def build():
+       "numerics":("0.3",["N1 automatic ink candidate (rejected 0/5)","N1 assisted two-reader and lead-pixel release","census_03 integration: digit/separator/digit adjacency for automatic candidate negatives"],
+           [PROJECTS/"greek-ocr-toolkit-secondary/artifacts/n1/n1_v1_w1.jsonl",ROOT/"greekocr/harvest/line_pipeline.py"],"assisted separator corrections; failed automatic candidate is disabled"),
+       "dashes":("0.1",["dash tags; no general repair release"],[ROOT/"greekocr/harvest/line_pipeline.py"],"tag only"),
+-      "segmentation":("0.9-s5",["29fa466 crop guides","5d664bf font normalized","cad8709 target-box normalization","b2f8d95 whole-word tolerance","405d4f1 padding 1.5 heights","0.5 + row-frame text box","crop-only line inventory and cut-off gate before length","owner's three rules; remove target-cut veto and taller-than-upright guard","every letter body >=95% visible for a whole neighbour word","every h > w crop turns 90 degrees right before all detection and measurement","main-row ink measured along its existing base curve","small segments use every ink component in the processed crop frame","length band 0.30–2.00 (coordinator decision under the owner's end-to-end mandate, 19 Oct 21:34; fitted on owner marks, s5)"],
++      "segmentation":("0.13",["29fa466 crop guides","5d664bf font normalized","cad8709 target-box normalization","b2f8d95 whole-word tolerance","405d4f1 padding 1.5 heights","0.5 + row-frame text box","crop-only line inventory and cut-off gate before length","owner's three rules; remove target-cut veto and taller-than-upright guard","every letter body >=95% visible for a whole neighbour word","every h > w crop turns 90 degrees right before all detection and measurement","main-row ink measured along its existing base curve","small segments use every ink component in the processed crop frame","length band 0.30–2.00 (coordinator decision under the owner's end-to-end mandate, 19 Oct 21:34; fitted on owner marks, s5)"],
+           [ROOT/"greekocr/glyphs/components.py",ROOT/"greekocr/harvest/line_pipeline_native.py",ROOT/"greekocr/harvest/filtering_assets/segmentation-policy.js",ROOT/"greekocr/harvest/filtering_assets/crop-tools.py",ROOT/"greekocr/harvest/filtering_assets/font-models.json",ROOT/"greekocr/harvest/filtering_assets/service.mjs",
+            ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/ownership.py",ROOT/"greekocr/harvest/filtering_assets/collector/collect_v3/vendor/geometry/magnitude.py"],"0.9-s5: one length band 0.30–2.00 for all rows; S4 measurement, small path, mode 2, padding 1.5 and gate unchanged"),
+     }
+@@ -28,17 +28,22 @@ def build():
+     definitions["content_gate"]=("0.3",history+["owner gate: mixed-script word drops, unexpected script holds, before segmentation; short ordinary lines excluded before segmentation (letters); cells and numeric lines exempt with more than one letter-or-digit"],paths,scope)
+     version,history,paths,scope=definitions["final_eligibility"]
+     definitions["final_eligibility"]=("0.3",history+["cells: alnum > 1 is the only length/shape check, consistent with the gate"],paths,scope)
++    version,history,paths,scope=definitions["composer"]
++    definitions["composer"]=("0.3",history+["PIPE032: declared routes_out_of_scope bypass correction lookup and automatic results; retain explicit non-success route evidence"],paths,scope)
+     definitions["inventory"]=("0.1",["first integrated graph implementation"],[ROOT/"greekocr/harvest/line_pipeline.py"],"existing toolkit inventory primitives")
+     version,history,paths,scope=definitions["census"]
+     definitions["census"]=("0.6",history+["bounded parallel native workers for CSCS","profiled CSCS throughput tuning with bounded queue lookahead and node-scale worker qualification","parent-confirmed collection-v2 legacy evaluation split aliases with retained lineage","census_03 integration: union configured heldout_crop_sha256 with observed held-out crops"],paths+[ROOT/"greekocr/harvest/line_pipeline_sources.py",ROOT/"greekocr/harvest/line_pipeline_parallel.py",ROOT/"greekocr/harvest/line_pipeline_native.py",ROOT/"greekocr/harvest/line_pipeline_runtime.py",ROOT/"greekocr/harvest/geometry_observations.py",*[ROOT/"scripts/harvest/clariden"/name for name in ("worker.py","bootstrap.py","filter_crop_paths.py","filter_worker.sbatch","package.py")]],scope)
++    version,history,paths,scope=definitions["census"]
++    definitions["census"]=("0.7",history+["PIPE032: bind release correction scope; export corrections_not_applied and count routed rows by tool and disposition"],paths,scope)
+     tools={}
+     for name,(version,iterations,paths,scope) in definitions.items():
+         components={str(path.relative_to(PROJECTS)):hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+         encoded=json.dumps(components,sort_keys=True,separators=(",",":"))
+         tools[name]=dict(version=version,documented_iterations=iterations,iteration_count=len(iterations),scope=scope,
+             components=components,digest=hashlib.sha256(encoded.encode()).hexdigest())
++    tools["segmentation"]["label"]="0.9-s5"
+     return dict(schema="ocr-filter-tool-versions-v1",versioning="0.n: documented named method generations, not commit count, accuracy or number of individual edits. Rejected generations remain in history. Previously undocumented patch rounds are not invented; exact source hashes identify patches within a named generation.",
+-        coordinator_decisions=dict(segmentation_s5="0.30–2.00 adopted under the owner's end-to-end mandate (you don't have to wait for me, resolve these end to end); coordinator ledger 19 Oct 21:34; reported to owner: frozen the configuration at 0.9-s4 measurement, gate 0.3, band 0.30–2.00, one band for everything; no objection reported since; coordinator decision, not an owner ruling"),
++        coordinator_decisions=dict(polytonic_release_scope="20 Oct: census_05 runs with polytonic out of scope under the owner's end-to-end mandate; routed rows retain raw Google labels for polytonic, with other in-scope edits and checks unchanged; SF7 enters when its audit passes; coordinator decision, not an owner ruling",segmentation_s5="0.30–2.00 adopted under the owner's end-to-end mandate (you don't have to wait for me, resolve these end to end); coordinator ledger 19 Oct 21:34; reported to owner: frozen the configuration at 0.9-s4 measurement, gate 0.3, band 0.30–2.00, one band for everything; no objection reported since; coordinator decision, not an owner ruling"),
+         owner_decisions=dict(segmentation="accepted_as_is; no threshold/detector tuning or new segmentation qualification required for this implementation task"),tools=tools)
+ 
+ 
+diff --git a/tests/test_content_gate.py b/tests/test_content_gate.py
+index 903d9f11b..95f7cb0a7 100644
+--- a/tests/test_content_gate.py
++++ b/tests/test_content_gate.py
+@@ -59,7 +59,7 @@ def test_codec_mark_keeps_segmentation_and_content_repair():
+ def test_clear_row_matches_pre_change_output_exactly():
+     before = json.loads((ARTIFACTS / 'clear-before.json').read_text())
+     assert before['pipeline_version'] == '0.3'
+-    before['pipeline_version'] = '0.3.1'
++    before['pipeline_version'] = '0.3.2'
+     assert engine().evaluate(row()) == before
+ 
+ 
+--- /dev/null
++++ b/tests/test_routes_out_of_scope.py
+@@ -0,0 +1,130 @@
++"""PIPE032 release scope: offline fixtures; no readers or native crops."""
++import json
++from pathlib import Path
++import pytest
++
++from test_line_pipeline import row, expected, answer, segment, VERSIONS, census_config
++from greekocr.harvest import admission as adm
++from greekocr.harvest import line_pipeline as lp
++from greekocr.harvest import line_pipeline_census as census
++
++
++def pipeline(scope, corrector=lambda *args: None, declaration=None):
++    return lp.Pipeline(adm.load_codec(), VERSIONS,
++        {'books': {'book': declaration or expected()}}, {}, segment, corrector, scope)
++
++
++def forbidden(*args, **kwargs):
++    raise AssertionError('out-of-scope correction was consulted')
++
++
++def test_polytonic_scope_bypasses_corrector_and_automatic(monkeypatch):
++    monkeypatch.setattr(lp, 'automatic_result', forbidden)
++    r = row()
++    d = pipeline(['polytonic'], forbidden).evaluate(r)
++    assert d['disposition'] == 'ADMIT' and d['final_text'] == r['raw_text']
++    assert d['routes']['polytonic'] == dict(tool='polytonic', status='not_applied_out_of_scope',
++        edits=[], reason='route out of scope for this release', release_scope=['polytonic'])
++    assert 'not_applied_out_of_scope' not in lp.SUCCESS
++    assert not d['edits']
++
++
++def test_empty_scope_missing_result_still_holds():
++    d = pipeline([]).evaluate(row())
++    assert d['disposition'] == 'HOLD'
++    assert d['reasons'] == [dict(reason='correction_unresolved', tool='polytonic', status='required_evidence_unresolved')]
++    assert d['routes']['polytonic']['reason'] == 'missing qualified tool result'
++
++
++def test_missing_in_scope_numerics_still_holds():
++    calls = []
++    def missing(r, t, e):
++        calls.append(t)
++    d = pipeline(['polytonic'], missing).evaluate(row('λόγος καὶ γράμματα 1.234'))
++    assert calls == ['numerics']
++    assert d['disposition'] == 'HOLD'
++    assert d['reasons'] == [dict(reason='correction_unresolved', tool='numerics', status='required_evidence_unresolved')]
++    assert d['routes']['numerics']['reason'] == 'missing qualified tool result'
++    assert d['routes']['polytonic']['status'] == 'not_applied_out_of_scope'
++
++
++def test_cyrillic_edit_applied_with_polytonic_out_of_scope():
++    r = row('λόγος будуть καὶ γράμματα')
++    declaration = expected(scripts=['greek', 'cyrillic'], languages=['Greek', 'Russian'],
++        orthographies={'cyrillic': 'historical_russian'})
++    calls = []
++    def correct(r, t, e):
++        calls.append(t)
++        return answer(r, t, r['raw_text'].replace('будуть', 'будутъ'))
++    d = pipeline(['polytonic'], correct, declaration).evaluate(r)
++    assert calls == ['cyrillic']
++    assert d['disposition'] == 'ADMIT' and d['final_text'] == 'λόγος будутъ καὶ γράμματα'
++    assert d['routes']['polytonic']['status'] == 'not_applied_out_of_scope'
++    assert {t for edit in d['edits'] for t in edit['tools']} == {'cyrillic'}
++
++
++@pytest.mark.parametrize('scope', [['content_repair'], ['unknown_tool']])
++def test_invalid_scope_rejected_at_config_load(tmp_path, scope):
++    # Rejected even before preflight can touch any config input.
++    with pytest.raises(ValueError, match='routes_out_of_scope'):
++        census.run({'routes_out_of_scope': scope}, tmp_path / 'never-created')
++    assert not (tmp_path / 'never-created').exists()
++
++
++def test_export_and_summary_and_binding(tmp_path, monkeypatch):
++    monkeypatch.setattr(census.ArtifactCorrector, '__call__', forbidden)
++    r = row()
++    config = census_config(tmp_path, [r, dict(row('日'), id='gate')])
++    Path(config['metadata']).write_text(lp.canonical({'books': {'book': expected()}}))
++    config['routes_out_of_scope'] = ['polytonic']
++    out = tmp_path / 'scoped'
++    summary = census.run(config, out, execute=True, segmenter_factory=lambda: segment)
++    admissions = {r['row_id']: r for r in map(json.loads, (out / 'admission_records.jsonl').read_text().splitlines())}
++    assert admissions['r1']['pass'] and admissions['r1']['label'] == r['raw_text']
++    assert admissions['r1']['corrections_not_applied'] == ['polytonic']
++    assert admissions['r1']['decision']['routes']['polytonic']['status'] == 'not_applied_out_of_scope'
++    assert admissions['gate']['corrections_not_applied'] == []
++    assert summary['corrections_not_applied'] == {'polytonic': {'ADMIT': 1}}
++    # Keep all other inputs identical; only scope changes the binding.
++    monkeypatch.setattr(census.ArtifactCorrector, '__call__', lambda *args: None)
++    config['routes_out_of_scope'] = []
++    empty = census.run(config, tmp_path / 'empty', execute=True, segmenter_factory=lambda: segment)
++    assert empty['run_binding_sha256'] != summary['run_binding_sha256']
++    assert empty['dispositions']['HOLD'] == 2
++
++
++@pytest.mark.parametrize('text', ['日', 'Αθηνa', 'α'])
++def test_gate_exclusion_keeps_prior_exclusion_routes(text):
++    p = pipeline(['polytonic'], forbidden)
++    p.segmenter = forbidden
++    d = p.evaluate(row(text))
++    assert d['disposition'] in {'HOLD', 'DROP'}
++    assert all(r['status'] == 'not_run_due_to_prior_exclusion' for r in d['routes'].values())
++
++
++def test_out_of_scope_candidate_does_not_require_recheck():
++    r = row('λόγος1.234 καὶ γράμματα')
++    def correct(r, t, e):
++        assert t == 'numerics'
++        return answer(r, t, r['raw_text'].replace('1.234', '1·234'))
++    d = pipeline(['polytonic'], correct).evaluate(r)
++    assert d['disposition'] == 'ADMIT'
++    assert d['final_text'] == 'λόγος1·234 καὶ γράμματα'
++    assert d['routes']['polytonic']['status'] == 'not_applied_out_of_scope'
++
++
++def test_out_of_scope_route_is_not_a_content_repair_resolver(monkeypatch):
++    # Synthetic residual-character issue cleared by the qualified Cyrillic edit.
++    original = lp.content_issues
++    def issues(text, inv, expected, codec):
++        return original(text, inv, expected, codec) + ([dict(reason='fixture_character_issue')] if 'ь' in text else [])
++    monkeypatch.setattr(lp, 'content_issues', issues)
++    r = row('λόγος будуть καὶ γράμματα')
++    declaration = expected(scripts=['greek', 'cyrillic'], languages=['Greek', 'Russian'],
++        orthographies={'cyrillic': 'historical_russian'})
++    def correct(r, t, e):
++        assert t in ('content_repair', 'cyrillic')
++        return None if t == 'content_repair' else answer(r, t, r['raw_text'].replace('будуть', 'будутъ'))
++    d = pipeline(['polytonic'], correct, declaration).evaluate(r)
++    assert d['disposition'] == 'ADMIT'
++    assert d['routes']['content_repair']['evidence']['resolved_by'] == ['cyrillic']

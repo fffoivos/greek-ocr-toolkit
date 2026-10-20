@@ -1,0 +1,256 @@
+diff --git a/prototypes/fast_lines/shared/geometry_contacts.py b/prototypes/fast_lines/shared/geometry_contacts.py
+--- a/prototypes/fast_lines/shared/geometry_contacts.py
++++ b/prototypes/fast_lines/shared/geometry_contacts.py
+@@ -54,7 +54,7 @@
+     return dict(density=density,components=records,scale=[sx,sy],height=height,
+                 _centres=np.asarray([q['centre'] for q in records]).reshape(-1,2),
+                 _boxes=np.asarray([q['bbox'] for q in records]).reshape(-1,4),
+-                **({'labels': labels} if with_labels else {}))
++                **({'labels': labels,'stats':stats} if with_labels else {}))
+ 
+ 
+ def walk(signal, seed, step):
+diff --git a/prototypes/fast_lines/shared/geometry_envelopes.py b/prototypes/fast_lines/shared/geometry_envelopes.py
+--- a/prototypes/fast_lines/shared/geometry_envelopes.py
++++ b/prototypes/fast_lines/shared/geometry_envelopes.py
+@@ -37,7 +37,7 @@
+     return dict(height=h,lines=records,components=field['components'],seconds=perf_counter()-start,route=route,version=version)
+ 
+ 
+-def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_labels=False,map_bands=None,envelope_indices=None,field_cache=None,skip_ambiguous=False):
++def guided(gray,pm,items,original,route='slow',version=2,selected=None,*,with_labels=False,map_bands=None,envelope_indices=None,field_cache=None,skip_ambiguous=False,column_evidence=None):
+     """Native contacts constrained by map ancestry, with competitors exposed.
+ 
+     The map supplies identity inside its observed extent, not a glyph envelope.
+@@ -94,10 +94,41 @@
+             # All routes keep the independently observed map identity. Native
+             # contacts provide extent; an uncorroborated tangent never does.
+             y=gaussian_filter1d(ay,max(1,.75*h/(x[1]-x[0])))
++        disagreement=float(np.max(abs(raw[inside]-ay[inside]))/h) if inside.any() else 0
++        shared=None
++        if (field_cache or {}).get('evidence') and not q.get('page_field'):
++            from .geometry_page_field import continuation
++            ev=field_cache['evidence'];bounds=[f['xs'] for f in ev['fields'] if f.get('curved') and f.get('xs')]
++            if bounds:
++                step=max(1,.25*h)
++                search=np.unique(np.r_[np.arange(max(0,min(v[0] for v in bounds)),x[0],step),x,
++                                        np.arange(x[-1]+step,min(gray.shape[1]-1,max(v[-1] for v in bounds)),step)])
++                shared=continuation(ev,anchor,search,column_evidence=column_evidence)
++                if shared is not None:
++                    prediction=np.asarray(shared['path'])[:,1];valid=np.isfinite(prediction)
++                    # Consume only the connected finite run containing the complete
++                    # observed anchor. Never remove a NaN and interpolate over its hole.
++                    runs=np.split(np.flatnonzero(valid),np.flatnonzero(np.diff(np.flatnonzero(valid))>1)+1)
++                    run=next((v for v in runs if len(v) and search[v[0]]<=anchor[0,0] and search[v[-1]]>=anchor[-1,0]),None)
++                    if run is None:shared=None
++                    else:
++                        xx=search[run];yy=prediction[run]
++                        left,right=anchor[0,0],anchor[-1,0]
++                        # Keep the original filtered observed path exactly. Only
++                        # outside it follows the common mesh, joined at each endpoint.
++                        cy=np.interp(xx,x,y)
++                        for edge,is_right in [(left,False),(right,True)]:
++                            offset=np.interp(edge,x,y)-np.interp(edge,xx,yy)
++                            use=xx>edge if is_right else xx<edge
++                            cy[use]=yy[use]+offset
++                        x,y=xx,cy;ay=cy.copy();seen=np.ones(len(x),bool)
++                        shared={k:v for k,v in shared.items() if k!='path'}
++                        shared['anchor_span']=[float(left),float(right)]
++                        shared['domain']=[float(x[0]),float(x[-1])]
+         eligible=(centres[:,0]>=x[0])&(centres[:,0]<=x[-1])&(abs(centres[:,1]-np.interp(centres[:,0],x,y))<.65*h)
+         contacts=[field['components'][k] for k in np.flatnonzero(eligible)]
+-        records.append(dict(line=i,path=np.c_[x,y].tolist(),reference=np.c_[x,ay].tolist(),observed=seen.tolist(),contacts=contacts,bbox=box,
+-            disagreement_h=float(np.max(abs(raw[inside]-ay[inside]))/h) if inside.any() else 0))
++        records.append(dict(line=i,path=np.c_[x,y].tolist(),reference=np.c_[x,ay].tolist(),observed=seen.tolist(),contacts=contacts,bbox=box,shared_continuation=shared,
++            disagreement_h=disagreement))
+     # The same physical glyph cannot independently belong to two row bands.
+     owners={};ambiguous=set()
+     for r in records:
+@@ -168,7 +199,7 @@
+         r['polygon']=np.vstack([np.c_[x,lo],np.c_[x[::-1],hi[::-1]]]).tolist()
+         r['owned']=len(contacts);r['extension_h']=[(box[0]-left)/h,(right-box[2])/h]
+     return dict(height=h,lines=records,components=field['components'],seconds=perf_counter()-start,route=route,version=version,
+-                **({'_labels':field['labels']} if with_labels else {}))
++                **({'_labels':field['labels'],'_stats':field['stats']} if with_labels else {}))
+ 
+ 
+ def correct(gray,pm,items,original,*,scout=None,forbidden_regions=(),detail=False,map_bands=None,column_evidence=None,field_cache=None,universal=False):
+@@ -196,8 +227,13 @@
+             if r['y0']<=cy<=r['y1'] and b[0]-h<cx<b[2]+h:blocked=True;break
+         if not blocked:eligible.add(i)
+     if not eligible:return dict(items=items,changes=[],decisions=[],seconds=perf_counter()-t,trigger=True,eligible=[])
+-    evidence=guided(gray,pm,items,original,route='explicit',version=5,with_labels=True,map_bands=map_bands,envelope_indices=eligible,field_cache=field_cache,skip_ambiguous=True);labels=evidence.pop('_labels');h=evidence['height'];out=list(items);changes=[];decisions=[]
++    evidence=guided(gray,pm,items,original,route='explicit',version=5,with_labels=True,map_bands=map_bands,envelope_indices=eligible,field_cache=field_cache,skip_ambiguous=True,column_evidence=column_evidence);labels=evidence.pop('_labels');stats=evidence.pop('_stats');h=evidence['height'];out=list(items);changes=[];decisions=[]
++    if (field_cache or {}).get('evidence'):
++        for row in evidence['lines']:
++            if row.get('shared_continuation') and row.get('polygon') and row['line'] in eligible:
++                row['polygon'],row['material_separator']=material_band(row,evidence,field_cache['evidence'],labels,stats,h)
+     for r in evidence['lines']:
++        shared=r.get('shared_continuation')
+         i=r['line'];q=items[i];p=r.get('polygon');reason=None
+         if not p or i not in eligible:continue
+         x,y=np.array(r['path']).T;b=bbox(q);inbox=(x>=b[0])&(x<=b[2]);a,sl=line_axis(q)
+@@ -245,11 +281,18 @@
+             for c in r['contacts']:
+                 a,bb,z,w=c['bbox'];a=max(0,int(a-xx0-.2*h));bb=max(0,int(bb-yy0-.35*h));z=min(shape[1],int(np.ceil(z-xx0+.2*h)));w=min(shape[0],int(np.ceil(w-yy0+.2*h)))
+                 mine[bb:w,a:z]=1
+-            if np.any((new>0)&(old==0)&(other>0)&(mine==0)&ink):reason='new overlap with retained neighbor ink'
++            if shared is None:
++                if np.any((new>0)&(old==0)&(other>0)&(mine==0)&ink):reason='new overlap with retained neighbor ink'
++            else:
++                # The rectangle is not a competing row witness in this population.
++                # Test complete native components against actual witnessed phases.
++                reason=material_foreign(r,evidence,field_cache['evidence'],labels,
++                                        new,old,origin,items,h)
++
+         if reason is None:
+             from .geometry_joinbarriers import inspect as rule_barriers
+             if rule_barriers(gray,p,h):reason='regional boundary remains unresolved'
+-        decision=dict(line=i,accepted=reason is None,reason=reason or 'smooth native contacts with unique ink retained',retention=audit,deviation_h=deviation)
++        decision=dict(line=i,accepted=reason is None,reason=reason or 'smooth native contacts with unique ink retained',retention=audit,deviation_h=deviation,shared_continuation=shared)
+         decisions.append(decision)
+         if reason is None:
+             out[i]=dict(q,polygon=p,baseline=None,provenance='smooth native contact envelope')
+@@ -308,6 +351,7 @@
+     h=evidence['height'];count=Counter(k for q in items for k in q.get('source_ids',[]));pairs=[]
+     allcomps=evidence['components']
+     for r in evidence['lines']:
++        shared=r.get('shared_continuation')
+         i=r['line'];b=bbox(items[i]);owned={c['id'] for c in r['contacts']}
+         if r.get('ambiguous') or b[2]-b[0]<16*h:continue
+         x,y=np.array(r['path']).T
+@@ -321,3 +365,77 @@
+             pairs.append(dict(line=i,fragment=j,components=[c['id'] for c in cs],gap_h=gap/h))
+     counts=Counter(q['fragment'] for q in pairs)
+     return [q for q in pairs if counts[q['fragment']]==1]
++
++
++def material_foreign(record,evidence,page_field,labels,new,old,origin,items,h):
++    """Whole native support, with witnessed row identity, replaces box claims.
++
++    A phase only supplies correspondence. Detached/unwitnessed marks and joined
++    components remain unresolved; they cannot acquire an owner from proximity.
++    """
++    from .geometry_page_field import invert_points
++    state=record['shared_continuation'];f=page_field['fields'][state['field']]
++    peers=[r for r in evidence['lines'] if r.get('shared_continuation') and
++           r['shared_continuation']['field']==state['field'] and len(r['contacts'])>=4]
++    phases=np.array([r['shared_continuation']['phase'] for r in peers])
++    if not len(phases):return 'material row witnesses unknown'
++    x0,y0=origin;H,W=new.shape
++    ids=np.unique(labels[y0:y0+H,x0:x0+W][(new>0)&(old==0)]);ids=ids[ids>0]
++    components={c['id']:c for c in evidence['components']}
++    own={c['id'] for c in record['contacts']}
++    for cid in ids:
++        c=components.get(int(cid))
++        if c is None:return 'unwitnessed new native mark'
++        a,b,z,w=np.asarray(c['bbox'],int);yy,xx=np.nonzero(labels[b:w,a:z]==cid)
++        p=invert_points(np.asarray(f['xs']),np.asarray(f['knots']),np.asarray(f['mesh']),np.c_[xx+a,yy+b])
++        if not len(p) or not np.isfinite(p).all():return 'unknown new native component phase'
++        owners=np.argmin(abs(p[:,None]-phases),axis=1)
++        if not np.all(owners==owners[0]):return 'joined native support crosses witnessed material rows'
++        owner=peers[int(owners[0])]['line']
++        if owner!=record['line']:return 'new whole component belongs to witnessed neighbor'
++        if cid not in own:return 'new native component lacks current row body witness'
++    return None
++
++
++def material_band(record,evidence,page_field,labels,stats,h):
++    """Clip the existing envelope at shared between-row paths, verified on ink.
++
++    Reuse M17's native whitespace refinement only where the shared separator
++    actually crosses a complete component. No extra bend fit or detector.
++    """
++    from .geometry_field_detector import displacement,refine_corridor
++    state=record['shared_continuation'];f=page_field['fields'][state['field']]
++    peers=[r for r in evidence['lines'] if r['line']!=record['line'] and r.get('shared_continuation') and
++           r['shared_continuation']['field']==state['field'] and len(r['contacts'])>=4]
++    poly=np.asarray(record['polygon']);n=len(poly)//2;x=poly[:n,0];top=poly[:n,1].copy();bottom=poly[n:,1][::-1].copy()
++    t=state['phase'];audit=[]
++    for above in (True,False):
++        choices=[r for r in peers if (r['shared_continuation']['phase']<t)==above]
++        if not choices:continue
++        peer=min(choices,key=lambda r:abs(r['shared_continuation']['phase']-t));v=peer['shared_continuation']['phase']
++        px,py=np.asarray(peer['path']).T;rx,ry=np.asarray(record['path']).T
++        a=max(0,int(np.ceil(max(x[0],px[0],rx[0]))));c=min(labels.shape[1],int(np.floor(min(x[-1],px[-1],rx[-1])))+1)
++        if c-a<3:continue
++        xx=np.arange(a,c);ours=np.interp(xx,rx,ry);theirs=np.interp(xx,px,py)
++        upper,lower=(theirs,ours) if above else (ours,theirs)
++        mid=(t+v)/2;path=mid+displacement(f,xx,mid)
++        ids=np.flatnonzero((stats[:,0]<c)&(stats[:,0]+stats[:,2]>a)&
++                          (stats[:,1]<lower.max())&(stats[:,1]+stats[:,3]>upper.min()))
++        def crossed(path):
++            result=[]
++            for k in ids:
++                if not k:continue
++                bx,by,w,hh,_=stats[k];l=max(a,bx);r=min(c,bx+w)
++                yy,ix=np.nonzero(labels[by:by+hh,l:r]==k)
++                delta=yy+by-path[ix+l-a]
++                if len(delta) and delta.min()<.5 and delta.max()>-.5:result.append(int(k))
++            return result
++        crossing=crossed(path)
++        if crossing:path=refine_corridor(labels>0,a,c,upper,lower,path,stats[crossing],h)
++        unresolved=crossed(path);audit.append(dict(peer=peer['line'],phase=mid,crossing=crossing,unresolved=unresolved))
++        if unresolved:return record['polygon'],dict(status='unknown native separator',records=audit)
++        use=(x>=a)&(x<c-1);edge=np.interp(x[use],xx,path)
++        if above:top[use]=np.maximum(top[use],edge+.5)
++        else:bottom[use]=np.minimum(bottom[use],edge-.5)
++    if np.any(top>=bottom):return record['polygon'],dict(status='unknown crossed band',records=audit)
++    return np.vstack([np.c_[x,top],np.c_[x[::-1],bottom[::-1]]]).tolist(),dict(status='native component-clear separators',records=audit)
+diff --git a/prototypes/fast_lines/shared/geometry_field_detector.py b/prototypes/fast_lines/shared/geometry_field_detector.py
+--- a/prototypes/fast_lines/shared/geometry_field_detector.py
++++ b/prototypes/fast_lines/shared/geometry_field_detector.py
+@@ -29,6 +29,7 @@
+ def run(gray,original,detector,*,column_evidence=None,evidence=None,excluded_regions=(),field_cache=None):
+     start=perf_counter();e=render(gray,original,column_evidence=column_evidence,route='slow',excluded_regions=excluded_regions,with_source=field_cache is not None) if evidence is None else evidence
+     source=e.pop('_source',None)
++    if field_cache is not None:field_cache['evidence']=e
+     if source is not None and not excluded_regions:
+         field_cache.update(height=e['height'],shape=gray.shape,prepared=source,native_full=True)
+     out=[];regions=[]
+diff --git a/prototypes/fast_lines/shared/geometry_page_field.py b/prototypes/fast_lines/shared/geometry_page_field.py
+--- a/prototypes/fast_lines/shared/geometry_page_field.py
++++ b/prototypes/fast_lines/shared/geometry_page_field.py
+@@ -217,3 +217,42 @@
+             (points[:,1]>=warped[0])&(points[:,1]<=warped[-1])&
+             np.all(np.diff(warped,axis=0)>0,axis=0))
+     return np.where(inside,knots[idx]+fraction*(knots[idx+1]-knots[idx]),np.nan)
++
++
++def continuation(evidence, anchor, x, *, column_evidence=None):
++    """Locate one observed row in the existing finite correspondence.
++
++    The anchor supplies position, never a new bend fit. Unknown inverse phases,
++    folds, unsupported end certificates and finite printed rules abstain. The
++    caller still has to witness native extent and retain/exclude actual ink.
++    """
++    from .geometry_field_detector import displacement
++    anchor=np.asarray(anchor,float);x=np.asarray(x,float);h=evidence['height']
++    possible=[]
++    for fid,f in enumerate(evidence.get('fields',[])):
++        if not f.get('curved') or 'mesh' not in f:continue
++        xs=np.asarray(f['xs']);knots=np.asarray(f['knots']);mesh=np.asarray(f['mesh'])
++        phase=invert_points(xs,knots,mesh,anchor)
++        if not np.isfinite(phase).all():continue
++        t=float(np.median(phase));residual=phase-t
++        if np.quantile(abs(residual),.9)>.65*h:continue
++        records=[r for r in f.get('certificate',[]) if r.get('coherent') and
++                 abs(f['rows'][r['row']]['seed']-t)<8*h]
++        if not records:continue
++        inside=(x>=xs[0])&(x<=xs[-1]);y=t+displacement(f,x,t)
++        inside&=np.isfinite(invert_points(xs,knots,mesh,np.c_[x,y]))
++        a,b,c,d=f['region'];inside&=(y>=b)&(y<=d)
++        # A full-height median-x cut is not a finite rule contract. Consume
++        # only the observed path and its stated native vertical span.
++        for r in (column_evidence or {}).get('rules',[]):
++            if not r.get('accepted'):continue
++            rule=r['rule'];path=np.asarray(rule['path']);cy=np.interp(anchor[:,1],path[:,1],path[:,0])
++            active=(anchor[:,1]>=rule['y0'])&(anchor[:,1]<=rule['y1'])
++            sides=np.sign(anchor[active,0]-cy[active])
++            if not len(sides):continue
++            if not np.all(sides==sides[0]) or sides[0]==0:inside[:]=False;break
++            at=(y>=rule['y0'])&(y<=rule['y1'])
++            edge=np.interp(y,path[:,1],path[:,0]);inside&=~at|((x-edge)*sides[0]>0)
++        possible.append(dict(field=fid,phase=t,path=np.c_[x,np.where(inside,y,np.nan)],
++                             residual_h=(residual/h).tolist(),sides=sorted({r['side'] for r in records})))
++    return possible[0] if len(possible)==1 else None

@@ -1,6 +1,6 @@
 # Public API
 
-For the page entry point and examples, start with [PAGES_GUIDE.md](PAGES_GUIDE.md). Page stages now live in `greekocr.pages`; the corresponding `greekocr.glyphs` imports remain compatibility aliases. Crop APIs are unchanged.
+For the page entry point and examples, start with [PAGES_GUIDE.md](A_ocr_development/reference/PAGES_GUIDE.md). Page stages now live in `greekocr.pages`; the corresponding `greekocr.glyphs` imports remain compatibility aliases. Crop APIs are unchanged.
 
 The public surface is the typed functions/classes explicitly exported by the API modules below. `_vendor`, the discovery runner and recognizer internals are private. Re-exported functions are documented once at their defining module. The preserved Docling entry point is also documented.
 
@@ -15,6 +15,325 @@ Strict scoring requires raw NFD GT and unchanged predictions. Bake-off decompose
 Discovery defaults to offline and uses a caller-owned evidence directory. R01/R03 specs bind local pinned checkouts/configs/weights and reviewed native preprocessing. CLLG workers expose `read_batch`, `close`, `binding`, `last_batch_ms`; close them when finished. Service hooks require explicit enabling and the original credential environment variables.
 
 Node environment plans do not execute. Kraken requires the staged wheel with SHA-256 `82faba07d9fa4746cb822c669e822570f8a8c42a9ac1570ad187326cedbd48e4`; E2WS additionally requires a pinned PaddleOCR requirements file. Use original environment evidence in `docs/origins/greek-page-ocr/docs/ocr_program_2026-10-06/E2_NOTES.md`. Pod clients obtain `PRIME_INTELLECT_CONTROL_KEY` from env; mock `PodClient` for offline work. Watches need bounded probes and direct terminal confirmation.
+
+### `greekocr.adjudicate.artifact_custody.verify`
+
+`def verify(destination: str | Path, manifest: dict) -> dict`
+
+Verify the exact file set and bytes against a relative-path SHA manifest.
+
+```python
+from greekocr.adjudicate.artifact_custody import verify
+result = verify(destination, receipt["manifest"])
+```
+
+### `greekocr.adjudicate.artifact_custody.copy_artifacts`
+
+`def copy_artifacts(source: str | Path, destination: str | Path, paths: list[str]) -> dict`
+
+Copy selected relative files, without symlinks/overwrites, then atomically publish.
+
+```python
+from greekocr.adjudicate.artifact_custody import copy_artifacts
+receipt = copy_artifacts(source_root, new_destination, selected_relative_paths)
+```
+
+### `greekocr.adjudicate.batch_check.batch_check`
+
+`def batch_check(folder: str | Path, assignment: dict, answers: list[dict], keys: list[dict], *, adapter: str='canonical', gate_spec: dict | None=None) -> dict`
+
+Check exact assigned order, hash custody, schema and controls via a dry run.
+
+```python
+from greekocr.adjudicate.batch_check import batch_check
+result = batch_check(folder, assignment, answers, private_keys)
+```
+
+### `greekocr.adjudicate.controls_review_sheets.controls_review_sheets`
+
+`def controls_review_sheets(controls: list[dict], output: str | Path, *, per_sheet: int=12, font_path: str | Path | None=None) -> dict`
+
+Emit ≤12 controls per PNG, word zoom + optional letter zoom + expected form.
+
+```python
+from greekocr.adjudicate.controls_review_sheets import controls_review_sheets
+receipt = controls_review_sheets(verified_controls, private_review_dir)
+```
+
+### `greekocr.adjudicate.deal_batches.deal_batches`
+
+`def deal_batches(deck: str | Path, output: str | Path, *, batch_size: int=110, readers: tuple[int, ...]=(1, 2)) -> dict`
+
+Copy public cards/images into independent new folders; reader 2 reverses.
+
+```python
+from greekocr.adjudicate.deal_batches import deal_batches
+receipt = deal_batches(blind_deck, isolated_assignments, batch_size=110)
+```
+
+### `greekocr.adjudicate.deck.crop_image`
+
+`def crop_image(image: Image.Image | str | Path, profile: str='word', *, bbox: list[float] | None=None, crop_box: list[float] | None=None, zoom_cap: float=3.0) -> tuple[Image.Image, dict]`
+
+Apply a named native crop profile, returning pixels and private geometry.
+
+```python
+from greekocr.adjudicate.deck import crop_image
+image, geometry = crop_image(native_image, "word", bbox=[20, 0, 80, 40])
+```
+
+### `greekocr.adjudicate.deck.leak_scan`
+
+`def leak_scan(blind_dir: str | Path, forbidden: list[str] | None=None) -> dict`
+
+Scan emitted text, paths and PNG metadata; intrinsic printed content is retained.
+
+```python
+from greekocr.adjudicate.deck import leak_scan
+receipt = leak_scan("review/blind", forbidden=["private-source-id"])
+```
+
+### `greekocr.adjudicate.deck.build_deck`
+
+`def build_deck(spec: dict[str, Any]) -> dict`
+
+Build a new two-reader deck with shuffled controls and an exclusive sibling key.
+
+```python
+from greekocr.adjudicate.deck import build_deck
+receipt = build_deck(deck_spec)
+```
+
+### `greekocr.adjudicate.edit_evidence_crosstab.edit_evidence_crosstab`
+
+`def edit_evidence_crosstab(records: list[dict], verdicts: dict[str, dict]) -> dict`
+
+Return per-change kind/head/slot/ink/verdict rows and aggregate counts.
+
+```python
+from greekocr.adjudicate.edit_evidence_crosstab import edit_evidence_crosstab
+table = edit_evidence_crosstab(saved_release_records, explicit_print_verdicts)
+```
+
+### `greekocr.adjudicate.mark_profile.mark_views`
+
+`def mark_views(image: Image.Image, word_box: list[float], letter_box: list[float]) -> dict[str, Image.Image]`
+
+Return native line and explicit 3×/8× crops, validating both native boxes.
+
+```python
+from greekocr.adjudicate.mark_profile import mark_views
+views = mark_views(native_line_image, word_box, letter_box)
+```
+
+### `greekocr.adjudicate.owner_notes_export.owner_notes_export`
+
+`def owner_notes_export(documents: list[dict], cards: list[dict], sheets: dict[str, dict], output: str | Path) -> dict`
+
+Join notes to sheet/card ids and write JSONL exclusively.
+
+```python
+from greekocr.adjudicate.owner_notes_export import owner_notes_export
+receipt = owner_notes_export(db_dump, cards, sheet_conventions, new_jsonl_path)
+```
+
+### `greekocr.adjudicate.owner_sheet.detection_image`
+
+`def detection_image(image: Image.Image | str | Path, slots: list[dict], *, opening_quotes: list[dict] | None=None) -> Image.Image`
+
+Draw saved detections and slot numbers without running a detector or model.
+
+```python
+from greekocr.adjudicate.owner_sheet import detection_image
+overlay = detection_image(native_image, saved_slots)
+```
+
+### `greekocr.adjudicate.owner_sheet.render`
+
+`def render(lines: list[dict], spec: dict[str, Any]) -> str`
+
+Render ordered card records and group headings into a self-contained owner HTML sheet.
+
+```python
+from greekocr.adjudicate.owner_sheet import render
+html = render(owner_cards, owner_spec)
+```
+
+### `greekocr.adjudicate.page_specs.load_spec`
+
+`def load_spec(path: str | Path) -> dict`
+
+Read JSON owner-sheet data; source builders are never imported or executed.
+
+```python
+from greekocr.adjudicate.page_specs import load_spec
+spec = load_spec(local_json_path)
+```
+
+### `greekocr.adjudicate.page_specs.render_spec`
+
+`def render_spec(path: str | Path) -> str`
+
+Render staged JSON data through the shared owner_sheet renderer.
+
+```python
+from greekocr.adjudicate.page_specs import render_spec
+html = render_spec(local_json_path)
+```
+
+### `greekocr.adjudicate.protocol.adapt_answer`
+
+`def adapt_answer(answer: dict, card: dict, *, adapter: str='canonical') -> dict`
+
+Adapt canonical/R0/S8/R2C field names, retaining explicit R2C unknown heads.
+
+```python
+from greekocr.adjudicate.protocol import adapt_answer
+answer = adapt_answer(reader_answer, public_card, adapter="s8")
+```
+
+### `greekocr.adjudicate.protocol.deal`
+
+`def deal(deck: list[dict], reader: int=1) -> list[dict]`
+
+Return an independent assignment; reader 2 is emitted in reverse order.
+
+```python
+from greekocr.adjudicate.protocol import deal
+reader_2 = deal(public_cards, reader=2)
+```
+
+### `greekocr.adjudicate.protocol.tiebreak_deck`
+
+`def tiebreak_deck(deck: list[dict], keys: list[dict], disagreements: list[str], *, image_root: str | Path, blind_dir: str | Path, seed: int=20261018) -> dict`
+
+Emit disagreements plus verified controls with fresh positions/options and its own key.
+
+```python
+from greekocr.adjudicate.protocol import tiebreak_deck
+receipt = tiebreak_deck(public_cards, private_keys, disagreement_ids, image_root="review/blind", blind_dir="tiebreak/blind")
+```
+
+### `greekocr.adjudicate.protocol.controls_gate`
+
+`def controls_gate(batches: list[dict[str, dict]], keys: list[dict], spec: dict[str, Any]) -> dict`
+
+Evaluate explicit control tolerances before votes; describe historical C1 gates with readers=1.
+
+```python
+from greekocr.adjudicate.protocol import controls_gate
+gate = controls_gate(normalized_batches, private_keys, gate_spec)
+```
+
+### `greekocr.adjudicate.protocol.resolve`
+
+`def resolve(deck: list[dict], keys: list[dict], reader1: list[dict], reader2: list[dict], *, reader3: list[dict] | None=None, tiebreak_keys: list[dict] | None=None, adapter: str='canonical', gate_spec: dict | None=None) -> dict`
+
+Gate both readers first, then 2-of-2 or 2-of-3; unresolved/unknown remains UNKNOWN.
+
+```python
+from greekocr.adjudicate.protocol import resolve
+result = resolve(public_cards, private_keys, reader_1, reader_2)
+```
+
+### `greekocr.adjudicate.protocol.write_truth`
+
+`def write_truth(path: str | Path, resolution: dict) -> dict`
+
+Write gated truth once as JSONL (optionally deterministic gzip), preserving UNKNOWN.
+
+```python
+from greekocr.adjudicate.protocol import write_truth
+receipt = write_truth("review/truth.jsonl.gz", gated_resolution)
+```
+
+### `greekocr.adjudicate.release_census.release_census`
+
+`def release_census(records: Iterable[dict], selection: dict[str, dict], *, seed: int=20261017, sample_size: int=20) -> dict`
+
+Count agreeing-reader substitutions by tier/wave and sample lines per tier.
+
+```python
+from greekocr.adjudicate.release_census import release_census
+census = release_census(local_release_rows, selection_by_id, seed=20261017)
+```
+
+### `greekocr.adjudicate.release_census.evidence_dump`
+
+`def evidence_dump(records: Iterable[dict], line_id: str) -> dict`
+
+Return one saved line and active slot evidence without truncation/rounding.
+
+```python
+from greekocr.adjudicate.release_census import evidence_dump
+evidence = evidence_dump(local_release_rows, requested_line_id)
+```
+
+### `greekocr.adjudicate.score.wilson`
+
+`def wilson(p: float, n: float) -> list[float] | None`
+
+Return the two-sided Wilson 95% interval using z=1.959963984540054.
+
+```python
+from greekocr.adjudicate.score import wilson
+interval = wilson(.95, 100)
+```
+
+### `greekocr.adjudicate.score.clopper_pearson_lb95`
+
+`def clopper_pearson_lb95(successes: int, total: int) -> float`
+
+Return the one-sided exact 95% lower bound (zero for no successes/trials).
+
+```python
+from greekocr.adjudicate.score import clopper_pearson_lb95
+lower = clopper_pearson_lb95(95, 100)
+```
+
+### `greekocr.adjudicate.score.score`
+
+`def score(rows: list[dict], numer: Callable[[dict], float], denom: Callable[[dict], float], seed: int=20261017, *, replicates: int=4000) -> dict`
+
+S8 weighted event estimate, document/line bootstrap and Wilson-Kish fallback.
+
+```python
+from greekocr.adjudicate.score import score
+estimate = score(weighted_rows, lambda r: r["correct"], lambda r: r["events"])
+```
+
+### `greekocr.adjudicate.score.named_slices`
+
+`def named_slices(rows: list[dict]) -> dict[str, list[dict]]`
+
+Select overlapping R2 truth-context slices with an immutable registry.
+
+```python
+from greekocr.adjudicate.score import named_slices
+slices = named_slices(truth_context_rows)
+```
+
+### `greekocr.adjudicate.truth_overlay.add`
+
+`def add(parent: dict, entry: dict, *, version: str, evidence_paths: list[str | Path], expected_parent: str) -> dict`
+
+Add/replace a slot delta, retaining its original frozen previous_tuple.
+
+```python
+from greekocr.adjudicate.truth_overlay import add
+receipt = add(parent_overlay, adjudicated_entry, version="v1.1", evidence_paths=local_evidence, expected_parent="v1")
+```
+
+### `greekocr.adjudicate.truth_overlay.symmetric_rescore`
+
+`def symmetric_rescore(lines: list[dict], overlay: dict, predictions: dict[str, list[dict]], scorer: Callable[[list[dict], list[dict]], object]) -> dict`
+
+Apply one overlay to frozen print_slots and score every arm on identical truth.
+
+```python
+from greekocr.adjudicate.truth_overlay import symmetric_rescore
+result = symmetric_rescore(frozen_lines, overlay, predictions_by_arm, local_scorer)
+```
 
 ### `greekocr.annotate.line_categories`
 
@@ -563,6 +882,53 @@ from greekocr.glyphs.evaluate import summarise
 rates = summarise(score)
 ```
 
+### `greekocr.glyphs.foreign_ink.MaskPage`
+
+```python
+from greekocr.glyphs.foreign_ink import MaskPage
+page = MaskPage(native_image, pixels, ink, component_labels, component_objects)
+```
+
+### `greekocr.glyphs.foreign_ink.MaskedCrop`
+
+```python
+from greekocr.glyphs.foreign_ink import MaskedCrop
+crop = MaskedCrop(native_image, foreign_mask, recorded_metadata)
+```
+
+### `greekocr.glyphs.foreign_ink.prepare_mask_page`
+
+`def prepare_mask_page(page: Image.Image | np.ndarray) -> MaskPage`
+
+Share page observations between calls; exactly the same as raw-page use.
+
+```python
+from greekocr.glyphs.foreign_ink import prepare_mask_page
+page = prepare_mask_page(native_image)
+```
+
+### `greekocr.glyphs.foreign_ink.mask_foreign_ink`
+
+`def mask_foreign_ink(page: MaskPage | Image.Image | np.ndarray, line: Any, neighbours: Sequence[Any], crop_box: Sequence[int]) -> MaskedCrop`
+
+Paint only foreign foreground pixels inside the unchanged native rectangle.
+
+```python
+from greekocr.glyphs.foreign_ink import mask_foreign_ink
+crop = mask_foreign_ink(page, detected_line, neighbour_lines, crop_box)
+```
+
+### `greekocr.glyphs.foreign_ink.mask_detected_line`
+
+`def mask_detected_line(page: MaskPage | Image.Image | np.ndarray, line: Any, neighbours: Sequence[Any], crop_box: Sequence[int] | None=None) -> MaskedCrop`
+
+Inference adapter at the native TextPiece boundary; no detector rerun.
+
+```python
+from greekocr.glyphs.foreign_ink import mask_detected_line
+crop = mask_detected_line(page, detected_line, neighbour_lines, crop_box)
+```
+
 ### `greekocr.glyphs.ink.LetterInk`
 
 ```python
@@ -1060,6 +1426,193 @@ rendered = render_truth_line("ἀνδρώας κύστεως", "GFSDidot-Regular
 ```python
 from greekocr.glyphs.synthetic import usable_fonts
 fonts, rejected = usable_fonts(["GFSDidot-Regular.ttf", "XCharter-Regular.otf"])
+```
+
+### `greekocr.harvest.montage.background_shade`
+
+`def background_shade(crop_path: str | Path) -> float`
+
+Median of the brightest ceil(50%) native pixels (RGB: L luminance).
+
+```python
+from greekocr.harvest.montage import background_shade
+shade = background_shade("crop.png")
+```
+
+### `greekocr.harvest.montage.group_flush_crops`
+
+`def group_flush_crops(records: Iterable[dict[str, Any]], n: int) -> list[list[dict[str, Any]]]`
+
+Stable (background shade, native height) sort, then consecutive N crops.
+
+```python
+from greekocr.harvest.montage import group_flush_crops
+groups = group_flush_crops(cached_crop_records, 10)
+```
+
+### `greekocr.harvest.montage.build_montages`
+
+`def build_montages(records: Iterable[dict[str, Any]], n: int, images_dir: str | Path, maps_dir: str | Path, *, max_width: int=2600, max_height: int=10000, max_png_bytes: int=8000000, grey_rule: bool=True, layout: str='gap') -> list[dict[str, Any]]`
+
+Stack up to N crops, preserving pixels; split on height or encoded size.
+
+```python
+from greekocr.harvest.montage import build_montages
+maps = build_montages(cached_crop_records, 20, "harvest_big/montages", "montage_maps")
+```
+
+### `greekocr.harvest.montage.response_lines`
+
+`def response_lines(engine: str, raw: dict[str, Any], size: tuple[int, int]) -> list[dict[str, Any]]`
+
+Engine lines: DocAI line layouts; Vision detectedBreak symbol box unions.
+
+```python
+from greekocr.harvest.montage import response_lines
+lines = response_lines("vision", cached_raw_response, (1268, 3900))
+```
+
+### `greekocr.harvest.montage.assign_lines`
+
+`def assign_lines(lines: Iterable[dict[str, Any]], mapping: dict[str, Any], *, threshold: float=0.7) -> dict[str, Any]`
+
+Assign >=70% box height to a crop; cross-band boxes mark every hit merged.
+
+```python
+from greekocr.harvest.montage import assign_lines
+assigned = assign_lines(engine_lines, montage_box_map)
+```
+
+### `greekocr.harvest.montage.response_symbols`
+
+`def response_symbols(engine: str, raw: dict[str, Any], size: tuple[int, int]) -> list[dict[str, Any]]`
+
+Extract symbol text, native boxes and confidence from unchanged raw JSON.
+
+```python
+from greekocr.harvest.montage import response_symbols
+symbols = response_symbols("docai", cached_raw_response, (1268, 3900))
+```
+
+### `greekocr.harvest.montage.assign_symbols`
+
+`def assign_symbols(symbols: Iterable[dict[str, Any]], mapping: dict[str, Any], *, threshold: float=0.7) -> dict[str, Any]`
+
+Apply the same band rule independently to symbol-confidence observations.
+
+```python
+from greekocr.harvest.montage import assign_symbols
+assigned = assign_symbols(engine_symbols, montage_box_map)
+```
+
+### `greekocr.harvest.montage.compare_nfd`
+
+`def compare_nfd(single: str, montage: str) -> dict[str, Any]`
+
+Exact NFD codepoint equality and Levenshtein CER, without whitespace folding.
+
+```python
+from greekocr.harvest.montage import compare_nfd
+comparison = compare_nfd("ἅλφα", "ἅλφα")
+```
+
+### `greekocr.harvest.montage.summarise`
+
+`def summarise(comparisons: Iterable[dict[str, Any]], montage_count: int) -> dict[str, Any]`
+
+Aggregate a reader/N cohort, including symbol-weighted confidence means.
+
+```python
+from greekocr.harvest.montage import summarise
+rates = summarise(score)
+```
+
+### `greekocr.harvest.montage_controls.letters_marks`
+
+`def letters_marks(text: str) -> str`
+
+NFD L/M codepoints only, after unifying spacing apostrophe variants.
+
+```python
+from greekocr.harvest.montage_controls import letters_marks
+text = letters_marks("* ν᾿ ἄλφα!")
+```
+
+### `greekocr.harvest.montage_controls.compare_control`
+
+`def compare_control(reference: str, prediction: str) -> dict[str, Any]`
+
+Exact NFD/letters+marks identity, CER, and minimum-edit kind histogram.
+
+```python
+from greekocr.harvest.montage_controls import compare_control
+comparison = compare_control("ἅλφα", "* ἅλφα")
+```
+
+### `greekocr.harvest.montage_controls.summarise_controls`
+
+`def summarise_controls(comparisons: Iterable[dict[str, Any]]) -> dict[str, Any]`
+
+Aggregate crop identity percentages and changed-codepoint histograms.
+
+```python
+from greekocr.harvest.montage_controls import summarise_controls
+summary = summarise_controls(control_comparisons)
+```
+
+### `greekocr.harvest.page_reads.polygon_overlap`
+
+`def polygon_overlap(box: list[float], polygon: list[list[float]]) -> dict[str, Any]`
+
+Mean vertical box-height overlap with a polygon band over the shared x span.
+
+```python
+from greekocr.harvest.page_reads import polygon_overlap
+overlap = polygon_overlap([0, 0, 100, 40], [[0, 0], [100, 2], [100, 42], [0, 40]])
+```
+
+### `greekocr.harvest.page_reads.assign_page_lines`
+
+`def assign_page_lines(lines: Iterable[dict[str, Any]], records: Iterable[dict[str, Any]]) -> dict[str, Any]`
+
+Assign 70% height/50% shorter-width; any two polygon touches are merged.
+
+```python
+from greekocr.harvest.page_reads import assign_page_lines
+assigned = assign_page_lines(engine_lines, sampled_page_records)
+```
+
+### `greekocr.harvest.page_reads.assign_page_symbols`
+
+`def assign_page_symbols(symbols: Iterable[dict[str, Any]], records: Iterable[dict[str, Any]]) -> dict[str, Any]`
+
+Apply the identical polygon height/width rule to symbol confidences.
+
+```python
+from greekocr.harvest.page_reads import assign_page_symbols
+assigned = assign_page_symbols(engine_symbols, sampled_page_records)
+```
+
+### `greekocr.harvest.page_reads.page_summary`
+
+`def page_summary(comparisons: Iterable[dict[str, Any]]) -> dict[str, Any]`
+
+Same-denominator reader preservation and usable-pair HARVEST agreement.
+
+```python
+from greekocr.harvest.page_reads import page_summary
+summary = page_summary(paired_page_comparisons)
+```
+
+### `greekocr.harvest.page_reads.build_blind_review`
+
+`def build_blind_review(comparisons: Iterable[dict[str, Any]], records: Iterable[dict[str, Any]], manifest: Iterable[dict[str, Any]], *, seed: int=15) -> tuple[str, dict[str, Any]]`
+
+Return self-contained 30-card HTML and a separate reproducible A/B key.
+
+```python
+from greekocr.harvest.page_reads import build_blind_review
+html, key = build_blind_review(paired_page_comparisons, pilot_records, page_manifest)
 ```
 
 ### `greekocr.ops.rate_limit.rate_limited_client`
@@ -2275,6 +2828,152 @@ from greekocr.real.sources.web_sources import source_pages
 seeds = list(source_pages(["wikisource"], max_pages=1, category="Αρχαία ελληνική ποίηση"))
 ```
 
+### `greekocr.recogniser.run_shard`
+
+`def run_shard(crops: Iterable[str | Path], recogniser: Recogniser, cache_path: str | Path, *, bs: int=16) -> dict[str, Alignment]`
+
+Run one caller-selected shard and persist canonical records with provenance.
+
+```python
+from greekocr.recogniser import run_shard
+alignments = run_shard(crop_paths, recogniser, "alignments.jsonl", bs=16)
+```
+
+### `greekocr.recogniser.alignment.Alignment`
+
+```python
+from greekocr.recogniser.alignment import Alignment
+alignment = Alignment.from_record(recorded_alignment)
+```
+
+### `greekocr.recogniser.alignment.Alignment.slots`
+
+`def slots(self) -> list[dict[str, Any]]`
+
+One slot per existing text cluster, retaining the frozen span geometry.
+
+```python
+from greekocr.recogniser.alignment import Alignment
+slots = alignment.slots()
+```
+
+### `greekocr.recogniser.alignment.Alignment.evidence`
+
+`def evidence(self, slots: Sequence[dict[str, Any]], image_width: int) -> dict[str, Any]`
+
+```python
+from greekocr.recogniser.alignment import Alignment
+evidence = alignment.evidence(alignment.slots(), image_width=800)
+```
+
+### `greekocr.recogniser.alignment.align`
+
+`def align(reading: Reading) -> Alignment`
+
+```python
+from greekocr.recogniser.alignment import align
+alignment = align(reading)
+```
+
+### `greekocr.recogniser.alignment.transfer`
+
+`def transfer(alignment_or_record: ctc.Alignment | dict[str, Any], new_text: str) -> Alignment`
+
+NFD, discard frame scores, flag even identity transfers; return Alignment.
+
+```python
+from greekocr.recogniser.alignment import transfer
+alignment = transfer(recorded_alignment, "ἅλφα")
+```
+
+### `greekocr.recogniser.alignment.confidence_matches`
+
+`def confidence_matches(frames: Sequence[float] | np.ndarray | None, confidence: float | None) -> bool`
+
+Float32-origin frame means, with absolute tolerance 1e-6 (no relative tolerance).
+
+```python
+from greekocr.recogniser.alignment import confidence_matches
+matches = confidence_matches(frame_confidences, recorded_confidence)
+```
+
+### `greekocr.recogniser.api.Reading`
+
+```python
+from greekocr.recogniser.api import Reading
+reading = Reading(**recorded_reading_values)
+```
+
+### `greekocr.recogniser.api.Recogniser`
+
+```python
+from greekocr.recogniser.api import Recogniser
+recogniser = Recogniser("weights.pt", codec="codec/v1.json", device="cpu", threads=2)
+```
+
+### `greekocr.recogniser.api.Recogniser.read`
+
+`def read(self, images: Iterable[str | Path | Image.Image | NDArray], *, profile: str='labelfix', bs: int=16) -> list[Reading]`
+
+```python
+from greekocr.recogniser.api import Recogniser
+readings = recogniser.read(crop_paths, profile="labelfix", bs=16)
+```
+
+### `greekocr.recogniser.api.Recogniser.logits`
+
+`def logits(self, images: Iterable[str | Path | Image.Image], *, dtype: DTypeLike=np.float32) -> list[NDArray]`
+
+Delegate E1.logits (float halo, distinct from E1Reader.read).
+
+```python
+from greekocr.recogniser.api import Recogniser
+logits = recogniser.logits(crop_paths)
+```
+
+### `greekocr.recogniser.api.Recogniser.as_reader`
+
+`def as_reader(self, *, profile: str='eval') -> SimpleNamespace`
+
+```python
+from greekocr.recogniser.api import Recogniser
+reader = recogniser.as_reader(profile="eval")
+```
+
+### `greekocr.recogniser.api.load`
+
+`def load(checkpoint: str | Path, codec: str | Path | None=None, device: str='cpu', threads: int | None=None, *, strict: bool=True) -> Recogniser`
+
+```python
+from greekocr.recogniser.api import load
+recogniser = load("weights.pt", codec="codec/v1.json", device="cpu", threads=2)
+```
+
+### `greekocr.recogniser.cache.AlignmentCache`
+
+```python
+from greekocr.recogniser.cache import AlignmentCache
+cache = AlignmentCache("alignments.jsonl", recogniser)
+```
+
+### `greekocr.recogniser.cache.AlignmentCache.get`
+
+`def get(self, crops: Iterable[str | Path], *, bs: int=16) -> dict[str, Alignment]`
+
+```python
+from greekocr.recogniser.cache import AlignmentCache
+alignments = cache.get(crop_paths, bs=16)
+```
+
+### `greekocr.recogniser.guard.forbid_forward`
+
+`def forbid_forward() -> Iterator[None]`
+
+```python
+from greekocr.recogniser.guard import forbid_forward
+with forbid_forward(): alignment = Alignment.from_record(recorded_alignment)
+```
+
 ### `greekocr.score.strict_cer`
 
 `def strict_cer(reference: str, prediction: str) -> float`
@@ -2593,192 +3292,15 @@ from greekocr.warmstart import qualify_parity
 receipt = qualify_parity(donor_spec, "converted/native_before_swap.pt", "100_crops.jsonl", "parity")
 ```
 
-### `greekocr harvest pilot` — H1 Anemi sample
+## Wave-0 harvest admission
 
-```bash
-.venv/bin/python -m greekocr harvest pilot --stage prepare
-.venv/bin/python -m greekocr harvest pilot --stage sample
-.venv/bin/python -m greekocr harvest pilot --stage label --cap-usd 3
-.venv/bin/python -m greekocr harvest pilot --stage report
-```
-
-`--stage all` executes these stages sequentially. Acquisition is a separate
-plan/fetch/verify operation using the amended fetcher in
-`docs/harvest/pilot/_fetch/o4b_anemi_pages.py`; `--records` accepts the 150-row
-Anemi proposal, and `--page-range middle:2` selects two contiguous middle pages
-across each record's volumes. Its verifier requires only these selected pages.
-Keep the source `scripts/fetch` directory on `PYTHONPATH` for transport imports.
-
-Defaults: outputs `docs/harvest/pilot_v1`, images
-`docs/harvest/harvest_big/t13c`, fetched pages
-`docs/harvest/harvest_big/anemi_wave3_sample_t13c`. The default exact proposal
-is `greek-page-ocr/docs/evidence/o4c/anemi_wave3_proposal.json`.
-`--out`, `--big`, `--anemi`, `--proposal`, `--stack-export`, and `--source-repo`
-override paths; `--max-new-pages` bounds one offline prepare invocation.
-Sampling waits for 300 pages from all 150 books. `--sample-max` is 1–500;
-three lines per eligible book are preferred, at most four in rich books,
-with zero where no candidate passes. A fixed `sampling.json` prevents drift
-on resume. Only this sample reaches the two Google services, as single crops.
-
-`--cap-usd` is positive and at most 3; a separate hard 1000-call ceiling applies.
-Calls are reserved persistently before I/O. Failed or interrupted attempts
-remain reserved and are not retried automatically. Caches bind crop hashes,
-reader settings and saved responses. Credentials are ADC; Anemi credentials
-stay exclusively in process environment/cookie memory.
-
-`greekocr.harvest.core` exports `page_gate(gray, items, bend_fired=False)`,
-`crop_gate(box, boxes, page_gate, size, item=None, long_complete=False)`,
-`body_font_gate(records, page_gate)`, `list_return(pieces)`,
-`tier(vision, docai, layer=None)`, and `validate_record(record)`.
-`long_complete=True` requires width ≥80% of the column text band, excludes
-short paragraph boundaries (<90%), physical page/gutter edge touches,
-tall rows and outside-band geometry. Page bends use the frozen scout's
-nonzero `side` trigger (flat observations do not fire). Straightener candidates
-must have one main band without ≥50%-visible neighbours and no >8% average
-body clipping. These thresholds are pilot heuristics.
-
-Each JSONL record identifies source/book/year/decade/page, source receipt and
-hash, catalogue/rights, stack commit/model/source hashes, polygon/bbox,
-page/line gates, body/width/faintness features, raw/straight crop paths,
-`sampled`, selection metadata, reader boxes/confidences/receipts, tier and label.
-Unsampled rows retain `unread` if geometry passes, `rejected` otherwise; crop
-paths and features never measured are null. Tier 3/rejected/unread have no
-label. Anemi has `text_layer=null`. Tier 1 includes only strict NFD whitespace
-agreement or the documented whole-word substitution exception; tier 2 is
-≤2 NFD edits. No broad case, sigma or accent folding applies.
-
-### T14 montage verification (offline API and explicit network driver)
-
-No production montage setting is enabled. See [MONTAGE_v1.md](harvest/MONTAGE_v1.md). Bands, padding and rules preserve native pixels. The driver uses the frozen 100-line pilot sample and its cached single responses; only generated montage images can reach the readers.
-
-### `greekocr.harvest.montage.build_montages`
-
-`def build_montages(records: Iterable[dict[str, Any]], n: int, images_dir: str | Path, maps_dir: str | Path, *, max_width: int=2600, max_height: int=10000, max_png_bytes: int=8000000, grey_rule: bool=True) -> list[dict[str, Any]]`
-
-Stack up to N crops, preserving pixels; split on height or encoded size.
+`greekocr.harvest.admission` contains pure, offline functions. `inventory(text)` returns Unicode script letter counts, foreign script/name counts, digits, punctuation, symbols, mixed words and whole Latin words. `admit(record)` returns `(admitted, script_class, reasons, label)` and reports every failing rule in order. The record supplies `docai_text`, mean symbol `confidence`, `flags`, and a previously computed `bad_page` boolean.
 
 ```python
-from greekocr.harvest.montage import build_montages
-maps = build_montages(cached_crop_records, 20, "harvest_big/montages", "montage_maps")
+from greekocr.harvest.admission import admit, page_quality
+quality = page_quality(records); results = [admit(dict(r, bad_page=quality[r["page_id"]]["bad_page"])) for r in records]
 ```
 
-### `greekocr.harvest.montage.response_lines`
+`select_holdout_books(books, seed=20261015)` chooses 20 books (5 dev / 15 test), with two per decade where capacity allows and preference for ≥300 admitted lines. The caller reports singleton-decade exceptions. `apply_holdout_labels(records)` removes train labels equal to a dev/test label after canonical normalization. `spatial_neighbours(page_records)` returns the nearest above/below boxes sharing at least half the narrower horizontal extent; all provider boxes participate. `crop_geometry(bbox, previous, following, page_size)` returns integer crop bounds plus a trimmed boolean, using >15% vertical overlap, midpoint cuts and in-page 4×2 px padding. `normalize_label(text)` and `has_spacing_mark(text)` provide the label/standalone-spacing-mark contract.
 
-`def response_lines(engine: str, raw: dict[str, Any], size: tuple[int, int]) -> list[dict[str, Any]]`
-
-Engine lines: DocAI line layouts; Vision detectedBreak symbol box unions.
-
-```python
-from greekocr.harvest.montage import response_lines
-lines = response_lines("vision", cached_raw_response, (1268, 3900))
-```
-
-### `greekocr.harvest.montage.assign_lines`
-
-`def assign_lines(lines: Iterable[dict[str, Any]], mapping: dict[str, Any], *, threshold: float=0.7) -> dict[str, Any]`
-
-Assign >=70% box height to a crop; cross-band boxes mark every hit merged.
-
-```python
-from greekocr.harvest.montage import assign_lines
-assigned = assign_lines(engine_lines, montage_box_map)
-```
-
-### `greekocr.harvest.montage.response_symbols`
-
-`def response_symbols(engine: str, raw: dict[str, Any], size: tuple[int, int]) -> list[dict[str, Any]]`
-
-Extract symbol text, native boxes and confidence from unchanged raw JSON.
-
-```python
-from greekocr.harvest.montage import response_symbols
-symbols = response_symbols("docai", cached_raw_response, (1268, 3900))
-```
-
-### `greekocr.harvest.montage.assign_symbols`
-
-`def assign_symbols(symbols: Iterable[dict[str, Any]], mapping: dict[str, Any], *, threshold: float=0.7) -> dict[str, Any]`
-
-Apply the same band rule independently to symbol-confidence observations.
-
-```python
-from greekocr.harvest.montage import assign_symbols
-assigned = assign_symbols(engine_symbols, montage_box_map)
-```
-
-### `greekocr.harvest.montage.compare_nfd`
-
-`def compare_nfd(single: str, montage: str) -> dict[str, Any]`
-
-Exact NFD codepoint equality and Levenshtein CER, without whitespace folding.
-
-```python
-from greekocr.harvest.montage import compare_nfd
-comparison = compare_nfd("ἅλφα", "ἅλφα")
-```
-
-### `greekocr.harvest.montage.summarise`
-
-`def summarise(comparisons: Iterable[dict[str, Any]], montage_count: int) -> dict[str, Any]`
-
-Aggregate a reader/N cohort, including symbol-weighted confidence means.
-
-```python
-from greekocr.harvest.montage import summarise
-rates = summarise(score)
-```
-
-The map has `boxes[crop_id] = {x0, x1, y0, y1, width, height, crop, crop_sha256}` plus image SHA, actual N, dimensions, PNG bytes, separator intervals and split reasons. Coordinates are half-open native pixels. N is 10, 20 or 40. Oversized singletons fail; no scaling is permitted.
-
-`assign_lines` returns per-crop text/status, independent merged/lost/split booleans, assigned line count, raw pieces, dropped pieces and list-return flags, plus the full per-line assignment audit. Merged/lost counts may overlap. Side-by-side pieces join in x order; stacked splits retain LF-separated readings and rejection flags. `assign_symbols` uses the same height rule for confidence observations. `compare_nfd` keeps whitespace and reports exact equality, edits, reference length and CER. `summarise` applies the requested 97% / zero merged / zero lost gate.
-
-Driver (run from this repo; `--run` is the only network opt-in):
-
-```bash
-.venv/bin/python scripts/harvest/montage_pilot.py --prepare
-.venv/bin/python scripts/harvest/montage_pilot.py --run
-.venv/bin/python scripts/harvest/montage_pilot.py
-```
-
-`--records`, `--evidence-dir` and `--bulk-dir` override paths. The no-flag invocation recomputes all metrics/reports from cached montage raw responses without invoking readers. Persistent budget reservations enforce USD 1 and the planned call count, refuse interrupted re-calls and deduplicate identical PNG hashes across N. Single inputs and their raw cache receipts are SHA-checked before and after the run; their text is never requested again.
-
-`.venv/bin/python scripts/harvest/validate_montage.py` replays the frozen raw evidence without network, verifies image/map custody and native pixels, recomputes every assignment and metric, checks the call ledgers and local gallery assets, and writes `montage_v1/validation.json`.
-
-### T14b controls (offline helpers and bounded experimental runner)
-
-`build_montages(..., grey_rule=False)` preserves the native crop bands, white padding and gap formula while leaving each complete gap paper-white (255). Separator intervals remain recorded; rule coordinates are `None`. The default layout and its bytes remain unchanged.
-
-### `greekocr.harvest.montage_controls.letters_marks`
-
-`def letters_marks(text: str) -> str`
-
-Unify spacing apostrophe variants, decompose NFD, then retain only Unicode L/M codepoints. Case, letter variants and combining marks are preserved. Punctuation, whitespace, digits and symbols are ignored; this is a diagnostic, so exact NFD remains the preservation measure.
-
-```python
-from greekocr.harvest.montage_controls import letters_marks
-text = letters_marks("* ν᾿ ἄλφα!")
-```
-
-### `greekocr.harvest.montage_controls.compare_control`
-
-`def compare_control(reference: str, prediction: str) -> dict[str, Any]`
-
-Return exact NFD and letters+marks identity, edit counts/CER, and one minimum-edit alignment with char-kind, operation and transition histograms. Ties resolve diagonal, deletion, insertion. Changed-codepoint histograms count both sides of substitutions; edit-operation histograms count each edit once.
-
-```python
-from greekocr.harvest.montage_controls import compare_control
-comparison = compare_control("ἅλφα", "* ἅλφα")
-```
-
-### `greekocr.harvest.montage_controls.summarise_controls`
-
-`def summarise_controls(comparisons: Iterable[dict[str, Any]]) -> dict[str, Any]`
-
-Aggregate crop-level exact/letters+marks identity counts and percentages, and difference histograms. Refuse empty cohorts.
-
-```python
-from greekocr.harvest.montage_controls import summarise_controls
-summary = summarise_controls(control_comparisons)
-```
-
-`.venv/bin/python scripts/harvest/montage_controls.py --prepare` freezes the 15/15 T14 Vision N=20 cohort and builds 20+10 crops without rules, offline. `--run` deliberately bypasses the historical caches by using the separate `montage_v1/determinism/google/` namespace: 60 fresh single calls and four montage calls, USD 0.50 cap, 64-call maximum. SHA-bound control responses and persistent reservations prevent automatic repeats. No-flag invocation rebuilds from those control responses with no reader calls. Original pilot records, crops, cached responses and T14 comparisons remain unchanged. All new readings are stored under `docs/harvest/montage_v1/determinism/`.
+The local builder is `python -m scripts.harvest.admit_round1`; full raster validation is `python -m scripts.harvest.validate_round1_admission`. See [ADMISSION.md](records/harvest/round1/ADMISSION.md).

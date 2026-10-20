@@ -1,0 +1,22 @@
+--- census_02/greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline.py
++++ census_03/greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline.py
+@@ -313,7 +313,7 @@
+     status = "verified_no_change"
+     if tool == "dashes":
+         status, evidence = "tag_only", dict(dashes=[dict(offset=i, character=c) for i, c in enumerate(text) if c in "-–—−"], policy="no qualified general dash repair")
+-    elif tool == "numerics" and not any(c in text for c in ".-·"):
++    elif tool == "numerics" and not re.search(r"\d\s*[.\-·]\s*\d", text):
+         evidence = dict(candidate_scan="no adjacent numeric separator candidate")
+     elif tool == "cyrillic":
+         lang = {s.lower() for s in expected["languages"]}
+--- census_02/greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py
++++ census_03/greek-ocr-toolkit-sol-recut/greekocr/harvest/line_pipeline_census.py
+@@ -162,6 +162,8 @@
+     def deduplicate(self):
+         """Exact crop identity and held-out protection; never silently union parents."""
+         held_crops={r[0] for r in self.db.execute("SELECT DISTINCT json_extract(payload,'$.crop_sha256') FROM observations WHERE split!='train' AND split!='unassigned'")}
++        binding=json.loads(self.db.execute("SELECT value FROM run WHERE key='binding'").fetchone()[0])
++        held_crops.update(binding.get("config",{}).get("final_policy",{}).get("heldout_crop_sha256",[]))
+         groups={}
+         for parent,i,payload,decision in self.db.execute("SELECT o.parent,o.id,o.payload,d.payload FROM observations o JOIN decisions d USING(parent,id) WHERE o.split='train' ORDER BY o.parent,o.id"):
+             row=json.loads(payload);d=json.loads(decision)

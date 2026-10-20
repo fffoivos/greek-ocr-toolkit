@@ -1,4 +1,5 @@
 """S0: the only image enumerator. Selection is metadata, never an algorithm input."""
+from greekocr.ops.data_root import input_path as _data_input
 from pathlib import Path
 import hashlib, json, platform
 from PIL import Image
@@ -10,7 +11,7 @@ PARKED = 's2-6419488b7f8e69fd20da-p00001'
 
 def digest(path):
     h = hashlib.sha256()
-    with Path(path).open('rb') as f:
+    with _data_input(Path(path)).open('rb') as f:
         for b in iter(lambda: f.read(1 << 20), b''): h.update(b)
     return h.hexdigest()
 
@@ -43,7 +44,7 @@ def build():
                 scope='54 dev + 80 disagreement + 40 supplied agreement; no held-out', schema=1)
 
 def load(path):
-    obj=json.loads(Path(path).read_text())
+    obj=json.loads(_data_input(Path(path)).read_text())
     for r in obj['pages']:
         p=Path(r['path'])
         if p.is_absolute() or '..' in p.parts: raise ValueError('unsafe manifest path')

@@ -1,0 +1,43 @@
+--- /Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-sol-reading/docs/harvest/sol_reading/tools/scan_rollout.py	2026-10-17 14:05:45
++++ scripts/secondary/reading/scan_rollout.py	2026-10-17 16:13:38
+@@ -59,6 +59,12 @@
+     for rel,blob,im in candidates:
+         if data==blob:return dict(path=rel,match='bytes',mad=0)
+     with Image.open(io.BytesIO(data)) as out:
++        # view_image may re-encode a PNG without changing mode or pixels.
++        for rel,blob,im in candidates:
++            if im.size != out.size:continue
++            with Image.open(io.BytesIO(blob)) as original:
++                if original.mode == out.mode and original.tobytes() == out.tobytes():
++                    return dict(path=rel,match='pixels',mad=0)
+         out=out.convert('RGB');w,h=out.size
+         for rel,blob,im in candidates:
+             if max(im.size)<=2048 or max(w,h)!=2048:continue
+@@ -69,7 +75,7 @@
+                 if mad<2.0:return dict(path=rel,match='downscale',mad=mad,resampling=filt.name)
+     return None
+ 
+-REPLAY_TMP=Path('/private/tmp/claude-501/-Users-foivoskarounos-zamparloukos/d11f6140-6320-42d0-9f21-018ca3512d68/scratchpad/g4_tmp')
++REPLAY_TMP=Path(__file__).resolve().parents[3]/'artifacts/ru1/scanner_tmp'
+ 
+ def reproduce(data,directory,view,history):
+     """Only invoked after ordinary v3 provenance fails; never seed from zoom."""
+@@ -133,6 +139,9 @@
+         except OSError:pass
+     def check(value,ordinal):
+         # Resolve only literal interpolations, never execute rollout code.
++        # The sole dynamic base admitted here is the literal command pwd.
++        # Its result is the launcher's own reader cwd; no shell expression runs.
++        value=value.replace('${(await tools.exec_command({cmd:"pwd",max_output_tokens:100})).output.trim()}',str(directory))
+         value=re.sub(r"\$\{\s*("+LITERAL+r")\s*\}",lambda m:unquote(m[1]),value)
+         # A computed interpolation owns its suffix, e.g. ${base}/zoom/${i}.
+         # Mask the slash after it so it cannot become a standalone absolute path.
+@@ -144,7 +153,7 @@
+         if bad:violations.append(dict(record=ordinal,reason='forbidden literal path/name',input=value,matched=bad.group()))
+         for other in ('r1','r2','r3'):
+             if other!=directory.name and re.search(r'(?:^|[\s/"\'`])'+other+r'(?:$|[\s/"\'`])',value):violations.append(dict(record=ordinal,reason='other reader folder',input=value))
+-        for path in re.findall(r'''(?<![\w:/])/(?:[^\s"'`;,(){}<>|&\\])+''',value):
++        for path in re.findall(r'''(?<![\w:/)])/(?:[^\s"'`;,(){}<>|&\\])+''',value):
+             paths.append(path)
+             if not (path==str(directory) or path.startswith(str(directory)+'/')):violations.append(dict(record=ordinal,reason='absolute path outside reader_dir',path=path))
+     if not Path(rollout).is_file():violations.append({'reason':'missing rollout: '+str(rollout)})

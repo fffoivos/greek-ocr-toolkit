@@ -1,4 +1,4 @@
-# Readability calibration (docs/GLYPHS_CALIBRATION.md)
+# Readability calibration (docs/records/glyphs/GLYPHS_CALIBRATION.md)
 
 1. `calib_strips.py OUT_DIR TEXT_DIR [LINES_PER_CONDITION]` — synthetic strips, one controlled degradation each
    (v2 conditions: clean, accent_cut, top_cut, tail_cut, bottom_cut, fade, thin, break, thick, skew) + manifest.jsonl.

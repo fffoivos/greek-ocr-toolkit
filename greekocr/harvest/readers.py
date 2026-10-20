@@ -1,5 +1,6 @@
 """Budget-reserved single-crop Google calls; no implicit retries."""
 from __future__ import annotations
+from greekocr.ops.data_root import input_path as _data_input
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import dataclasses, fcntl, json, hashlib, time, threading
@@ -11,7 +12,7 @@ from greekocr.readers.services.google_docai import DocAIReader, DEFAULT_VERSION
 PRICE = .0015
 
 def read_jsonl(path):
-    return [json.loads(s) for s in Path(path).read_text().splitlines() if s.strip()] if Path(path).exists() else []
+    return [json.loads(s) for s in _data_input(Path(path)).read_text().splitlines() if s.strip()] if Path(path).exists() else []
 
 def atomic(path, value):
     path=Path(path); path.parent.mkdir(parents=True,exist_ok=True)

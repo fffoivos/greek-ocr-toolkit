@@ -4,6 +4,7 @@ import ast
 import hashlib
 import json
 from pathlib import Path
+from scripts.layout_paths import relocated
 import subprocess
 import sys
 import unicodedata as ud
@@ -367,7 +368,7 @@ def test_imports_without_torch_or_arrow():
 
 
 def test_field_documentation_covers_dataclass():
-    docs = (ROOT / 'docs/LINE_METADATA.md').read_text()
+    docs = (relocated(ROOT / 'docs/LINE_METADATA.md')).read_text()
     for field in fields(LineFeatures):
         assert f'`{field.name}`' in docs
 

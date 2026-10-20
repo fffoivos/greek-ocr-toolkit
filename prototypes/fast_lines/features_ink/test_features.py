@@ -3,7 +3,7 @@ import copy
 import cv2
 import numpy as np
 import pytest
-from ..shared.ink_photometry import percentiles8,glyphs,match_glyphs
+from ..shared.ink_photometry import percentiles8,glyphs,match_glyphs,glyph_atlas
 from ..shared.ink_ownership import analyze
 from ..shared.ink_strokes import measure,heuristic
 from ..shared.ink_images import render
@@ -59,7 +59,7 @@ def test_breaks_are_separate_from_attenuation():
 def test_mirror_template_has_spatial_handedness():
     a=strokes();atlas=glyphs(a,[0,0,420,100],45)
     query=glyphs(a[:,::-1].copy(),[0,0,420,100],45)
-    matches=match_glyphs(query,atlas)
+    matches=match_glyphs(query,glyph_atlas(atlas))
     assert len(matches)>=4
     assert all(m['reflected']>m['direct']+.1 for m in matches)
 
@@ -67,7 +67,7 @@ def test_mirror_template_has_spatial_handedness():
 def test_symmetry_does_not_supply_mirror_vote():
     a=np.full((100,420),240,np.uint8)
     for x in range(30,380,55):cv2.circle(a,(x,50),18,20,5)
-    atlas=glyphs(a,[0,0,420,100],45);matches=match_glyphs(atlas,atlas)
+    atlas=glyphs(a,[0,0,420,100],45);matches=match_glyphs(atlas,glyph_atlas(atlas))
     assert matches and all(m['margin']<=.01 for m in matches)
 
 

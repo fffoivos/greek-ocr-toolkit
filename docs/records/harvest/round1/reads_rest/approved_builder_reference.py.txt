@@ -1,0 +1,53 @@
+import json,sys,os,re,collections,statistics
+from PIL import Image,ImageDraw,ImageFont
+out=sys.argv[1]
+recs=collections.defaultdict(list); meta={}
+for l in open('docs/harvest/round1/reads_d1/records.jsonl'):
+    r=json.loads(l); recs[r['page_id']].append(r); meta[r['page_id']]=r
+sel={b['key']:b for b in json.load(open('docs/harvest/round1/selection.json'))['books']}
+FONT='/System/Library/Fonts/Supplemental/Times New Roman.ttf'
+fcache={}
+def font(sz):
+    sz=max(9,min(80,int(sz)))
+    if sz not in fcache: fcache[sz]=ImageFont.truetype(FONT,sz)
+    return fcache[sz]
+nfont=ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial Unicode.ttf',20)
+def slug(t,n=40):
+    t=re.sub(r'[/:\\?*"<>|]',' ',t); return re.sub(r'\s+',' ',t).strip()[:n].strip()
+def fit(pd,txt,w,start):
+    f=font(start)
+    while f.size>9 and pd.textlength(txt,font=f)>w*1.05: f=font(f.size-1)
+    return f.size
+PAD=40; GAP=40; n=0
+for pid,rows in recs.items():
+    m=meta[pid]; b=sel[m['book_key']]
+    page=Image.open(m['image']).convert('RGB'); W,H=page.size
+    dr=ImageDraw.Draw(page)
+    hs=[r['bbox'][3]-r['bbox'][1] for r in rows if r.get('counted')] or [r['bbox'][3]-r['bbox'][1] for r in rows]
+    med=statistics.median(hs)
+    panel=Image.new('RGB',(W,H),(255,255,255)); pd=ImageDraw.Draw(panel)
+    items=[]
+    for r in rows:
+        x0,y0,x1,y1=r['bbox']; txt=' '.join(r['docai_text'].split())
+        if not txt: continue
+        items.append((r,txt,fit(pd,txt,x1-x0,med*0.95)))
+    sizes=sorted(s for r,t,s in items if r.get('counted')) or sorted(s for _,_,s in items)
+    psize=sizes[len(sizes)//4] if sizes else med*0.8
+    for r in rows:
+        x0,y0,x1,y1=r['bbox']; h=y1-y0; tall=h>1.7*med
+        dr.rectangle([x0,y0,x1,y1],outline=(200,30,30) if tall else (20,150,60),width=3 if tall else 2)
+        dr.text((max(2,x0-40),y0-2),str(r['line_number']),fill=(200,30,30),font=nfont)
+    for r,txt,s in items:
+        x0,y0,x1,y1=r['bbox']; h=y1-y0; tall=h>1.7*med; low=(r.get('confidence') or 1)<0.89
+        f=font(min(psize,s)); col=(170,0,0) if low else (0,0,0)
+        ty = y0+2 if tall else y0+(h-f.size)/2-f.size*0.15
+        pd.text((x0,ty),txt,fill=col,font=f)
+        pd.text((max(2,x0-40),y0-2),str(r['line_number']),fill=(200,30,30),font=nfont)
+        if tall: pd.rectangle([x0,y0,x1,y1],outline=(200,30,30),width=2)
+    canvas=Image.new('RGB',(2*W+GAP+2*PAD,H+2*PAD),(255,255,255))
+    canvas.paste(page,(PAD,PAD)); canvas.paste(panel,(PAD+W+GAP,PAD))
+    ImageDraw.Draw(canvas).line([(PAD+W+GAP//2,PAD),(PAD+W+GAP//2,PAD+H)],fill=(200,200,200),width=2)
+    d=f"{out}/{b['decade']}s/{b['year']}_{slug(b['title'])}_{b['key'][:6]}"; os.makedirs(d,exist_ok=True)
+    canvas.save(f"{d}/p{m['page']:04d}.jpg",'JPEG',quality=85); n+=1
+open(out+'/README.txt','w').write("One image per page. Left: the page with Document AI's line boxes (green; RED box = it spans more than one printed row). Right: the same lines' text drawn where their box sits, one type size per page. Red text = Document AI's mean confidence on that line is below 0.89 (the weakest 5%). Numbers match on both sides.\n")
+print('pages',n)

@@ -10,6 +10,7 @@ from scipy.sparse.csgraph import connected_components
 from scipy.sparse import csr_matrix
 from .geometry import height_proxy
 from .contracts import bbox
+from .type_dot_runs import chains
 
 
 def box_grid(items,height,version=1):
@@ -164,21 +165,24 @@ def leader_rows(gray,items,height,*,slow=False,heuristic=False,version=2):
     ids=np.flatnonzero((s[:,2]<dot_max)&(s[:,3]<dot_max)&(s[:,2]>.035*h)&(s[:,3]>.035*h)&(s[:,4]>.008*h*h))
     points=np.zeros_like(ink)
     if not len(ids):return [],[]
-    xy=np.rint(c[ids]).astype(int);points[xy[:,1],xy[:,0]]=1
-    joined=cv2.dilate(points,np.ones((max(1,int(.4*h)),max(1,int(2*h))),np.uint8))
-    _,groups=cv2.connectedComponents(joined,8)
-    memberships=groups[xy[:,1],xy[:,0]];rows=[]
-    for v in np.unique(memberships):
-        ii=ids[memberships==v]
-        if len(ii)<6:continue
-        cc=c[ii];cc=cc[np.argsort(cc[:,0])];gaps=np.diff(cc[:,0]);pitch=float(np.median(gaps))
-        if pitch<.35*h or pitch>2*h or np.median(abs(gaps-pitch))>.2*pitch:continue
-        if np.ptp(cc[:,0])<6*h:continue
-        coef=np.polyfit(cc[:,0],cc[:,1],1)
-        if np.quantile(abs(cc[:,1]-np.polyval(coef,cc[:,0])),.9)>.18*h:continue
-        rows.append(dict(points=(cc*[sx,sy]).tolist(),pitch=pitch*sx,
-            bbox=[float(cc[:,0].min()*sx),float(cc[:,1].min()*sy-height*.3),float(cc[:,0].max()*sx),float(cc[:,1].max()*sy+height*.3)]))
-    if version>=5:rows=localized_leaders(c[ids],items,sx,sy,height)
+    if version>=5:
+        # The localized route replaces the older flood-filled row census.
+        rows=localized_leaders(c[ids],items,sx,sy,height)
+    else:
+        xy=np.rint(c[ids]).astype(int);points[xy[:,1],xy[:,0]]=1
+        joined=cv2.dilate(points,np.ones((max(1,int(.4*h)),max(1,int(2*h))),np.uint8))
+        _,groups=cv2.connectedComponents(joined,8)
+        memberships=groups[xy[:,1],xy[:,0]];rows=[]
+        for v in np.unique(memberships):
+            ii=ids[memberships==v]
+            if len(ii)<6:continue
+            cc=c[ii];cc=cc[np.argsort(cc[:,0])];gaps=np.diff(cc[:,0]);pitch=float(np.median(gaps))
+            if pitch<.35*h or pitch>2*h or np.median(abs(gaps-pitch))>.2*pitch:continue
+            if np.ptp(cc[:,0])<6*h:continue
+            coef=np.polyfit(cc[:,0],cc[:,1],1)
+            if np.quantile(abs(cc[:,1]-np.polyval(coef,cc[:,0])),.9)>.18*h:continue
+            rows.append(dict(points=(cc*[sx,sy]).tolist(),pitch=pitch*sx,
+                bbox=[float(cc[:,0].min()*sx),float(cc[:,1].min()*sy-height*.3),float(cc[:,0].max()*sx),float(cc[:,1].max()*sy+height*.3)]))
     bounds=np.asarray([bbox(q) for q in items],float).reshape(-1,4);clusters=[]
     for row in sorted(rows,key=lambda r:r['bbox'][1]):
         a,t,b,d=row['bbox'];match=None
@@ -209,29 +213,19 @@ def localized_leaders(centres,items,sx,sy,height):
     punctuation into neighbouring rows. Candidate dots still come from pixels.
     """
     from .geometry import line_axis
-    c=centres*np.array([sx,sy]);found=[]
+    c=centres*np.array([sx,sy]);found=[];found_y=[]
     for it in items:
         a,t,b,d=bbox(it)
         if b-a<6*height:continue
         pts=c[(c[:,0]>=a)&(c[:,0]<=b)&(c[:,1]>=t)&(c[:,1]<=d)]
         if len(pts)<6:continue
         _,slope=line_axis(it);pts=pts[np.argsort(pts[:,0])]
-        used=set()
-        for i in range(len(pts)-5):
-            if i in used:continue
-            for j in range(i+1,min(i+6,len(pts))):
-                pitch=pts[j,0]-pts[i,0]
-                if not .35*height<pitch<2*height:continue
-                if abs(pts[j,1]-pts[i,1]-slope*pitch)>.2*height:continue
-                chain=[i,j];last=j
-                while last<len(pts)-1:
-                    dx=pts[last+1:,0]-pts[last,0];dy=pts[last+1:,1]-pts[last,1]-slope*dx
-                    near=np.flatnonzero((abs(dx-pitch)<.2*pitch)&(abs(dy)<.2*height))
-                    if not len(near):break
-                    last+=1+int(near[0]);chain.append(last)
-                if len(chain)<6 or pts[chain[-1],0]-pts[i,0]<6*height:continue
-                cc=pts[chain]
-                if any(abs(np.median(cc[:,1])-np.median(np.asarray(r['points'])[:,1]))<.3*height and
-                       min(cc[-1,0],r['bbox'][2])-max(cc[0,0],r['bbox'][0])>.5*(cc[-1,0]-cc[0,0]) for r in found):continue
-                found.append(dict(points=cc.tolist(),pitch=float(pitch),bbox=[float(cc[:,0].min()),float(cc[:,1].min()-.3*height),float(cc[:,0].max()),float(cc[:,1].max()+.3*height)]));used.update(chain);break
+        used=set();accepted_seeds=set()
+        for i,j,chain,pitch in chains(pts,slope,height,pitch_max=2,vertical=.2,horizontal=.2,lookahead=5,min_remaining=6):
+            if i in used or i in accepted_seeds:continue
+            if len(chain)<6 or pts[chain[-1],0]-pts[i,0]<6*height:continue
+            cc=pts[chain];cy=float(np.median(cc[:,1]))
+            if any(abs(cy-ry)<.3*height and
+                   min(cc[-1,0],r['bbox'][2])-max(cc[0,0],r['bbox'][0])>.5*(cc[-1,0]-cc[0,0]) for r,ry in zip(found,found_y)):continue
+            found.append(dict(points=cc.tolist(),pitch=float(pitch),bbox=[float(cc[:,0].min()),float(cc[:,1].min()-.3*height),float(cc[:,0].max()),float(cc[:,1].max()+.3*height)]));found_y.append(cy);used.update(chain);accepted_seeds.add(i)
     return found

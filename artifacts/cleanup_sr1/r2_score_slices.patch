@@ -1,0 +1,28 @@
+--- a/scripts/labelfix/r2_score.py
++++ b/scripts/labelfix/r2_score.py
+@@ -5,6 +5,7 @@
+ including unmarked consonants, participate in case-preserving alignment.
+ Physical-slot scoring remains a separately invoked, unchanged R1 instrument.
+ """
++from greekocr.adjudicate.score import named_slices
+ from collections import Counter, defaultdict
+ from copy import deepcopy
+ import argparse
+@@ -87,6 +88,7 @@
+                 result.append(dict(line_id=l['line_id'],doc=l['doc'],source=l.get('source',l['doc'].split(':')[0]),
+                     id=ts['id'] if ts else f"{l['line_id']}:insert:{p}:{ps['base']}",
+                     base=(ts or ps)['base'],
++                    **{k:ts[k] for k in ('word','orthography','numeral','exact_name') if ts and k in ts},
+                     truth=y,prediction=ps['factors'] if ps else [0]*4,unknown=unknown,
+                     coverage=p is not None and not ps.get('unscored',False),
+                     unmatched_print=p is None,inserted_prediction=t is None,
+@@ -154,7 +156,8 @@
+         macro={metric:dict(mean=float(np.mean([g['atomic'][metric] for g in gs.values() if g['atomic'][metric] is not None])) if any(g['atomic'][metric] is not None for g in gs.values()) else None,
+             defined=sum(g['atomic'][metric] is not None for g in gs.values()),total=len(gs)) for metric in ('precision','recall')}
+         groups[key]=dict(groups=gs,macro=macro,micro=summarize(records))
+-    return dict(micro=summarize(records),groups=groups),records
++    slices = {name:summarize(selected) for name,selected in named_slices(records).items()}
++    return dict(micro=summarize(records),groups=groups,slices=slices),records
+ 
+ 
+ def paired(old,new,replicates=2000,seed=20261017,per_head=True):

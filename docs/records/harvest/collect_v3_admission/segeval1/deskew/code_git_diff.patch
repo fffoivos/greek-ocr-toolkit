@@ -1,0 +1,106 @@
+diff --git a/docs/harvest/collect_v3_admission/segeval1/deskew/baseline/greekocr/harvest/line_pipeline_native.py b/greekocr/harvest/line_pipeline_native.py
+index 34e0a8575..e02f273d1 100644
+--- a/docs/harvest/collect_v3_admission/segeval1/deskew/baseline/greekocr/harvest/line_pipeline_native.py
++++ b/greekocr/harvest/line_pipeline_native.py
+@@ -145,9 +145,17 @@ class NativeSegmenter:
+         yy, xx = np.nonzero(glyphs.ink)
+         ink_box = [int(xx.min()), int(yy.min()), int(xx.max())+1, int(yy.max())+1] if len(xx) else None
+         components = [dict(index=int(c.index), bbox=[int(c.x0),int(c.y0),int(c.x1),int(c.y1)], role=c.role, area=int(c.area), touches=list(c.touches)) for c in glyphs.components]
++        main = next((l for l in lines if l.side == "main"), None)
++        angle_deg = 0.0
++        # A mathematically flat fitted curve can carry a few ULPs of solver
++        # roundoff. Keep that identity case off the floating rotation path.
++        if main is not None and len(main.base) > 1 and np.ptp(main.base) > 8*np.spacing(max(1., float(np.max(np.abs(main.base))))):
++            x = np.arange(len(main.base), dtype=float); x -= x.mean()
++            slope = float(np.dot(x, main.base-main.base.mean()) / np.dot(x, x))
++            angle_deg = float(np.degrees(np.arctan(slope)))  # clockwise in image coordinates
+         features = self.crop_tools.features_from_observation(width=glyphs.width, height=glyphs.height, components=components,
+             ink_box=ink_box, ink_pixels=int(glyphs.ink.sum()), xheight=float(glyphs.band.xh), xheight_source=glyphs.band.xh_source,
+-            support_count=glyphs.band.n_support, chars=chars)
++            support_count=glyphs.band.n_support, chars=chars, labels=glyphs.labels, angle_deg=angle_deg)
+         packed = []
+         for l in lines:
+             at = np.unique(np.r_[np.linspace(0,glyphs.width-1,min(128,glyphs.width),dtype=int), *[np.array([np.argmin(getattr(l,k)),np.argmax(getattr(l,k))]) for k in ('ascender','mean','base','descender')]])
+@@ -158,10 +166,12 @@ class NativeSegmenter:
+             box_evidence=dict(available=False), detected_rows=packed,
+             padding_evidence=dict(available=False), neighbour_evidence=None)
+         if b:
+-            prediction = self.predictor.call(dict(long_side=max(b["width"],b["height"]), short_side=min(b["width"],b["height"]), script=row.get("script_class", "pooled")))
+-            evidence["box_evidence"] = dict(available=True, predictions=[None,None,prediction["expected"]], bbox=b["bbox"], prediction=prediction)
++            rf = features["row_frame_text_box"]
++            prediction = self.predictor.call(dict(long_side=max(rf["length"],rf["height"]), short_side=min(rf["length"],rf["height"]), script=row.get("script_class", "pooled")))
++            evidence["box_evidence"] = dict(available=True, predictions=[None,None,prediction["expected"]], bbox=b["bbox"], prediction=prediction, row_frame=rf)
+             h = features["segment"]["height"]
+-            evidence["padding_evidence"] = dict(available=True, total_padding_line_heights=(h-b["height"])/b["height"])
++            evidence["padding_evidence"] = dict(available=True, total_padding_line_heights=(h-b["height"])/rf["height"],
++                upright_box_height=b["height"], row_frame_height=rf["height"])
+         if any(l["side"] != "main" and l["votes"] > 0 for l in packed):
+             context = self.context(row, image, frame, QuarterTurn)
+             if context.get('error'):
+diff --git a/docs/harvest/collect_v3_admission/segeval1/deskew/baseline/greekocr/harvest/filtering_assets/crop-tools.py b/greekocr/harvest/filtering_assets/crop-tools.py
+index e45c22c32..5a99104e4 100644
+--- a/docs/harvest/collect_v3_admission/segeval1/deskew/baseline/greekocr/harvest/filtering_assets/crop-tools.py
++++ b/greekocr/harvest/filtering_assets/crop-tools.py
+@@ -52,9 +52,25 @@ def sha(path):
+     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+ 
+ 
+-def tight_box(components):
++def tight_box(components, *, labels=None, angle_deg=0, centre=None):
+     if not components:
+         return None
++    if angle_deg != 0:
++        import numpy as np
++        # Rotate only the selected components' ink, not their upright envelopes.
++        # Pixel cells have unit area; their projected half-width bounds the ink
++        # without resampling or rounding a continuous row-frame measurement.
++        yy, xx = np.nonzero(np.isin(labels, [c['index'] for c in components]))
++        if not len(xx):
++            raise ValueError('text components have no labelled ink')
++        cx, cy = centre
++        c, s = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
++        dx, dy = xx + .5 - cx, yy + .5 - cy
++        u, v = c*dx + s*dy + cx, -s*dx + c*dy + cy
++        half = (abs(c) + abs(s))/2
++        return [float(u.min()-half), float(v.min()-half),
++                float(u.max()+half), float(v.max()+half)]
++    # Preserve the original integer box exactly for the identity transform.
+     return [min(c['bbox'][0] for c in components), min(c['bbox'][1] for c in components),
+             max(c['bbox'][2] for c in components), max(c['bbox'][3] for c in components)]
+ 
+@@ -81,7 +97,8 @@ def box_metrics(box, width, height, xheight):
+ 
+ 
+ def features_from_observation(*, width, height, components, ink_box, ink_pixels,
+-                              xheight, xheight_source, support_count, chars):
++                              xheight, xheight_source, support_count, chars,
++                              labels=None, angle_deg=0):
+     """Geometry arithmetic only; components/roles come from the existing tool."""
+     if width <= 0 or height <= 0 or chars < 0:
+         raise ValueError('invalid native dimensions or character count')
+@@ -102,6 +119,16 @@ def features_from_observation(*, width, height, components, ink_box, ink_pixels,
+         raise ValueError('component census exceeds observed ink')
+     text_pixels = sum(c['area'] for c in text)
+     text_box = box_metrics(tight_box(text), width, height, xheight)
++    row_box = tight_box(text, labels=labels, angle_deg=angle_deg, centre=(width/2, height/2))
++    row_frame = None
++    if row_box is not None:
++        x0, y0, x1, y1 = row_box
++        corners = [[x0,y0], [x1,y0], [x1,y1], [x0,y1]]
++        if angle_deg != 0:
++            c, s = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
++            corners = [[c*(x-width/2)-s*(y-height/2)+width/2,
++                        s*(x-width/2)+c*(y-height/2)+height/2] for x,y in corners]
++        row_frame = dict(angle_deg=angle_deg, length=x1-x0, height=y1-y0, corners=corners)
+     body_box = box_metrics(tight_box(bodies), width, height, xheight)
+     letters = [c for c in components if c['role'] == 'letter']
+     def median(values):
+@@ -126,7 +153,7 @@ def features_from_observation(*, width, height, components, ink_box, ink_pixels,
+     return dict(segment=dict(width=width, height=height, aspect=width/height,
+                              short_long=min(width,height)/max(width,height)),
+                 all_ink_box=box_metrics(ink_box,width,height,xheight),
+-                candidate_text_box=text_box, letter_component_box=body_box,
++                candidate_text_box=text_box, row_frame_text_box=row_frame, letter_component_box=body_box,
+                 neighbour_box=box_metrics(tight_box(neighbours),width,height,xheight),
+                 xheight_px=xheight, xheight_source=xheight_source, band_support=support_count,
+                 median_letter_component_width_px=letter_width,

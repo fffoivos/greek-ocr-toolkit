@@ -10,6 +10,7 @@ import numpy as np
 from ..shared.geometry import height_proxy, quantize, roi, robust_fit
 from ..shared.image_evidence import runs, components
 from ..shared.contracts import bbox
+from ..shared import observations as obs
 
 
 def scout(gray, items):
@@ -22,13 +23,12 @@ def scout(gray, items):
     # Integer area kernels are substantially cheaper than a large arbitrary ratio.
     step=max(1,2**int(np.floor(np.log2(1/scale))))
     ch,cw=(H//step)*step,(W//step)*step
-    reduced=cv2.resize(gray[:ch,:cw],(cw//step,ch//step),interpolation=cv2.INTER_AREA)
-    small=cv2.resize(reduced,(w,h),interpolation=cv2.INTER_AREA)
+    reduced=obs.resize(gray[:ch,:cw],(cw//step,ch//step))
+    small=obs.resize(reduced,(w,h))
     sx,sy=w/cw,h/ch
     body=height*sy
     # Local mean, not a page darkness reference; no foreground classification.
-    paper=cv2.boxFilter(small,cv2.CV_32F,(quantize(3*body)|1,quantize(3*body)|1))
-    ink=(paper-small>255*.06).astype(np.uint8)
+    ink=obs.ink(small,quantize(3*body)|1,method="mean",threshold=255*.06,arithmetic="dn")
     ink=cv2.morphologyEx(ink,cv2.MORPH_CLOSE,np.ones((quantize(.5*body),1),np.uint8))
     tolerance=quantize(.6*body)
     widened=cv2.dilate(ink,np.ones((1,tolerance),np.uint8))

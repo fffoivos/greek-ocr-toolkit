@@ -1,0 +1,711 @@
+"""Shared SF2/L1E policy: observation, agreement, K1, and bounded edits.
+
+PRESENCE compares mark families; FULL compares exact mark sets. Neither is
+independent print truth. Missing observation always abstains. Punctuation uses
+detector opening quotes (canonical “) and word-final elisions (canonical ’).
+Other punctuation and spaces must match, allowing explicit codepoint aliases.
+Base letters and unsupported printed marks remain guarded.
+ENSEMBLE_AB/AE compare A with B/E exactly and do not veto on detector names.
+"""
+from collections import Counter
+from copy import deepcopy
+from dataclasses import asdict, fields, replace
+from difflib import SequenceMatcher
+import hashlib
+import json
+import math
+import unicodedata as ud
+from . import reading as R
+from .text import (clusters, nfd, nfc, GREEK_LETTERS, ELISION, BREATHINGS,
+                   is_letter, word_final_elision, spacing_breathing, punctuation_sites)
+
+POLICY = 'sf6-release-v1'
+MODES = ('PRESENCE', 'FULL', 'ENSEMBLE_AB', 'ENSEMBLE_AE')
+ENSEMBLE_CAVEAT = "A and B share training data (C1 agreement labels) and therefore share errors; agreement measures the reader's stability, not an independent pixel signal. Precision on the training waves is unmeasured until the training-wave DEV with print truth exists. Wave 1c on this release is a pseudo-label experiment."
+R1_LETTERS = frozenset('αεηιουωρΑΕΗΙΟΥΩΡ')
+LEADING_QUOTES = '“”«»„"'
+RECOGNISER_ABSENCE_FLOOR = 0.5
+
+
+def policy_binding():
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]
+    paths = [Path(__file__), Path(R.__file__),Path(__file__).with_name('text.py'),
+             Path(__file__).with_name('segmentation.py'),
+             root/'scripts/labelfix/clariden/l1_common.py',root/'scripts/labelfix/clariden/l1r_recompose.py',
+             root/'scripts/labelfix/owner_reading.py',root/'scripts/labelfix/owner_pages_build_combined.py',
+             Path(__file__).with_name('ctc_align.py'), root/'scripts/labelfix/m2_run.py',
+             root/'scripts/labelfix/clariden/r1_extract.py',root/'scripts/labelfix/clariden/l1_infer.py',
+             root/'scripts/labelfix/clariden/l1e_measure.py',root/'scripts/labelfix/clariden/l1e_run.py',
+             root/'scripts/labelfix/clariden/l1_detect.py',root/'scripts/labelfix/clariden/r1_common.py']
+    sources = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+    return dict(schema=POLICY, sources=sources,
+                sha256=hashlib.sha256(json.dumps(sources,sort_keys=True).encode()).hexdigest())
+
+
+def serialize(rd):
+    """Lossless decision/evidence serializer shared by pages and releases."""
+    slots=[]
+    for i,s in enumerate(rd.slots,1):
+        c=s.get('component')
+        d={k:v for k,v in s.items() if k not in ('component','evidence','naming')}
+        d.update(display_slot=i,parts=list(s.get('parts',())),
+                 bbox=[c.x0,c.y0,c.x1,c.y1] if c is not None else s.get('bbox'),
+                 component_ids=list(s.get('component_ids',())))
+        ev=s.get('evidence',{})
+        d['evidence']=ev.to_record() if hasattr(ev,'to_record') else deepcopy(ev)
+        nm=s.get('naming',{})
+        d['naming']=asdict(nm) if hasattr(nm,'__dataclass_fields__') else deepcopy(nm)
+        slots.append(d)
+    record=dict(schema='line-reading-sf1-v1',text=rd.text,slots=slots,unnamed=rd.unnamed,
+                opening_quotes=rd.opening_quotes,removed_by_constraint=rd.removed_by_constraint,
+                constraint_flags=rd.constraint_flags)
+    if rd.geometry:record['geometry']=deepcopy(rd.geometry)
+    if rd.evidence_sha256:record['evidence_sha256']=rd.evidence_sha256
+    return record
+
+
+def deserialize(record):
+    return R.LineReading(**deepcopy({f.name:record[f.name] for f in fields(R.LineReading) if f.name in record}))
+
+
+def kinds(parts):
+    return {'breathing' if p in ('psili','dasia') else 'accent' if p in ('acute','grave','circumflex') else p for p in parts}
+
+
+def prediction_index(records):
+    result={}
+    for p in records:
+        if p['start'] in result:raise ValueError('duplicate R1 prediction start')
+        result[p['start']]=p
+    return result
+
+
+def _supported(c):
+    if c.base not in GREEK_LETTERS:return not c.marks
+    if any(m not in R.MARKS.values() for m in c.marks):return False
+    counts=Counter(kinds([p]).pop() for m in c.marks for p,v in R.MARKS.items() if v==m)
+    if any(n>1 for n in counts.values()):return False
+    if counts['breathing'] and counts['dialytika']:return False
+    if c.marks and c.base not in R1_LETTERS:return False
+    if counts['dialytika'] and c.base.lower() not in 'ιυ':return False
+    if counts['subscript'] and c.base.lower() not in 'αηω':return False
+    if c.base.lower()=='ρ' and any(k!='breathing' for k in counts):return False
+    return True
+
+
+_word_final_elision = word_final_elision
+
+
+def _render_reading(text, slots):
+    """Release composer: reader marks, detector final elisions, other quotes kept."""
+    by={s['start']:s for s in slots};out=[];cs=clusters(nfd(text))
+    for i,c in enumerate(cs):
+        if _word_final_elision(cs,i):continue
+        if (spacing_breathing(cs,i) and
+                {'psili','dasia'} & set(by.get(cs[i+1].start,{}).get('parts',()))):
+            continue
+        s=by.get(c.start)
+        if s is None:out.append(c.base)
+        else:
+            out.append(c.base+''.join(R.MARKS[p] for p in s.get('parts',()) if p in R.MARKS))
+            if s.get('apostrophe'):out.append('’')
+    return nfc(''.join(out))
+
+
+def _punctuation(text):
+    """Remove only leading quote aliases and elisions after Greek word ends."""
+    cs=clusters(nfd(text).lstrip(LEADING_QUOTES+' '))
+    out=[]
+    for i,c in enumerate(cs):
+        if _word_final_elision(cs,i):continue
+        if not c.base.isalpha() or c.base in ELISION:
+            # Representation only: never drop a quote, space or attached mark.
+            base = ('"' if c.base in LEADING_QUOTES else c.base if spacing_breathing(cs,i)
+                    else "'" if c.base in ELISION+'‘'
+                    else ' ' if c.base in '\u00a0\u202f' else c.base)
+            out.append(base+c.marks)
+    return ''.join(out)
+
+
+def _letters(text):
+    return [c for c in clusters(nfd(text)) if is_letter(c.base)]
+
+
+def _breathing_pair(original, proposal):
+    """Remove a spacing breathing and its duplicate only with an attached one.
+
+    This is the sole punctuation-guard exception for SF5: the same letter
+    boundary must carry a Google spacing breathing and a proposed combining
+    breathing. Internal/closing apostrophes do not qualify.
+    """
+    a,b=_letters(original),_letters(proposal)
+    if [c.base for c in a]!=[c.base for c in b]:return original,proposal
+    sites=punctuation_sites(original,spacing_breathing)
+    attached={k for k in sites if k<len(b) and set(b[k].marks)&BREATHINGS}
+    def remove(text):
+        cs=clusters(nfd(text));boundary=0;out=[]
+        for i,c in enumerate(cs):
+            if is_letter(c.base):boundary+=1
+            if (boundary in attached and c.base in ELISION and not c.marks
+                    and i+1<len(cs) and is_letter(cs[i+1].base)):
+                continue
+            out.append(c.base+c.marks)
+        return ''.join(out)
+    return remove(original),remove(proposal)
+
+
+def release_text(original, recogniser, proposal):
+    """SF5's two release-only rules; no slot decisions or reader votes change.
+
+    Consensus elisions survive detector absence. Existing Google elisions keep
+    their spelling, including on lines with real mark edits. A Google spacing
+    breathing is consumed atomically with attachment, else kept verbatim.
+    The single-source sites are observed, never promoted to consensus.
+    """
+    g=punctuation_sites(original);r=punctuation_sites(recogniser)
+    same=([c.base for c in _letters(original)]==[c.base for c in _letters(recogniser)]
+          ==[c.base for c in _letters(proposal)])
+    if not same:
+        return proposal,dict(aligned=False,google=len(g),recogniser=len(r))
+    breathings=punctuation_sites(original,spacing_breathing)
+    cs=clusters(nfd(proposal));letters=_letters(proposal)
+    attached={k for k in breathings if k<len(letters) and set(letters[k].marks)&BREATHINGS}
+    p=punctuation_sites(proposal);consensus=g.keys()&r.keys();out=[];boundary=0
+    for i,c in enumerate(cs):
+        if is_letter(c.base):
+            # Unattached spacing breathings belong immediately before this
+            # letter. A preceding source alias has already been suppressed.
+            if boundary in breathings and boundary not in attached:
+                out.append(breathings[boundary].base)
+            out.append(c.base+c.marks);boundary+=1
+            if boundary in consensus and boundary not in p:
+                out.append(g[boundary].base)
+        elif (boundary in breathings and c.base in ELISION and not c.marks
+              and i+1<len(cs) and is_letter(cs[i+1].base)):
+            continue
+        elif word_final_elision(cs,i) and boundary in g:
+            out.append(g[boundary].base)
+        else:out.append(c.base+c.marks)
+    text=nfc(''.join(out));final=punctuation_sites(text)
+    census=dict(aligned=True,google=len(g),recogniser=len(r),both=len(consensus),
+        google_only=len(g.keys()-r.keys()),recogniser_only=len(r.keys()-g.keys()),
+        both_kept=len(consensus&final.keys()),both_deleted=len(consensus-final.keys()),
+        google_only_kept=len((g.keys()-r.keys())&final.keys()),
+        google_only_deleted=len((g.keys()-r.keys())-final.keys()),
+        recogniser_only_kept=len((r.keys()-g.keys())&final.keys()),
+        recogniser_only_deleted=len((r.keys()-g.keys())-final.keys()),
+        added=len(final.keys()-g.keys()),spacing_breathings=len(breathings),
+        spacing_breathings_attached=len(attached))
+    return text,census
+
+
+def edit_guard(original, proposal):
+    """Return rejection reasons; unchanged unsupported characters are preserved.
+
+    Greek bases and legal mark multiplicities are the only editable letters.
+    Non-Greek clusters and unsupported Greek clusters must remain identical.
+    Canonical equivalence alone is never a reason to rewrite source bytes.
+    """
+    a=[c for c in clusters(nfd(original)) if (c.base.isalpha() and c.base not in ELISION) or ud.combining(c.base)]
+    b=[c for c in clusters(nfd(proposal)) if (c.base.isalpha() and c.base not in ELISION) or ud.combining(c.base)]
+    reasons=[]
+    # Preserve the raw spelling of out-of-domain clusters, including decomposed
+    # Latin accents. NFC equivalence does not authorize rewriting those bytes.
+    raw_a=[c for c in clusters(original) if c.base.isalpha() and c.base not in ELISION]
+    raw_b=[c for c in clusters(proposal) if c.base.isalpha() and c.base not in ELISION]
+    if len(raw_a)==len(raw_b):
+        for i,(x,y) in enumerate(zip(raw_a,raw_b)):
+            decoded=clusters(nfd(x.base+x.marks))[0]
+            if (decoded.base not in GREEK_LETTERS or not _supported(decoded)) and x.base+x.marks!=y.base+y.marks:
+                reasons.append(f'edit_guard:unsupported_raw_character:{i}')
+    if len(a)!=len(b) or [c.base for c in a]!=[c.base for c in b]:
+        reasons.append('edit_guard:base_or_character_mismatch')
+    else:
+        for i,(x,y) in enumerate(zip(a,b)):
+            if (not _supported(x) or not _supported(y) or x.base not in GREEK_LETTERS) and (x.base+x.marks!=y.base+y.marks):
+                reasons.append(f'edit_guard:unsupported_character:{i}')
+    punct_a,punct_b=_breathing_pair(original,proposal)
+    if _punctuation(punct_a)!=_punctuation(punct_b):reasons.append('edit_guard:punctuation_mismatch')
+    return reasons
+
+
+def deletion_atoms(text):
+    """NFD deletions at fixed letter boundaries; only SF5 elision aliases fold.
+
+    A replacement deletes its old atom, even when it adds another accent or
+    attaches a spacing breathing. Repeated signs retain their multiplicity.
+    Keraia classification is descriptive: explicit numeral signs or an alias
+    after a Greek/decimal/Unicode numeral token. All punctuation classes
+    use the same detector AND recogniser requirement.
+    """
+    cs=clusters(nfd(text));out=[];boundary=0
+    for i,c in enumerate(cs):
+        letter=is_letter(c.base) and c.base not in '\u02b9\u0374\u0375\u0384'
+        if letter:
+            out.append(dict(key=('letter',boundary,c.base),character=c.base,
+                start=c.start,letter=boundary,category='other'))
+            out.extend(dict(key=('mark',boundary,m),character=m,start=c.start+j+1,
+                letter=boundary,category='mark') for j,m in enumerate(c.marks))
+            boundary+=1
+            continue
+        spacing=spacing_breathing(cs,i)
+        alias=word_final_elision(cs,i)
+        token=''
+        if c.base in ELISION:
+            for prev in reversed(cs[:i]):
+                if is_letter(prev.base) or prev.base.isdecimal() or ud.category(prev.base)=='Nl':token=prev.base+token
+                else:break
+        keraia=(c.base in '\u02b9\u0374\u0375\u0384' or (c.base in ELISION and token and
+            (token.isdecimal() or all(ud.category(x)=='Nl' for x in token) or
+             len(token)<=3 and all(x in 'ΑΒΓΔΕϚϜΖΗΘΙΚΛΜΝΞΟΠϞΡΣΤΥΦΧΨΩϠ' for x in token))))
+        category=('mark' if spacing or ud.category(c.base).startswith('M') else 'keraia' if keraia else
+                  'apostrophe' if alias else 'quote' if c.base in LEADING_QUOTES+'‘‚‹›' else
+                  'apostrophe' if c.base in ELISION else 'other')
+        # Spacing breathings refer to the following letter, other punctuation
+        # to the preceding letter (a leading quote to the first letter).
+        owner=boundary if spacing else max(0,boundary-1)
+        key=('punct',boundary,'elision' if alias else c.base)
+        out.append(dict(key=key,character=c.base,start=c.start,letter=owner,category=category))
+        out.extend(dict(key=('punct_mark',boundary,m),character=m,start=c.start+j+1,
+            letter=owner,category='mark') for j,m in enumerate(c.marks))
+    return out
+
+
+def google_deletions(original, proposal):
+    """Include replaced characters; exclude canonical and pure elision aliases."""
+    a,b=deletion_atoms(original),deletion_atoms(proposal)
+    matcher=SequenceMatcher(None,[x['key'] for x in a],[x['key'] for x in b],autojunk=False)
+    return [dict(x) for tag,i,j,_,_ in matcher.get_opcodes() if tag!='equal' for x in a[i:j]]
+
+
+def _finite_span(value):
+    return (isinstance(value,(list,tuple)) and len(value)==2
+            and all(isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x) for x in value)
+            and 0<=value[0]<value[1])
+
+
+def _source_in_window(span, window, image_width=None, coverage=None):
+    """One coordinate contract for MOVE, reader absence and recogniser absence.
+
+    Source letter spans must belong to the saved target window. Padded reader
+    crops may be wider; their native target mask must still be inside the image.
+    Historical R1 extraction explicitly recorded out_of_image_span in uncertainty;
+    its known, scored, uncertainty-free records retain that bounds provenance.
+    Arbitrary finite coordinates alone never establish image bounds.
+    """
+    if not (_finite_span(span) and _finite_span(window)
+            and window[0]<=span[0]<span[1]<=window[1]):return False
+    if image_width is not None:
+        return (isinstance(image_width,(int,float)) and not isinstance(image_width,bool)
+                and math.isfinite(image_width) and span[1]<=image_width)
+    cov=coverage or {}
+    return bool(cov.get('window_contract',{}).get('schema')=='r1-trained-full-height-v1'
+                and cov.get('scored') is True and cov.get('evidence_state') not in (None,'UNKNOWN')
+                and cov.get('uncertainty')==[] and cov.get('span')==span)
+
+
+def _recogniser_scored(runtime, slot, window):
+    """An explicit line score AND scored observation of this entire window."""
+    def above_floor(value):
+        return (isinstance(value,(int,float)) and not isinstance(value,bool)
+                and math.isfinite(value) and RECOGNISER_ABSENCE_FLOOR<value<=1)
+    evidence=runtime.get('recognition_evidence') or {}
+    if not (above_floor(runtime.get('recognition_confidence'))
+            and evidence.get('schema')=='ctc-window-score-v1' and evidence.get('scored') is True
+            and evidence.get('provenance')=='saved_alignment_confidence'
+            and evidence.get('text_sha256')==hashlib.sha256(nfd(runtime.get('recogniser_text','')).encode()).hexdigest()
+            and isinstance(evidence.get('alignment_sha256'),str)
+            and len(evidence['alignment_sha256'])==64):return False
+    regions=[r for r in evidence.get('regions',()) if r.get('start')==slot.get('start')]
+    if len(regions)!=1:return False
+    region=regions[0];observed=region.get('window')
+    frames=region.get('frames')
+    return bool(region.get('base')==slot.get('base') and region.get('scored') is True
+        and region.get('provenance')=='minimum_max_frame_posterior_including_blank'
+        and above_floor(region.get('confidence')) and _finite_span(frames)
+        and all(isinstance(x,int) and not isinstance(x,bool) for x in frames)
+        and _source_in_window(observed,observed,region.get('image_width'))
+        and _finite_span(window) and observed[0]<=window[0]<window[1]<=observed[1]
+        and _source_in_window(slot.get('locator_span'),window,region.get('image_width'))
+        and (runtime.get('image_width') is None or runtime['image_width']==region['image_width']))
+
+
+def deletion_guard(original, proposal, runtime, decision):
+    """SF6: two positive absences, except an R1-named same-kind breathing MOVE.
+
+    A/B (or A/E) together are ONE reader. The R1 heads name combining
+    marks only. Punctuation therefore needs detector AND scored recogniser
+    text. Empty candidates outside a detector's head/window are unknown.
+    This checks saved evidence and never runs or alters a source decision.
+    """
+    deleted=google_deletions(original,proposal)
+    if not deleted:return []
+    text=runtime.get('recogniser_text','')
+    letters=[c for c in _letters(text) if c.base not in '\u02b9\u0374\u0375\u0384']
+    aligned=([c.base for c in _letters(original) if c.base not in '\u02b9\u0374\u0375\u0384']==[c.base for c in letters])
+    raw=runtime.get('detector',{});raw=serialize(raw) if not isinstance(raw,dict) else raw
+    slots={s['start']:s for s in raw.get('slots',())}
+    composed={s['start']:s for s in decision.get('slots',())}
+    coverage={s['start']:s for s in runtime.get('coverage',())}
+    predictions=prediction_index(runtime.get('r1_predictions',()))
+    rec_atoms=Counter(x['key'] for x in deletion_atoms(text))
+    # SF6b moves content from a spacing sign onto the SAME capital. It does
+    # not certify absence. Keep the raw deletion inventory and absence signals
+    # intact, and identify the exception explicitly in the resulting check.
+    moves={};source=clusters(nfd(original));target=_letters(proposal)
+    same_letters=([c.base for c in _letters(original)]==[c.base for c in target])
+    boundary=0
+    for i,x in enumerate(source):
+        if is_letter(x.base):boundary+=1
+        part={'᾿':'psili','᾽':'psili','῾':'dasia'}.get(x.base)
+        if not (aligned and same_letters and part and not x.marks and i+1<len(source)
+                and boundary<len(target) and boundary<len(letters)):continue
+        old=source[i+1];new=target[boundary];rc=letters[boundary]
+        if not (old.base in R1_LETTERS and old.base.isupper() and old.base==new.base==rc.base
+                and not set(old.marks)&BREATHINGS
+                and set(new.marks)&BREATHINGS=={R.MARKS[part]}):continue
+        slot=slots.get(rc.start,{});written=composed.get(rc.start,{})
+        ev=slot.get('evidence',{});ev=ev.to_record() if hasattr(ev,'to_record') else ev
+        window=ev.get('window')
+        if not (slot and written.get('base')==rc.base and written.get('label_status')=='ACCEPT'
+                and not written.get('hold') and not written.get('hold_reasons')
+                and _finite_span(window) and slot.get('base')==rc.base
+                and slot.get('localisation_unknown') is False and slot.get('segmentation_uncertain') is False
+                and slot.get('physical_resolved') is not False
+                and not any(slot.get(k) for k in ('unnamed','ambiguity','hold','unseen_zones','constraint_flags'))
+                and slot.get('evidence_state')!='UNKNOWN' and ev.get('evidence_state')!='UNKNOWN'
+                and not ev.get('uncertainty') and ev.get('clipped_top') is False
+                and not any(ev.get('clipped_'+z) for z in ('left','right'))
+                and ev.get('observation',{}).get('above') not in ('UNSEEN','UNKNOWN')
+                and not any(_flag_targets(f,rc.start) for f in raw.get('constraint_flags',()))
+                and not raw.get('geometry',{}).get('physical_mapping',{}).get('ambiguous')):continue
+        named=True
+        arms=[(predictions,coverage)]
+        for peer in (('B','E') if decision.get('mode')=='ENSEMBLE_AE' else ('B',)):
+            arms.append((prediction_index(runtime.get('peer_predictions',{}).get(peer,())),
+                         {c['start']:c for c in runtime.get('peer_coverage',{}).get(peer,())}))
+        for preds,covs in arms:
+            pred=preds.get(rc.start);cov=covs.get(rc.start)
+            named=bool(named and cov and not _reader_reasons(slot,pred,cov,'r1')
+                and _source_in_window(cov.get('span'),window,runtime.get('image_width'),cov)
+                and set(pred.get('parts',pred.get('cls','none').split('+')))&{'psili','dasia'}=={part})
+        if named:moves[x.start]=part
+    events=[]
+    for atom in deleted:
+        index=atom['letter'];c=letters[index] if aligned and index<len(letters) else None
+        s=slots.get(c.start,{}) if c else {};d=composed.get(c.start,{}) if c else {}
+        ev=s.get('evidence',{});ev=ev.to_record() if hasattr(ev,'to_record') else ev
+        char=atom['character'];category=atom['category']
+        part=next((p for p,m in R.MARKS.items() if m==char),None)
+        if char in '᾿᾽':part='psili'
+        zone='below' if part=='subscript' else 'above'
+        edge='bottom' if zone=='below' else 'top'
+        clean=bool(c and s and s.get('base')==c.base
+            and s.get('localisation_unknown') is False and s.get('segmentation_uncertain') is False
+            and s.get('physical_resolved') is not False
+            and not any(s.get(k) for k in ('unnamed','ambiguity','hold','unseen_zones','constraint_flags'))
+            and s.get('evidence_state')!='UNKNOWN' and ev.get('evidence_state')!='UNKNOWN'
+            and not ev.get('uncertainty') and not d.get('hold_reasons')
+            and not any(_flag_targets(f,c.start) for f in raw.get('constraint_flags',()))
+            and not raw.get('geometry',{}).get('physical_mapping',{}).get('ambiguous')
+            and ev.get('clipped_'+edge) is False
+            and not any(ev.get('clipped_'+z) for z in ('left','right'))
+            and ev.get('observation',{}).get(zone) not in ('UNSEEN','UNKNOWN'))
+        cov=coverage.get(c.start) if c else None
+        pred=predictions.get(c.start) if c else None
+        window=ev.get('window')
+        scored=bool(clean and cov and not _reader_reasons(s,pred,cov,'r1')
+                    and _source_in_window(cov.get('span'),window,runtime.get('image_width'),cov))
+        reader=bool(category=='mark' and part and c and c.base in R1_LETTERS and scored
+                    and part not in (pred.get('parts',pred.get('cls','none').split('+')) or []))
+        # The coordinator's A∧B is one reader absence in every release mode.
+        # AE additionally retains its selected E check; it supplies no extra
+        # independent signal. Missing/conflicting arms cannot certify absence.
+        for peer in (('B','E') if decision.get('mode')=='ENSEMBLE_AE' else ('B',)):
+            pp=prediction_index(runtime.get('peer_predictions',{}).get(peer,())).get(c.start) if c else None
+            pc={x['start']:x for x in runtime.get('peer_coverage',{}).get(peer,())}.get(c.start) if c else None
+            reader=bool(reader and pc and not _reader_reasons(s,pp,pc,'peer')
+                        and _source_in_window(pc.get('span'),window,runtime.get('image_width'),pc)
+                        and part not in pp.get('parts',pp.get('cls','none').split('+')))
+        observed=ev.get('observation',{})
+        detector=bool(clean and _finite_span(ev.get('window')) and observed.get(zone)=='OBSERVED'
+                      and 'parts' in s and category=='mark' and part and part not in s['parts'])
+        if category in ('apostrophe','keraia'):
+            # ink.apostrophe_candidates scores only these word-final letters;
+            # in particular an empty Ι/kappa/mu slot is not a negative head.
+            detector=bool(clean and category=='apostrophe' and s.get('word_final') is True
+                and c.base.lower() in 'δτρθπ' and s.get('apostrophe') is False
+                and ev.get('apostrophes')==[] and observed.get('above')=='OBSERVED'
+                and observed.get('right')=='OBSERVED' and _finite_span(ev.get('window')))
+        elif category=='quote':
+            detector=bool(clean and atom['key'][1]==0 and raw.get('opening_quotes')==[]
+                and observed.get('above')=='OBSERVED' and observed.get('left')=='OBSERVED'
+                and _finite_span(ev.get('window')))
+        recogniser=bool(clean and _recogniser_scored(runtime,s,window) and rec_atoms[atom['key']]==0)
+        # Text presence is decisive against absence, even if it has a score.
+        allowed=(detector and recogniser if category in ('apostrophe','quote','keraia')
+                 else reader and (detector or recogniser))
+        move=moves.get(atom['start']) if atom['key'][0]=='punct' else None
+        allowed=allowed or bool(move)
+        events.append(dict(atom,recogniser_start=c.start if c else None,
+            signals=dict(reader=reader,detector=detector,recogniser=recogniser),allowed=bool(allowed),
+            reason=None if allowed else 'sf6:deletion_needs_two_positive_absences:'+category))
+        if move:events[-1].update(operation='MOVE',breathing=move)
+    return events
+
+
+def _reader_reasons(slot, prediction, coverage, prefix):
+    reasons=[]
+    if prediction is None:reasons.append(prefix+'_missing')
+    elif not ('parts' in prediction or 'cls' in prediction):reasons.append(prefix+'_prediction_invalid')
+    if prediction and prediction.get('base',slot['base'])!=slot['base']:reasons.append(prefix+'_base_mismatch')
+    if coverage is None:reasons.append(prefix+'_missing_coverage')
+    else:
+        if coverage.get('base',slot['base'])!=slot['base']:reasons.append(prefix+'_coverage_base_mismatch')
+        if coverage.get('scored') is not True:reasons.append(prefix+'_unscored:'+str(coverage.get('reason')))
+        if coverage.get('evidence_state') in (None,'UNKNOWN'):reasons.append(prefix+'_evidence_UNKNOWN')
+        if not isinstance(coverage.get('uncertainty'),(list,tuple)):
+            reasons.append(prefix+'_uncertainty_not_recorded')
+        else:reasons.extend(prefix+'_uncertainty:'+str(z) for z in coverage['uncertainty'])
+    if prediction is not None:
+        if prediction.get('evidence_state')=='UNKNOWN':reasons.append(prefix+'_evidence_UNKNOWN')
+        reasons.extend(prefix+'_uncertainty:'+str(z) for z in (prediction.get('uncertainty') or ()))
+        parts=prediction.get('parts',prediction.get('cls','none').split('+'))
+        if any(p not in R.MARKS and p!='none' for p in parts):reasons.append(prefix+'_unsupported_mark')
+    return reasons
+
+
+def zone_relevance(slot, signal_parts=()):
+    """Conservative saved-evidence contract; no capital side-zone exception.
+
+    Scalar meanline/xh do not certify the whole overhead AND preposed zone.
+    Saved SF3 records lack that certificate, so top cuts remain decisive for
+    mark bearers. Either recogniser case or physical capital case/band vetoes
+    both clipping relaxations, including on otherwise unsupported capitals.
+    """
+    base=slot['base'].lower()
+    ev=slot.get('evidence',{})
+    ev=ev.to_record() if hasattr(ev,'to_record') else ev
+    capital=(slot['base'].isupper() or slot.get('case_class')=='capital'
+             or ev.get('case_class')=='capital'
+             or any(record.get(key)=='capital' for record in (slot,ev)
+                    for key in ('pixel_class','raw_pixel_class','frozen_pixel_class'))
+             or slot.get('geometry_capital') is True or slot.get('all_caps') is True
+             or str(ev.get('band_source','')).startswith('capital')
+             or str(slot.get('height_band',{}).get('source','')).startswith('capital'))
+    bearing=base in 'αεηιουωρ'
+    return dict(above=bearing or capital,top_cut=bearing or capital,upper_zone_top=None,
+        below=capital or not slot['base'].islower() or base in 'αηω'
+              or bool(slot.get('iota_adscript')) or 'subscript' in signal_parts,
+        left=bearing and capital,right=slot.get('word_final',False) or slot.get('apostrophe',False))
+
+
+def _flag_relevant(flag, relevance):
+    """Only known observation predicates can lose a veto; unknown flags hold."""
+    if flag.get('rule','observation')!='observation':return True
+    reason=flag.get('reason','')
+    key={'clipped_top':'top_cut','detector_clipped_top':'top_cut',
+         'clipped_bottom':'below','detector_clipped_bottom':'below',
+         'unseen_above':'above','crop_UNSEEN:above':'above',
+         'unseen_below':'below','crop_UNSEEN:below':'below'}.get(reason)
+    return relevance[key] if key else True
+
+
+def _flag_targets(flag, start):
+    return (flag.get('start')==start or any(a.get('start')==start for a in flag.get('alternatives',()))
+            or ('start' not in flag and not flag.get('alternatives')))
+
+
+def decide(slot, prediction, coverage, mode, *, flagged=False, peer_prediction=None, peer_coverage=None, signal_parts=()):
+    mode=mode.upper()
+    if mode not in MODES:raise ValueError('unknown release mode: '+mode)
+    ev=slot.get('evidence',{})
+    ev=ev.to_record() if hasattr(ev,'to_record') else ev
+    det=list(slot.get('parts',()))
+    rp=None if prediction is None else list(prediction.get('parts',prediction.get('cls','none').split('+')))
+    if rp==['none']:rp=[]
+    reasons=[]
+    for key in ('localisation_unknown','segmentation_uncertain'):
+        if slot.get(key):reasons.append('detector_'+key)
+    if slot.get('physical_resolved') is False or slot.get('ambiguity'):
+        reasons.append('detector_physical_unresolved')
+    if slot.get('unnamed'):reasons.append('detector_unnamed_mark')
+    peer_parts=[] if peer_prediction is None else peer_prediction.get('parts',peer_prediction.get('cls','none').split('+'))
+    relevant=zone_relevance(slot,[*det,*(rp or []),*peer_parts,*signal_parts])
+    reasons.extend('crop_UNSEEN:'+z for z in slot.get('unseen_zones',()) if relevant.get(z,True))
+    for zone,direction in [('above','top'),('below','bottom'),('left','left'),('right','right')]:
+        if relevant['top_cut' if direction=='top' else zone] and ev.get('clipped_'+direction):reasons.append('detector_clipped_'+direction)
+        if relevant[zone] and ev.get('observation',{}).get(zone) in ('UNSEEN','UNKNOWN'):
+            reasons.append('crop_UNSEEN:'+zone)
+    if slot['base'] in R1_LETTERS:
+        reasons.extend(_reader_reasons(slot,prediction,coverage,'r1'))
+        if mode.startswith('ENSEMBLE_'):
+            peer='r1_'+mode[-1]
+            reasons.extend(_reader_reasons(slot,peer_prediction,peer_coverage,peer))
+            pp=None if peer_prediction is None else peer_prediction.get('parts',peer_prediction.get('cls','none').split('+'))
+            if pp==['none']:pp=[]
+            if prediction is not None and peer_prediction is not None and set(rp)!=set(pp):
+                reasons.append(mode.lower()+'_mark_set_disagreement')
+        if prediction is not None:
+            if mode in ('PRESENCE','FULL') and (kinds(det)!=kinds(rp) if mode=='PRESENCE' else set(det)!=set(rp)):
+                reasons.append('mark_kind_disagreement' if mode=='PRESENCE' else 'mark_set_disagreement')
+    elif (det and not mode.startswith('ENSEMBLE_')) or slot.get('unnamed'):reasons.append('r1_unsupported_letter')
+    active_flags=[f for f in slot.get('constraint_flags',()) if _flag_relevant(f,relevant)]
+    if flagged or active_flags:reasons.append('K1:flag')
+    if slot.get('hold'):
+        old=slot.get('hold_reasons')
+        # A saved K1-only HOLD must not resurrect a now-irrelevant flag.
+        if old:
+            for reason in old:
+                predicate=reason.removeprefix('K1:observation:')
+                if reason.startswith(('detector_clipped_','crop_UNSEEN:','K1:observation:')):
+                    if not _flag_relevant(dict(reason=predicate),relevant):continue
+                if (reason=='K1:flag' and slot.get('constraint_flags') and not active_flags and not flagged):continue
+                reasons.append(reason)
+        elif not slot.get('constraint_flags') or active_flags:reasons.append('detector_hold')
+    reasons=list(dict.fromkeys(reasons))
+    return dict(action='HOLD' if reasons else 'ACCEPT' if slot['base'] in R1_LETTERS else 'KEEP',
+                reasons=reasons,detector_parts=det,r1_parts=rp)
+
+
+def _compose_reading(text, raw, predictions, coverage, mode, k1_flags=(), *, peer_predictions=None, peer_coverage=None, signal_parts=None):
+    """Compose from detector punctuation and R1 names, retaining all HOLD evidence."""
+    if isinstance(raw,dict):raw=deserialize(raw)
+    # Old saved U+02BC slots are punctuation, not evidence for another letter.
+    # Preserve their complete records and carry unresolved evidence as a veto.
+    aliases=[s for s in raw.slots if s['base'] in ELISION]
+    if aliases:
+        flags=list(raw.constraint_flags)
+        if any(any(s.get(key) for key in ('parts','unnamed','hold','constraint_flags','localisation_unknown',
+                    'segmentation_uncertain','ambiguity','unseen_zones')) or s.get('physical_resolved') is False
+               for s in aliases):
+            flags.append(dict(rule='observation',reason='legacy_elision_slot_unresolved'))
+        raw=replace(raw,slots=[s for s in raw.slots if s['base'] not in ELISION],
+                    constraint_flags=flags,geometry=dict(raw.geometry,elision_alias_slots=[s for s in serialize(raw)['slots'] if s['base'] in ELISION]))
+    cov={c['start']:c for c in coverage}
+    if len(cov)!=len(coverage):raise ValueError('duplicate R1 coverage start')
+    pcov={c['start']:c for c in (peer_coverage or [])}
+    if len(pcov)!=len(peer_coverage or []):raise ValueError('duplicate peer coverage start')
+    slots=[]
+    cs=clusters(nfd(text))
+    source_parts={c.start:[p for p,v in R.MARKS.items() if v in c.marks] for c in cs}
+    # A written iota immediately after Α/Η/Ω can be an adscript. Without a
+    # separate adscript adjudication, keep the below zone conservative there.
+    adscript={c.start for i,c in enumerate(cs) if i and c.base in 'ιΙ' and cs[i-1].base in 'ΑΗΩ'}
+    relevance={}
+    for s in raw.slots:
+        parts=list(s.get('parts',()))+source_parts.get(s['start'],[])+list((signal_parts or {}).get(s['start'],()))
+        for p in (predictions.get(s['start']), (peer_predictions or {}).get(s['start'])):
+            if p:parts.extend(p.get('parts',p.get('cls','none').split('+')))
+        relevance[s['start']]=zone_relevance(dict(s,iota_adscript=True) if s['start'] in adscript else s,parts)
+    flags=[]
+    for f in [*raw.constraint_flags,*k1_flags]:
+        targets=[s for s in raw.slots if _flag_targets(f,s['start'])]
+        active=[s for s in targets if _flag_relevant(f,relevance[s['start']])]
+        if len(active)==len(targets):flags.append(f)
+        else:flags.extend(dict(f,start=s['start'],alternatives=[]) for s in active)
+    raw=replace(raw,constraint_flags=flags)
+    for original in raw.slots:
+        s=deepcopy({k:v for k,v in original.items() if k not in ('component','evidence','naming')})
+        s.update(component=original.get('component'),evidence=original.get('evidence',{}),naming=original.get('naming',{}))
+        start=s['start'];p=predictions.get(start)
+        if start in adscript:s['iota_adscript']=True
+        if p is not None:
+            if 'parts' not in p and 'cls' not in p:
+                p=dict(p,evidence_state='UNKNOWN',uncertainty=['invalid_prediction'])
+            p=dict(p,parts=p.get('parts',[x for x in p.get('cls','none').split('+') if x!='none']))
+        flagged=any(_flag_targets(f,start) for f in flags)
+        peer=(peer_predictions or {}).get(start)
+        signals=[*source_parts.get(start,()),*(signal_parts or {}).get(start,())]
+        d=decide(s,p,cov.get(start),mode,flagged=flagged,peer_prediction=peer,peer_coverage=pcov.get(start),signal_parts=signals)
+        s['constraint_flags']=[f for f in s.get('constraint_flags',()) if _flag_relevant(f,relevance[start])]
+        mapping=raw.geometry.get('physical_mapping',{})
+        if mapping.get('ambiguous'):
+            d['reasons'].append('detector_physical_mapping_ambiguous')
+        for variant in raw.geometry.get('substitutions',()):
+            if variant not in R.QUALIFIED_GEOMETRY:
+                d['reasons'].append('detector_geometry_unqualified:'+variant)
+        if d['reasons']:d['action']='HOLD'
+        s.update(detector_parts=d['detector_parts'],r1_parts=d['r1_parts'],
+                 r1_coverage=deepcopy(cov.get(start)),hold_reasons=d['reasons'],hold=bool(d['reasons']),label_status=d['action'])
+        s['zone_relevance']=relevance[start]
+        if mode.upper().startswith('ENSEMBLE_'):
+            s.update(peer_arm=mode[-1].upper(),peer_prediction=deepcopy(peer),peer_coverage=deepcopy(pcov.get(start)))
+        if p is not None and s['base'] in R1_LETTERS:
+            s.update(parts=p['parts'],naming={},mark_support_source='reader',reader_evidence={},mark_probabilities=p.get('mark_probabilities',{}))
+        slots.append(s)
+    rendered=_render_reading(text,slots).lstrip(LEADING_QUOTES+' ')
+    if raw.opening_quotes:rendered='“'+rendered
+    rd,removed=R.apply_constraints(replace(raw,text=rendered,slots=slots))
+    assert not removed
+    guard=edit_guard(text,rendered)
+    for s in rd.slots:
+        rr=list(s['hold_reasons'])+guard
+        rr.extend('K1:'+f.get('rule','observation')+':'+f.get('reason','unknown') for f in s.get('constraint_flags',()))
+        s.update(hold=bool(rr),hold_reasons=list(dict.fromkeys(rr)),label_status='HOLD' if rr else s['label_status'])
+    return rd
+
+
+def bind_runtime(runtime, k1_flags=()):
+    """One content-bound envelope for every input used by the release policy.
+
+    Keep all saved peers, including diagnostic E in AB. The binding covers
+    detector geometry, recogniser context, coverage, predictions and K1 flags.
+    It proves input identity; source-file/checkpoint custody remains the caller's.
+    """
+    evidence={k:deepcopy(runtime.get(k,default)) for k,default in (
+        ('recogniser_text',''),('detector',{}),('r1_predictions',[]),('coverage',[]),
+        ('peer_predictions',{}),('peer_coverage',{}),('k1_flags',[]))}
+    if 'recogniser_nfd' in runtime:
+        if nfd(runtime['recogniser_text'])!=nfd(runtime['recogniser_nfd']):raise ValueError('runtime recogniser text mismatch')
+        evidence['recogniser_nfd']=runtime['recogniser_nfd']
+    # SF6 uses this saved score to distinguish observed text absence from an
+    # unscored transcript. Bind its presence/value as well as all old inputs.
+    for key in ('recognition_confidence','recognition_evidence','image_width'):
+        if key in runtime:evidence[key]=deepcopy(runtime[key])
+    if not isinstance(evidence['detector'],dict):evidence['detector']=serialize(evidence['detector'])
+    digest=hashlib.sha256(json.dumps(evidence,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    if runtime.get('evidence_sha256',digest)!=digest:raise ValueError('runtime evidence binding mismatch')
+    if k1_flags:
+        evidence['k1_flags'].extend(deepcopy(k1_flags))
+        digest=hashlib.sha256(json.dumps(evidence,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    return dict(evidence,evidence_sha256=digest)
+
+
+def compose_runtime(runtime, mode, k1_flags=()):
+    """Compose the complete saved evidence envelope, without selecting inputs."""
+    runtime=bind_runtime(runtime,k1_flags)
+    peer=mode[-1].upper() if mode.upper().startswith('ENSEMBLE_') else None
+    signals={}
+    for records in runtime['peer_predictions'].values():
+        prediction_index(records)  # Diagnostic peers must not hide duplicate starts.
+        for p in records:signals.setdefault(p['start'],[]).extend(p.get('parts',p.get('cls','none').split('+')))
+    rd=_compose_reading(runtime.get('recogniser_nfd',runtime['recogniser_text']),runtime['detector'],
+        prediction_index(runtime['r1_predictions']),runtime['coverage'],mode,runtime['k1_flags'],
+        peer_predictions=prediction_index(runtime['peer_predictions'].get(peer,[])),
+        peer_coverage=runtime['peer_coverage'].get(peer),signal_parts=signals)
+    serial=serialize(rd)
+    serial.update(mode=mode.upper(),release_policy=POLICY,evidence_sha256=runtime['evidence_sha256'],
+        hold_slots=[dict(start=s['start'],base=s['base'],reasons=s['hold_reasons'],parts=s['parts'],
+                         detector_parts=s['detector_parts'],r1_parts=s['r1_parts'],locator_span=s.get('locator_span'))
+                    for s in serial['slots'] if s['hold']])
+    return serial
+
+
+def compose(text,raw,predictions,coverage,mode,k1_flags=(),*,peer_predictions=None,peer_coverage=None,signal_parts=None):
+    """Legacy component adapter; bind all supplied evidence before composition.
+
+    Runtime-aware callers must use compose_runtime to retain diagnostic peers.
+    """
+    peer=mode[-1].upper() if mode.upper().startswith('ENSEMBLE_') else None
+    def records(index):return [dict(p,start=start) for start,p in (index or {}).items()]
+    peers={peer:records(peer_predictions)} if peer else {}
+    # Preserve explicit legacy relevance inputs as another diagnostic signal.
+    if signal_parts:peers['diagnostic']=[dict(start=start,parts=list(parts)) for start,parts in signal_parts.items()]
+    return compose_runtime(dict(recogniser_text=text,detector=raw,r1_predictions=records(predictions),coverage=coverage,
+        peer_predictions=peers,peer_coverage={peer:peer_coverage or []} if peer else {}),mode,k1_flags)
+
+
+def compose_reading(*args,**kwargs):
+    return deserialize(compose(*args,**kwargs))

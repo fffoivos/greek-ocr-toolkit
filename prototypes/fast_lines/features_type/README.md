@@ -91,3 +91,28 @@ Final reproduction commands are in the output README. Each feature runner uses
 `slow` then `fast`; inspect original-pixel renderings before accepting fast work.
 `reuse_round4.json` attributes all new B snapshot dependencies. The complete
 report is `docs/research/FAST_LINES_FEATURES_C.md`.
+
+## Round 5
+
+The owner-review continuation is in `round5.py`; `round5_validate.py` calls the
+public merged `Stack` on the authorized 195+5 cohort, exports numbered owner-colour
+images, and validates a fresh reverse-order replay. Runtime is imported through
+`shared/type_extended.recover`, with conditional native residual body evidence
+and first-adjacent-row initial completion. No side pipeline is composed here.
+
+See `docs/research/FAST_LINES_ROUND5_TYPE.md` and
+`.astra/fast_lines/out/round5/type/README.md` for every preserved iteration,
+physical rendering, false addition, timing failure and final owner-comment status.
+The optional `column_evidence` argument consumes A's live `geometry_columns.apply`
+after merge; no A implementation is copied. Native body contacts and stroke depth
+remain uncertain physical measurements, not font identity or front ownership.
+
+## R8-01b iteration 2
+
+The historical B snapshots described above are deleted. Type now imports the
+merged `ink_ownership`, `ink_photometry`, `ink_motif_gate`, `ink_motifs`,
+`ink_recurrence` and `ink_repeat_field` providers. `reuse.json` and
+`reuse_round4.json` point to these providers and the historical snapshot receipt.
+The common ownership API adds diagnostic `weak_indices` and `image_size`; its
+default decisions match the former type copy on all208 development pages.
+Caller-specific calibration populations remain separate, pending02.

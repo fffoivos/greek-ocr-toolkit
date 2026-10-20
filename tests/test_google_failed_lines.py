@@ -163,6 +163,7 @@ def comment_catalogue(tmp_path):
     root=tmp_path/'source'
     directory=root/'.astra/fast_lines/out/stack/r7/failed_lines'
     shutil.copytree(FIXTURE,directory)
+    directory.chmod(0o700)
     r7=directory.parent
     r6=r7.with_name('r6');r6.mkdir()
     page='s2-fixture-p00001'

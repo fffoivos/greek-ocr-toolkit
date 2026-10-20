@@ -8,7 +8,7 @@ from ..shared.geometry_fragment_correct import run as join_fragments
 from ..shared.geometry_columns import analyze as column_evidence, apply as column_split
 
 
-def run(gray, pm, original, current, witness, primitive, *, forbidden_regions=()):
+def run(gray, pm, original, current, witness, primitive, *, forbidden_regions=(),field_cache=None,columns=None,separated=None):
     start=perf_counter()
     s=sparse(pm,original,(gray.shape[1],gray.shape[0]),3)
     scout_s=perf_counter()-start
@@ -24,6 +24,22 @@ def run(gray, pm, original, current, witness, primitive, *, forbidden_regions=()
     out=[replacements[q['source_ids'][0]] if q['source_ids'][0] in replacements else q for q in current]
     audits={q['line']:q['retention'] for q in a['geometry_decisions'] if q['decision']=='native geometry'}
     changes=[dict(q,source=q['line'],retention=audits[q['line']]) for q in a['geometry_changes']]
+    if separated is None:
+        separated=cuts(gray,original,out,witness,primitive,columns=columns)
+        out=separated['items']
+    curved=separated['curved'];columns=separated['columns'];column_s=separated['column_s'];curved_s=separated['curved_s']
+    fragments=join_fragments(gray,original,out,forbidden_regions=forbidden_regions,field_cache=field_cache,local_filter=True)
+    return dict(items=fragments['items'],changes=changes,decisions=a['geometry_decisions'],
+                map_bands=a.get('map_bands'),
+                witness=s,curved=curved,columns=columns,column_s=column_s,fragments={k:v for k,v in fragments.items() if k!='items'},
+                joined_reduction=len(out)-len(fragments['items']),
+                scout_s=scout_s,geometry_s=a['geometry_s'],curved_s=curved_s,
+                fragment_s=fragments['seconds'],seconds=perf_counter()-start)
+
+
+def cuts(gray,original,current,witness,primitive,*,columns=None):
+    out=current
+    counts=Counter(i for q in current for i in q['source_ids'])
     t=perf_counter();curved=None
     if witness['candidates']:
         # Ownership sees removed original crossings too: deletion cannot certify a rule.
@@ -32,12 +48,6 @@ def run(gray, pm, original, current, witness, primitive, *, forbidden_regions=()
         curved.update(applied=split['changes'],applied_decisions=split['decisions']);out=split['items']
     curved_s=perf_counter()-t
     t=perf_counter()
-    columns=column_evidence(gray,original,witness,primitive,retained_source_indices=set(counts))
+    columns=column_evidence(gray,original,witness,primitive,retained_source_indices=set(counts)) if columns is None else columns
     extra=column_split(out,columns);out=extra['items'];columns['changes']=extra['changes'];column_s=perf_counter()-t
-    fragments=join_fragments(gray,original,out,forbidden_regions=forbidden_regions)
-    return dict(items=fragments['items'],changes=changes,decisions=a['geometry_decisions'],
-                map_bands=a.get('map_bands'),
-                witness=s,curved=curved,columns=columns,column_s=column_s,fragments={k:v for k,v in fragments.items() if k!='items'},
-                joined_reduction=len(out)-len(fragments['items']),
-                scout_s=scout_s,geometry_s=a['geometry_s'],curved_s=curved_s,
-                fragment_s=fragments['seconds'],seconds=perf_counter()-start)
+    return dict(items=out,curved=curved,columns=columns,column_s=column_s,curved_s=curved_s)

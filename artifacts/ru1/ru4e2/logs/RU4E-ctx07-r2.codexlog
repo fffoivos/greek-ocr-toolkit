@@ -1,0 +1,469 @@
+OpenAI Codex v0.159.2
+--------
+workdir: /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a14d6e-66c7-7061-881d-e5291f40e418
+--------
+user
+You are running non-interactively as one blind reader in an OCR data-quality check. Nobody will answer questions during the run, so do not ask any: make the reasonable choice and finish the whole task in this turn.
+
+# Environment
+- Your working folder (the current directory) holds everything you need: items.jsonl and the crops/ folder.
+- See an image with the view_image tool. View items in small groups (about 5 to 10 images per tool call) rather than one per call.
+- ImageMagick (`magick`) is installed. Put enlargements only in ./zoom/.
+- Write files with shell commands (a heredoc or a short Python script that writes text), only inside this folder.
+- There is no network and no web search.
+
+# Protocol
+The protocol below is the one every reader of this bed gets. Where it says ITEMS, read ./items.jsonl; where it says OUT, write ./answers.jsonl; where it says ZOOM, use ./zoom/.
+
+You are a blind glyph adjudicator for an OCR data project. Each item is one printed line of Russian text, cropped from a scanned page (`crop`), and a transcription of it (`masked_text`) in which some word-final letters are hidden as ⟦1⟧, ⟦2⟧, … Each hidden letter is either the hard sign ъ or the soft sign ь in the transcription; you are not told which, and you must decide from the ink alone.
+
+## Input
+ITEMS, a JSONL file; each row has `item_id`, `crop` (a path relative to the items file's directory), `masked_text`, `slots` (the number of hidden letters; may be 0).
+
+Open every crop with the view_image tool. Make enlarged copies with ImageMagick (`magick in.png -resize 400% out.png`, or crop a region first with `-crop WxH+X+Y` and then enlarge) in ZOOM. Do not use sips or Pillow. Zoom every hidden letter; do not judge one at normal size.
+
+## For each hidden slot
+Locate the word in the crop and look at its final glyph:
+- **ъ (hard sign):** the bowl has a stem whose top carries a horizontal flag or bar extending to the LEFT (like a T-bar on the left side of the stem), often rising to x-height or slightly above.
+- **ь (soft sign):** the same bowl and stem with NO flag at the top.
+- **other:** a different glyph, or none printed.
+- **u:** the ink does not let you decide (worn, blurred, cut).
+
+Judge from the pixels only. Do not use spelling, grammar or what the word "should" be; another reader handles that.
+
+## For every item, also
+List any OTHER word-final ъ you can see printed in the line that is not a hidden slot (that is, a printed ъ the transcription omitted), as the word as printed. Also say whether the line shows pre-1918 orthography (word-final ъ, ѣ, і, ѳ): yes / no / unclear.
+
+## Output
+Write one JSON object per item, one per line, to OUT (with a shell command; overwrite; rewrite after every few items):
+
+{"item_id":"a001","slots":{"1":"ъ","2":"ь"},"confidence":{"1":"high","2":"low"},"unmarked_final_hard_signs":["былъ"],"pre1918":"yes","note":""}
+
+Use "slots":{} when slots is 0. Confidence is high or low per slot. Then reply with: items done, slot calls (ъ/ь/other/u counts), the number of items with unmarked final hard signs, and one sentence on how distinct the two glyphs are in these faces.
+
+Open only ITEMS and the crop images. Never open key files or anything else in the folder.
+
+# Done when
+- ./answers.jsonl has exactly one valid JSON line per item of ./items.jsonl, in the same order, with one call for every hidden slot;
+- you have checked the count, the order and the slot coverage with a command;
+- your final reply is the short plain-text summary the protocol asks for.
+
+deprecated: `[features].collab` is deprecated. Use `[features].multi_agent` instead.
+Enable it with `--enable multi_agent` or `[features].multi_agent` in config.toml. See https://developers.openai.com/codex/config-basic#feature-flags for details.
+codex
+I’ll inspect every crop, enlarge all hidden letters, and write the judgments to answers.jsonl, then check item order and slot coverage.
+
+exec
+/bin/zsh -lc 'cat items.jsonl' in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+{"item_id": "k85283814b3", "crop": "crops/149c172ea5d91a24b48d77d6dea97e002d31fc42c2d52b6f33f4d9c213c5c9ef.png", "masked_text": "Однако надо написат⟦1⟧ Алексѣю, -и Бется сіла за стол⟦2⟧,", "slots": 2}
+{"item_id": "ke5c14028ff", "crop": "crops/9bcf0c8c9ad6fbebbcec534e2890a310e0500ca52ca6cea80b59cd111f71f28a.png", "masked_text": "43.-22) Челобитная царю Петру с⟦1⟧ моря Окіяна", "slots": 1}
+{"item_id": "k3ac3400f2f", "crop": "crops/9654b03b2e039a4aba9fe06e0387f3497b93d673bee146199669301e7710c213.png", "masked_text": "Вѣд⟦1⟧ он⟦2⟧ же это нарочно...", "slots": 2}
+{"item_id": "k69e31c8406", "crop": "crops/90cb242cfb65ef7859cd68ccb2ccb6a72e07164a8a32d24ca477f179ebfa30b0.png", "masked_text": "вом⟦1⟧, множество вещей, о которых⟦2⟧ упоминалос⟦3⟧ в⟦4⟧", "slots": 4}
+{"item_id": "k78f0f39a8a", "crop": "crops/b75b92fae60626103ef3a08a11d2687f52019fd49c9c772fdd80fb1b1a92af0f.png", "masked_text": "солдат⟦1⟧, щами да кашей, но сестры помѣщалис⟦2⟧", "slots": 2}
+{"item_id": "kf3d21eeb3c", "crop": "crops/e95d8902438782d1eaea70158565449c85bdb83e7c0821f10f720467499148b5.png", "masked_text": "вслѣд⟦1⟧ за офицером⟦2⟧ спустилис⟦3⟧ с⟦4⟧ желѣзно-", "slots": 4}
+{"item_id": "kf0c9c7a8de", "crop": "crops/bcab055b4b16d0b67642434597c3de1e5ae6e7398cd9138f6a3ac867532ae7e3.png", "masked_text": "шій, прекрасный дирижабл⟦1⟧ и вдруг⟦2⟧ -", "slots": 2}
+{"item_id": "k1e0f93d3b6", "crop": "crops/d0160188ec8fbeb13e2f508fc8f476e781350a165c354014544d6ad6cfaad1e4.png", "masked_text": "Сначала Левин⟦1⟧ думал⟦2⟧ сдат⟦3⟧ все хозяйство, как⟦4⟧ оно было,", "slots": 4}
+{"item_id": "kaa3cceddb5", "crop": "crops/c42840a94b51d62fb58a183ad888b0dde65c1c59919df20863345214bf31f8e6.png", "masked_text": "гат⟦1⟧ вперед⟦2⟧, не застывая на одном⟦3⟧ мѣ-", "slots": 3}
+{"item_id": "k13df5d6cb8", "crop": "crops/b837d73030a91e9731321bbfbca9b55f973a5de69d5e0d9721926fea0d0f7bc5.png", "masked_text": "пооообразитолѣнѣе, то сразу догадалис⟦1⟧ бы,", "slots": 1}
+{"item_id": "k198f27bf01", "crop": "crops/7cdbc6e8aabb715a4762ab827e85390c4daee48bd8e5831f05f790f104509e37.png", "masked_text": "Погода совсѣм⟦1⟧ испортилас⟦2⟧: льет⟦3⟧ спорый,", "slots": 3}
+{"item_id": "k971d765ee0", "crop": "crops/a488a9798d25521334cab1d30f819794ba7e96673511c2b4913daf82a992d2c1.png", "masked_text": "и красивым⟦1⟧. Аринушка очен⟦2⟧ полюбила княгиню.", "slots": 2}
+{"item_id": "kffde412310", "crop": "crops/bf2a8f2f4ff1ba641bc4568f69454eaa5d2ef20af5bf8058d5fd07e1b97b5b5d.png", "masked_text": "Варенькѣ хотѣлос⟦1⟧ улыбнуться, глядя на дѣтскій гнѣв⟦2⟧ сво-", "slots": 2}
+{"item_id": "k340d299ed2", "crop": "crops/4cea886f51dccf98a51c0365a285b8815b4bc7b648b4e6719e4e6f3d406778d1.png", "masked_text": "и др.; богато ся представени и игликитѣ, тинтявит⟦1⟧, скалоломкитѣ, а покрай", "slots": 1}
+{"item_id": "k836dd16a64", "crop": "crops/8b6cdaac12471d3e499fdd08ed6010b82d4a43b0b2e2204ccdcb67e5920469d7.png", "masked_text": "Распустив⟦1⟧ слух⟦2⟧, что Марія, подобно Ана-", "slots": 2}
+{"item_id": "k881cebac89", "crop": "crops/9808d2a0c3a933a9b5654ce3af039a3a95921dc7f7a5fc7bec1d42b9e5caa0ae.png", "masked_text": "Но скажите пожалуйста, я никогда не могла понят⟦1⟧,", "slots": 1}
+{"item_id": "kb0a107f16b", "crop": "crops/d2074768c71d51ec6f45ff060e76c2891549bb949e05017114d69d1e3d95d804.png", "masked_text": "очен⟦1⟧ дипломатично:", "slots": 1}
+{"item_id": "kd09cfaaee6", "crop": "crops/97ec191c8cf092ceb972257c1e6ff716a38908b2ad5a5fd30e7d8e3da7e6e451.png", "masked_text": "нины совершенно измѣнилос⟦1⟧, но двадцат⟦2⟧ видов⟦3⟧ растеній (не считая", "slots": 3}
+{"item_id": "k17e482878d", "crop": "crops/9714672f2687d29c5674bfa3600adf2ea731c7bdb23d56fd952d7fb5eafd8f58.png", "masked_text": "чилос⟦1⟧? Ничего. Она долго говорила с⟦2⟧ ним⟦3⟧. Ну что же? Мало", "slots": 3}
+{"item_id": "k1dadca1a2d", "crop": "crops/ad2bd8cb932d684dc8ced0344e33a878199182686f5fb1eeeda5b1b20f045512.png", "masked_text": "сряду бросалас⟦1⟧ изо всей мочи на стеклянную перегородку,", "slots": 1}
+{"item_id": "k6eb256b474", "crop": "crops/e76c67d05c89a60ef2098f276dcbda37e4f595a2970cb353884de29251934320.png", "masked_text": "Скажите, господин⟦1⟧ Бурачков⟦2⟧, а у вас⟦3⟧ тут⟦4⟧, в⟦5⟧", "slots": 5}
+{"item_id": "k50b5759b08", "crop": "crops/605b5ed67fdbafe630e89a8f76db58770d9f7951258cf618f95f94f1e319e9ce.png", "masked_text": "Должны в⟦1⟧ нем⟦2⟧ жит⟦3⟧ черты.", "slots": 3}
+{"item_id": "kdb993d62f5", "crop": "crops/90f0d06e5298591d213e22b8c7a538a979f79d3d0ad5ef814bdb4ac868016e7e.png", "masked_text": "интеллигенции. Цар⟦1⟧, крайне недовольный темой бе-", "slots": 1}
+{"item_id": "kf73acab572", "crop": "crops/5a3d7da2f2d90255b83601dc023a5d9ad6c776576f71a8b40d55bfd719de169d.png", "masked_text": "тиф⟦1⟧, и вам⟦2⟧ почудилос⟦3⟧.", "slots": 3}
+{"item_id": "kf5db4708e7", "crop": "crops/73788d7ffd0b7693fd34769c7ac5d964c11d92cf6bd630bfb8a9275a332d50fa.png", "masked_text": "утеса не бросаются. Любов⟦1⟧ замѣнили флиртом⟦2⟧,", "slots": 2}
+{"item_id": "k493c00952d", "crop": "crops/d263731b21d354072040aac5151d77e804b805a8f2b919bc8c9904434512c552.png", "masked_text": "только штыками: пулей все равно не достанеш⟦1⟧.", "slots": 1}
+{"item_id": "kea3f1fab2e", "crop": "crops/f94bea8cac481912756e170e2c90d545167ad2aece3d55a5913aea83b8d07e2d.png", "masked_text": "полненія, а с⟦1⟧ ними и многіе другіе факты, могут⟦2⟧ быт⟦3⟧ подве-", "slots": 3}
+{"item_id": "keed0905110", "crop": "crops/7e246b7188c0aef9375707d361ffb2a9cf00346b2962fbb894824476740aaf81.png", "masked_text": "Поѣзд⟦1⟧ вышел⟦2⟧ ночью, часов⟦3⟧ в⟦4⟧ девят⟦5⟧, под⟦6⟧", "slots": 6}
+{"item_id": "kdf2260e7c6", "crop": "crops/85846eb51b4bc6e9213613b112413091d047b4b5d7b9f26d1465c22a05ed2553.png", "masked_text": "тес⟦1⟧ при мнѣ.", "slots": 1}
+{"item_id": "k5b574b5c14", "crop": "crops/488dc88edee273173ed9e40b3b8f5994eee5c7fb2f36be6d3f519f576c696e3f.png", "masked_text": "можно кокетничат⟦1⟧ и вертѣт⟦2⟧ им⟦3⟧ как⟦4⟧ ей угодно.", "slots": 4}
+{"item_id": "kae14116478", "crop": "crops/31b0e0070f2ec454a0096e08343f04dbba64dcabc5dfdd22c9eded694be4cb17.png", "masked_text": "Он⟦1⟧ передал⟦2⟧ бинокл⟦3⟧ княгинѣ и показал⟦4⟧", "slots": 4}
+{"item_id": "k5d939f7c7c", "crop": "crops/d359c38d5d3d8572da00f50a186bda90909806466ef696e0de3070e080dcfcd9.png", "masked_text": "однако, ни гугу. А она ревет⟦1⟧. Тоска меня взяла.", "slots": 1}
+{"item_id": "kdab12b31ca", "crop": "crops/4a647b67892874161080518708a56002b074de3e62cab1f4d56a105b4fbc5b6a.png", "masked_text": "общіе, может⟦1⟧ быт⟦2⟧, и разберетес⟦3⟧.", "slots": 3}
+{"item_id": "kfb77db7e6d", "crop": "crops/8d87393f7a9b1e9fd3096813f37d4178291b71f2d138e04d34ef572a467b19cc.png", "masked_text": "„Вы можете затоптат⟦1⟧ в⟦2⟧ гряз⟦3⟧\", слышал⟦4⟧ он⟦5⟧ слова Але-", "slots": 5}
+{"item_id": "k0d9c08a2a2", "crop": "crops/9bb818c4704c47f6305508a5222b53b26bc87bd77de957da59b943b339b3d244.png", "masked_text": "денег⟦1⟧. Всѣ, якобы, истрачен⟦2⟧.", "slots": 2}
+{"item_id": "kc5350e56b9", "crop": "crops/ff5f58ecbb7dcd8dd8bae3c119a8ec418e9e7ad4d789da4d8c9a1e400de9b231.png", "masked_text": "которых⟦1⟧ мог⟦2⟧ озират⟦3⟧ сотни акров⟦4⟧ неогражденной равнины, и бук-", "slots": 4}
+{"item_id": "k6db31f3226", "crop": "crops/ffa9c0e31505ad63597bb34674d170a338452b6a997d20bcfc98abb4db444bff.png", "masked_text": "Пуст⟦1⟧ ты меня убьеш⟦2⟧, -", "slots": 2}
+{"item_id": "kf65189f04b", "crop": "crops/37db0841ad54d547700ded7401cc2c42f950c0e48af38b34b035e753c42a422e.png", "masked_text": "теченіем⟦1⟧ льдинами, и искат⟦2⟧ новой стоянки. Часто", "slots": 2}
+{"item_id": "kcaa94202d5", "crop": "crops/70a71ae07298ec3ce5bcd19819eb25f4f8e3aa4a753ba6ab02990ce7228120c6.png", "masked_text": "Чебурдаев⟦1⟧. — Значит⟦2⟧, по-вашему, мое дѣло -не-", "slots": 2}
+{"item_id": "k6391af643f", "crop": "crops/eb1081b62bfd6b795f80c52d7a1cb21461b55549c3bdcdd8c28f37503594ee6e.png", "masked_text": "нером⟦1⟧, да сразу и кончит⟦2⟧ всю музыку!", "slots": 2}
+{"item_id": "kdc4ecf686f", "crop": "crops/772c7e5774a6e8988476a87620b34e18c48690f77cd584dd75f4ee306fae2230.png", "masked_text": "щечках⟦1⟧, глазенки большіе такіе - смотрят⟦2⟧ так⟦3⟧... и", "slots": 3}
+{"item_id": "k435e48d302", "crop": "crops/1ba97eb8a7640ca0bab5a77be1cc26b8a70d5d0ed93ec3355ce3e04b73e12dcd.png", "masked_text": "в. Граничар⟦1⟧, 28. ІХ. 1917), Androsace hedraeantha Grsb. (от⟦2⟧ Цар⟦3⟧ Борис⟦4⟧ III", "slots": 4}
+{"item_id": "k2c58b23b3f", "crop": "crops/66f03b2497a57f8534faf2d88597f5cc9b279b42f3f3472139ddb4518474d308.png", "masked_text": "их можно вправду принят⟦1⟧ за сочиненные Игорем", "slots": 1}
+{"item_id": "k31f4d089e7", "crop": "crops/595bdef3c7c0ed501d7b14b3c357d14959f82e79ca08a29eaafda5c0cf7f32ab.png", "masked_text": "смѣяс⟦1⟧, повисла у него на шеѣ, как⟦2⟧ всегда, радуяс⟦3⟧ на зна-", "slots": 3}
+{"item_id": "k4ba3335bd3", "crop": "crops/cdcbb7a7f4b62ada00e8d72ef8725de1830adf70e8e75e1f7b9bb1eff49f52c2.png", "masked_text": "поворачивался и хотѣл⟦1⟧ видѣт⟦2⟧ сзади свою курточку; но все-", "slots": 2}
+{"item_id": "ka28684f004", "crop": "crops/c4b7f1ea9fe9ecaac302a9629ca0c6e3a7c6bb81c63feb68bbc9843a0dd4c1ca.png", "masked_text": "н. вернувшис⟦1⟧ в родную деревню,", "slots": 1}
+{"item_id": "k083e855b16", "crop": "crops/07c7ccabaf0ae76b523b270804558b1840dac66e32b2d5ffd4170a3da6001c7d.png", "masked_text": "сил⟦1⟧ Константин⟦2⟧ Павлович⟦3⟧, удивленный ея простотою,", "slots": 3}
+{"item_id": "kd78cf7e6f7", "crop": "crops/1f3fc9694cb369d0182772741787789a9877ba4a7ee3d2d82bb05511f9cdce05.png", "masked_text": "Все, что приходит⟦1⟧, то прошло,", "slots": 1}
+{"item_id": "kcb471420be", "crop": "crops/6880ae0180152fcc48ac5d1f228e1cefeceb0eac7cb4eb99d4c1e4cad3c0d42b.png", "masked_text": "Ест⟦1⟧ люди: мысли их⟦2⟧ и жесты", "slots": 2}
+{"item_id": "k6c5f77080f", "crop": "crops/bb9b67387fcb2a8cba04bdf33eac430c74ca37a7cc369f81e47a4eb7060b556b.png", "masked_text": "покинули гаван⟦1⟧ Амстердама. Так⟦2⟧ как⟦3⟧ Баренц⟦4⟧ взял⟦5⟧", "slots": 5}
+{"item_id": "k4c3e749319", "crop": "crops/9e5339e1e7d4683b79eb2243ac1c1892d0e42cfdb774a7e66da2fd21e629e340.png", "masked_text": "неопреодолимую ненавист⟦1⟧ к существовавшему до сих", "slots": 1}
+{"item_id": "k9111316cdc", "crop": "crops/80736b42cd9793e250e526a90881b8a98b8bc8d48fff157a1d746870761a1aca.png", "masked_text": "ден⟦1⟧ я дотронулся до его подошвы кусочком⟦2⟧ бумаги; он⟦3⟧", "slots": 3}
+{"item_id": "k14d24cad0f", "crop": "crops/a3f22c12b087dcfd4bc3a62cff6417f9b708873f85dbcc97fbba5daf18c1254a.png", "masked_text": "одном⟦1⟧ мѣстѣ всю ноч⟦2⟧, а идти домой спат⟦3⟧ до утра.", "slots": 3}
+{"item_id": "kff050dbebb", "crop": "crops/859cfee4d2b53a6e7982e771fd92f4592f71f6803d600d1c9ab1fecd6bea8161.png", "masked_text": "не принят⟦1⟧ за таковое же удовольствіе еще ранче произ-", "slots": 1}
+{"item_id": "k717741ee94", "crop": "crops/4c818b99afa8e88527e94b963a457d70a1e6bbcbfa533ce766a760613fc9cc17.png", "masked_text": "но в⟦1⟧ одно и то-же время откормит⟦2⟧ корову и получит⟦3⟧ от⟦4⟧ нея много", "slots": 4}
+{"item_id": "k7e31dba67b", "crop": "crops/de0af2bdb4ff6a321fcb2d2d4a6bfbc3230b1fa89d760a006a4b8be129140c75.png", "masked_text": "в русскую реч⟦1⟧, невыносимо тягостны, но чаще всего", "slots": 1}
+{"item_id": "kde969ef7b9", "crop": "crops/8da4d73b1ae74334063496b057980bb724890d2cd00a247c7132c1e2cf3bab5f.png", "masked_text": "отдаться. И когда уж⟦1⟧ кончилос⟦2⟧ все-подошли", "slots": 2}
+{"item_id": "k1a0d1f659a", "crop": "crops/40f8feb361da75aa92bb2e57026b05337286a790922a5d77bd8dd60f5be60e85.png", "masked_text": "Внѣ пониманія, что ест⟦1⟧ лучистый ден⟦2⟧,", "slots": 2}
+{"item_id": "k990f8a5c4c", "crop": "crops/13df94cb94d5c944147b79886f6888d1d85f19832702ec9dfce46768a4b8c965.png", "masked_text": "значившіяся разновидности, которых⟦1⟧ признаки сдѣлалис⟦2⟧ в⟦3⟧ зна-", "slots": 3}
+{"item_id": "kfdd2a80034", "crop": "crops/a6743aadd265f5bde07f09a3859d3f81805c525065557ced3c08111a88dc10ce.png", "masked_text": "139. — Арсеній Суханов⟦1⟧. Изслѣдованіе. Част⟦2⟧ вто-", "slots": 2}
+{"item_id": "k97a1f4bb00", "crop": "crops/3d0c925e93783c129c1ec648b81ca11be970a4d3101462641bc0da55408cf00c.png", "masked_text": "что?!“ Ну, брат⟦1⟧, и крикнула! - Я так⟦2⟧ и вздрогнул⟦3⟧.", "slots": 3}
+{"item_id": "k6f74ea96b9", "crop": "crops/0a5a8ea130c5cd8b911896e98952ae546463ec91e6b74252e3b61c91edea666a.png", "masked_text": "тяты и щепяты. В⟦1⟧ четыре мѣсяца он⟦2⟧ очен⟦3⟧ ясно выра-", "slots": 3}
+{"item_id": "k395363aa88", "crop": "crops/65c9099861fec7ca79654c3d5d11cd8ebe9166acf02336c8f87f3d49f57003b0.png", "masked_text": "чала инстинктивными криками, которые в⟦1⟧ очен⟦2⟧ короткое", "slots": 2}
+{"item_id": "kc7ed75c595", "crop": "crops/41227ee749f9fb10bc40c7e01e1d8c1d0a4636e18d6dad8fee58294d86873ed2.png", "masked_text": "дут⟦1⟧ на Балаклаву - народом⟦2⟧ некультурным⟦3⟧ и", "slots": 3}
+{"item_id": "kd42f08ffd3", "crop": "crops/3d87c65a1c050d9f1fdc8335745fd63e5cdb79a7e5871fe468c4716af530c268.png", "masked_text": "торых⟦1⟧ ест⟦2⟧ повод⟦3⟧ полагат⟦4⟧, что виды одного рода обособилис⟦5⟧ во", "slots": 5}
+{"item_id": "kf6b069340d", "crop": "crops/67d0150d4baa36c4ee831fc58f6d11974c0c4be41361676982fccf16997c92c7.png", "masked_text": "- Послушайте, Берегов⟦1⟧!! Вы меня можете убит⟦2⟧,", "slots": 2}
+{"item_id": "k813e3398e6", "crop": "crops/60e83398f5eaad2271f13b24d2d027d7fbb70e828de7168a6e4ea030c16d8c96.png", "masked_text": "когда ему было сто десят⟦1⟧ дней, я раз⟦2⟧, играя с⟦3⟧ ним⟦4⟧", "slots": 4}
+{"item_id": "ke03e16f911", "crop": "crops/067c4db3827334a6053110781d37d4a370f589774856b9e3eb0e33b00e183736.png", "masked_text": "сти не может⟦1⟧. Эти причины становятся дѣйствительными лиш⟦2⟧ при-", "slots": 2}
+{"item_id": "ke0f50b6b2b", "crop": "crops/25f8566e8e174f4e9ad96d42c442036bce625f0a4460b63666e33682fd73555e.png", "masked_text": "достигнет⟦1⟧.", "slots": 1}
+{"item_id": "k5480c759a3", "crop": "crops/af84d85ffd3098a08ab375117c4fe88f02d8aa9f222ba218848345cc6d9cdb88.png", "masked_text": "с⟦1⟧ трудом⟦2⟧ пробиралис⟦3⟧ по усѣянному ледяными глы-", "slots": 3}
+{"item_id": "kc1fc4e50c4", "crop": "crops/2f8281ac5b7de310ff70392ec08a1ad14400242f71686095e971d6740892b8a3.png", "masked_text": "Музыкантов⟦1⟧", "slots": 1}
+{"item_id": "k9d82510482", "crop": "crops/1c3bb18eb615cada79a3c86c6adf747e44471302cb69e51a56561c50f1a5e667.png", "masked_text": "и търсят⟦1⟧ своя директор⟦2⟧, рѣлкитѣ планински растения: Achillea Kellereri", "slots": 2}
+{"item_id": "k5a228d603c", "crop": "crops/bca6c3d1b1cd4a4ac23011b3cd3a25c7a460e9d500a5fcb6be2aadf7c5fa0527.png", "masked_text": "ка, ибо может⟦1⟧ двигаться лиш⟦2⟧ самыми мелкими, медленными шагами.", "slots": 2}
+{"item_id": "k991fac1278", "crop": "crops/99d938be0c9ad3dbd6c71f6486f9f7d0aea693c342910f5e59fb1f9ba3fdce00.png", "masked_text": "Хорошо быт⟦1⟧ богачем⟦2⟧, еще лучше при этом⟦3⟧", "slots": 3}
+{"item_id": "kfef63d6e42", "crop": "crops/3a0936ec16774d03355931af139dd83cb9ee474dfc10d42bf9f1fac205160348.png", "masked_text": "готовы, убогій вы человѣк⟦1⟧, надават⟦2⟧ ему", "slots": 2}
+{"item_id": "k2d3d22b5ef", "crop": "crops/b1e8cc8e22e9a402fdd51b09d8b5bf8a5716f87bc37efddb88ac676784627b4e.png", "masked_text": "В⟦1⟧ ея глазах⟦2⟧ дрожит⟦3⟧ печал⟦4⟧,", "slots": 4}
+{"item_id": "ke8fefdc341", "crop": "crops/a1bb51354c531a3eb7b33e2db860c0b41ca3fdef959b134b54bd730a98e7ac5c.png", "masked_text": "ніе! Профессор⟦1⟧ Оуен⟦2⟧ тотчас⟦3⟧ замѣтил⟦4⟧, что зуб⟦5⟧, хотя и стол⟦6⟧", "slots": 6}
+{"item_id": "k9e9dcc389f", "crop": "crops/1e56f51963368f9cb96dbef722fa636beb3c14231f1d060adceed39d8dd3f0e5.png", "masked_text": "лиш⟦1⟧ бы к⟦2⟧ тому представлялис⟦3⟧ случаи...", "slots": 3}
+{"item_id": "k65c46b1abe", "crop": "crops/da85dae8b9ca4e36404fded232e852b107087c113e625bfe260f3271fcc067c1.png", "masked_text": "ганный вид⟦1⟧ и долго плакал⟦2⟧. Цѣлий час⟦3⟧ послѣ этого он⟦4⟧", "slots": 4}
+{"item_id": "k9ba119f6be", "crop": "crops/d67eb12e9956db7a55f6a9b1b5d02aac740e26c27f2a262c05f8218bdf4724d0.png", "masked_text": "топталас⟦1⟧ ватага закутанных⟦2⟧ в⟦3⟧ мѣха дикарей, пер-", "slots": 3}
+{"item_id": "k47a23d811a", "crop": "crops/329b31c40ea3397b7cbe5410a1977c9c605fb2c4b321cef15db02aa144f4f7b8.png", "masked_text": "ками, не хочу, не хочу... ѣхат⟦1⟧ надо, ѣхат⟦2⟧, ѣхат⟦3⟧!", "slots": 3}
+{"item_id": "kcbb4b8c2ba", "crop": "crops/73b572e7b49e476b670283994af1cf2956f3410519fc3d5af2527b0f5cb2a90a.png", "masked_text": "входя в⟦1⟧ ея кабинет⟦2⟧; но разсужденіе это, прежде имѣвшее та-", "slots": 2}
+{"item_id": "kf641d0d0a8", "crop": "crops/c28f89781388db480a918cbf8fef52a447f07ac9c46047432fb0f3f5f92bd763.png", "masked_text": "зад⟦1⟧. „Но высказат⟦2⟧ что же? какое рѣшеніе?\" говорил⟦3⟧ он⟦4⟧", "slots": 4}
+{"item_id": "kf0bfd20c44", "crop": "crops/d9e6a9db545eb69ee34e22721398fa76fd90013852b902a26948d98fcb76842f.png", "masked_text": "чтоб⟦1⟧ тут⟦2⟧ дѣйствовали опыт⟦3⟧ или какая-нибуд⟦4⟧ ассоціація", "slots": 4}
+{"item_id": "kc3f2182526", "crop": "crops/9ddf5c4589520eade786dceda0857d0df32e869aa1f0afb03c364e4b65269b54.png", "masked_text": "В⟦1⟧ них⟦2⟧ ускользающая дал⟦3⟧", "slots": 3}
+{"item_id": "k4078070d4f", "crop": "crops/0e07fae086aafa0ebf56dce7227a3fb3fed42af6fc65c4cd9caeecdf09d44b81.png", "masked_text": "и повторяющійся во многих⟦1⟧ других⟦2⟧ случаях⟦3⟧; а именно, когда", "slots": 3}
+{"item_id": "kdf050a8f7c", "crop": "crops/fd166cebed7b9e532d5b2c9d504eccea5ee3cac68de7bdd9c8bca05c5eb18c7f.png", "masked_text": "(от⟦1⟧ Цар⟦2⟧ Борис⟦3⟧ III, край Охридското езеро, 21. VIII. 1918), Lilium jankae", "slots": 3}
+{"item_id": "kebb8329ed4", "crop": "crops/586340b259c58476aea4a3e2378d044d042ff0a78e8d9a0326f18d0d1763ed7c.png", "masked_text": "расцвѣли новыя надежды. Снова появилас⟦1⟧ открытая", "slots": 1}
+{"item_id": "kb41ba2ebf9", "crop": "crops/21bc51203573602dc80cf2fa0d5a2f0b2ee25394da4eff7f5b5044400041f25d.png", "masked_text": "ния градинар⟦1⟧ Антон⟦2⟧ Краус⟦3⟧) (фиг. 20 и 21), в⟦4⟧ което ся насадени водни", "slots": 4}
+{"item_id": "kc904b66ff4", "crop": "crops/b77977bd3d4afc86f6b8180ccb09ebadd26103758782cfe1a7b576cd2612ac56.png", "masked_text": "поднеся опят⟦1⟧ ко рту мой палец⟦2⟧ в⟦3⟧ своей рукѣ, он⟦4⟧ сдви-", "slots": 4}
+{"item_id": "k8bc1e8c3e4", "crop": "crops/cf30dfa3c262c395244412832b631eaed367992e418eb3c2f2ad5d59a51851ae.png", "masked_text": "удовольствіе. Но сегодня удовольствіе это отравлялос⟦1⟧ воспоми-", "slots": 1}
+{"item_id": "k3c15e9eccb", "crop": "crops/719c26bee787dc8f35f5100715add0a2e8cbee73674b20dcb93a1b0e69c8a281.png", "masked_text": "Когда увидим⟦1⟧ луч⟦2⟧, сред⟦3⟧ чащи, на тропинкѣ.", "slots": 3}
+{"item_id": "kaf5b2f5f60", "crop": "crops/6cce5d3415487b7642632539e2d6edf67a26c7c2a532515479aa393f90739c6a.png", "masked_text": "в⟦1⟧ гостиной убѣждался, что случилос⟦2⟧ что-то. Мысли его, как⟦3⟧", "slots": 3}
+{"item_id": "k5cdb2c6382", "crop": "crops/3a3ef38c0149531ee1975d529f8fba58f0ff276602efc3b96afb7a4cd656491e.png", "masked_text": "скоро-ли их⟦1⟧ покормят⟦2⟧.", "slots": 2}
+
+exec
+/bin/zsh -lc "mkdir -p zoom
+python - <<'PY'
+import json,subprocess
+rows=[json.loads(x) for x in open('items.jsonl')]
+for i,r in enumerate(rows):
+ subprocess.run(['magick',r['crop'],'-resize','400%',f'zoom/{i+1:03}.png'],check=True)
+print(len(rows))
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ exited 127 in 0ms:
+zsh:2: command not found: python
+
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json,subprocess
+rows=[json.loads(x) for x in open('items.jsonl')]
+for i,r in enumerate(rows):
+ subprocess.run(['magick',r['crop'],'-resize','400%',f'zoom/{i+1:03}.png'],check=True)
+print(len(rows))
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 27294ms:
+94
+
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+calls=['sh','h','sh','hhsh','hs','hhsh','sh','hhsh','shh','s','hsh','hs']
+with open('answers.jsonl','w') as f:
+ for r,c in zip(rows,calls):
+  d={'item_id':r['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'yes','note':''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+codex
+The leftward flag is clear in most enlarged glyphs. One hidden slot shows a different letter; I’ve recorded it as “other.”
+
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+calls=['sh','o','hh','s','s','ssh','shh']
+with open('answers.jsonl','a') as f:
+ for r,c in zip(rows[12:],calls):
+  d={'item_id':r['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь','o':'other'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'no' if r==rows[16] else 'yes','note':'Slot 1 is printed ѣ.' if r==rows[13] else ''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+with open('answers.jsonl','a') as f:
+ for idx,c in enumerate(['s','hhhhh','hhs','s','hhs','sh','s'],19):
+  d={'item_id':rows[idx]['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'no' if idx in [19,22,25] else 'yes','note':''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+with open('answers.jsonl','a') as f:
+ for idx,c in enumerate(['hhs','hhhhsh','s','sshh','hhsh','h','hss'],26):
+  d={'item_id':rows[idx]['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'yes','note':''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+with open('answers.jsonl','a') as f:
+ for idx,c in enumerate(['shshh','hs','hhsh','ss','hs','hh','hs'],33):
+  d={'item_id':rows[idx]['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'no' if idx==36 else 'yes','note':''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+codex
+I’m continuing through the remaining lines, checking both the hidden slots and any additional printed final hard signs omitted from the transcription.
+
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+with open('answers.jsonl','a') as f:
+ for idx,c in enumerate(['hhh','hhsh','s','shs','hs','s','hhh'],40):
+  d={'item_id':rows[idx]['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'no' if idx in [42,45] else 'yes','note':''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+with open('answers.jsonl','a') as f:
+ for idx,c in enumerate(['h','sh','shhhh','s','shh','hss','s'],47):
+  d={'item_id':rows[idx]['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'no' if idx==50 else 'yes','note':''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+with open('answers.jsonl','a') as f:
+ for idx,c in enumerate(['hssh','s','hs','ss','hsh','hs','hhh'],54):
+  d={'item_id':rows[idx]['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'no' if idx==55 else 'yes','note':''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+with open('answers.jsonl','a') as f:
+ for idx,c in enumerate(['hhs','hs','hhh','hshss','hs','shhh','hs'],61):
+  d={'item_id':rows[idx]['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'yes','note':''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+exec
+/bin/zsh -lc 'magick zoom/071.png -rotate 90 zoom/071-rot.png' in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 12ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+with open('answers.jsonl','a') as f:
+ for idx,c in enumerate(['h','hhs','h','hh','hs','shh','hs'],68):
+  d={'item_id':rows[idx]['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'yes','note':''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+with open('answers.jsonl','a') as f:
+ for idx,c in enumerate(['hhhs','hhhhhs','shs','hhhh','shh','sss','hh'],75):
+  d={'item_id':rows[idx]['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'yes','note':''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+codex
+The review is nearly complete. I’ll finish the last lines, then validate the JSON output, order, and slot coverage.
+
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+with open('answers.jsonl','a') as f:
+ for idx,c in enumerate(['hshh','hhhs','hhs','hhh','hsh','s','hhhh'],82):
+  d={'item_id':rows[idx]['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'yes','note':''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+2026-10-18T05:15:54.087247Z ERROR codex_core::tools::router: error=unable to locate image at `/private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2/zoom/095.png`: No such file or directory (os error 2)
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json
+rows=[json.loads(x) for x in open('items.jsonl')]
+with open('answers.jsonl','a') as f:
+ for idx,c in enumerate(['shhh','s','hhs','hsh','hh'],89):
+  d={'item_id':rows[idx]['item_id'],'slots':{str(i+1):{'h':'ъ','s':'ь'}[x] for i,x in enumerate(c)},'confidence':{str(i+1):'high' for i in range(len(c))},'unmarked_final_hard_signs':[],'pre1918':'yes','note':''}
+  f.write(json.dumps(d,ensure_ascii=False)+'\\n')
+print(len(rows))
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+94
+
+exec
+/bin/zsh -lc 'cat items.jsonl' in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+{"item_id": "k85283814b3", "crop": "crops/149c172ea5d91a24b48d77d6dea97e002d31fc42c2d52b6f33f4d9c213c5c9ef.png", "masked_text": "Однако надо написат⟦1⟧ Алексѣю, -и Бется сіла за стол⟦2⟧,", "slots": 2}
+{"item_id": "ke5c14028ff", "crop": "crops/9bcf0c8c9ad6fbebbcec534e2890a310e0500ca52ca6cea80b59cd111f71f28a.png", "masked_text": "43.-22) Челобитная царю Петру с⟦1⟧ моря Окіяна", "slots": 1}
+{"item_id": "k3ac3400f2f", "crop": "crops/9654b03b2e039a4aba9fe06e0387f3497b93d673bee146199669301e7710c213.png", "masked_text": "Вѣд⟦1⟧ он⟦2⟧ же это нарочно...", "slots": 2}
+{"item_id": "k69e31c8406", "crop": "crops/90cb242cfb65ef7859cd68ccb2ccb6a72e07164a8a32d24ca477f179ebfa30b0.png", "masked_text": "вом⟦1⟧, множество вещей, о которых⟦2⟧ упоминалос⟦3⟧ в⟦4⟧", "slots": 4}
+{"item_id": "k78f0f39a8a", "crop": "crops/b75b92fae60626103ef3a08a11d2687f52019fd49c9c772fdd80fb1b1a92af0f.png", "masked_text": "солдат⟦1⟧, щами да кашей, но сестры помѣщалис⟦2⟧", "slots": 2}
+{"item_id": "kf3d21eeb3c", "crop": "crops/e95d8902438782d1eaea70158565449c85bdb83e7c0821f10f720467499148b5.png", "masked_text": "вслѣд⟦1⟧ за офицером⟦2⟧ спустилис⟦3⟧ с⟦4⟧ желѣзно-", "slots": 4}
+{"item_id": "kf0c9c7a8de", "crop": "crops/bcab055b4b16d0b67642434597c3de1e5ae6e7398cd9138f6a3ac867532ae7e3.png", "masked_text": "шій, прекрасный дирижабл⟦1⟧ и вдруг⟦2⟧ -", "slots": 2}
+{"item_id": "k1e0f93d3b6", "crop": "crops/d0160188ec8fbeb13e2f508fc8f476e781350a165c354014544d6ad6cfaad1e4.png", "masked_text": "Сначала Левин⟦1⟧ думал⟦2⟧ сдат⟦3⟧ все хозяйство, как⟦4⟧ оно было,", "slots": 4}
+{"item_id": "kaa3cceddb5", "crop": "crops/c42840a94b51d62fb58a183ad888b0dde65c1c59919df20863345214bf31f8e6.png", "masked_text": "гат⟦1⟧ вперед⟦2⟧, не застывая на одном⟦3⟧ мѣ-", "slots": 3}
+{"item_id": "k13df5d6cb8", "crop": "crops/b837d73030a91e9731321bbfbca9b55f973a5de69d5e0d9721926fea0d0f7bc5.png", "masked_text": "пооообразитолѣнѣе, то сразу догадалис⟦1⟧ бы,", "slots": 1}
+{"item_id": "k198f27bf01", "crop": "crops/7cdbc6e8aabb715a4762ab827e85390c4daee48bd8e5831f05f790f104509e37.png", "masked_text": "Погода совсѣм⟦1⟧ испортилас⟦2⟧: льет⟦3⟧ спорый,", "slots": 3}
+{"item_id": "k971d765ee0", "crop": "crops/a488a9798d25521334cab1d30f819794ba7e96673511c2b4913daf82a992d2c1.png", "masked_text": "и красивым⟦1⟧. Аринушка очен⟦2⟧ полюбила княгиню.", "slots": 2}
+{"item_id": "kffde412310", "crop": "crops/bf2a8f2f4ff1ba641bc4568f69454eaa5d2ef20af5bf8058d5fd07e1b97b5b5d.png", "masked_text": "Варенькѣ хотѣлос⟦1⟧ улыбнуться, глядя на дѣтскій гнѣв⟦2⟧ сво-", "slots": 2}
+{"item_id": "k340d299ed2", "crop": "crops/4cea886f51dccf98a51c0365a285b8815b4bc7b648b4e6719e4e6f3d406778d1.png", "masked_text": "и др.; богато ся представени и игликитѣ, тинтявит⟦1⟧, скалоломкитѣ, а покрай", "slots": 1}
+{"item_id": "k836dd16a64", "crop": "crops/8b6cdaac12471d3e499fdd08ed6010b82d4a43b0b2e2204ccdcb67e5920469d7.png", "masked_text": "Распустив⟦1⟧ слух⟦2⟧, что Марія, подобно Ана-", "slots": 2}
+{"item_id": "k881cebac89", "crop": "crops/9808d2a0c3a933a9b5654ce3af039a3a95921dc7f7a5fc7bec1d42b9e5caa0ae.png", "masked_text": "Но скажите пожалуйста, я никогда не могла понят⟦1⟧,", "slots": 1}
+{"item_id": "kb0a107f16b", "crop": "crops/d2074768c71d51ec6f45ff060e76c2891549bb949e05017114d69d1e3d95d804.png", "masked_text": "очен⟦1⟧ дипломатично:", "slots": 1}
+{"item_id": "kd09cfaaee6", "crop": "crops/97ec191c8cf092ceb972257c1e6ff716a38908b2ad5a5fd30e7d8e3da7e6e451.png", "masked_text": "нины совершенно измѣнилос⟦1⟧, но двадцат⟦2⟧ видов⟦3⟧ растеній (не считая", "slots": 3}
+{"item_id": "k17e482878d", "crop": "crops/9714672f2687d29c5674bfa3600adf2ea731c7bdb23d56fd952d7fb5eafd8f58.png", "masked_text": "чилос⟦1⟧? Ничего. Она долго говорила с⟦2⟧ ним⟦3⟧. Ну что же? Мало", "slots": 3}
+{"item_id": "k1dadca1a2d", "crop": "crops/ad2bd8cb932d684dc8ced0344e33a878199182686f5fb1eeeda5b1b20f045512.png", "masked_text": "сряду бросалас⟦1⟧ изо всей мочи на стеклянную перегородку,", "slots": 1}
+{"item_id": "k6eb256b474", "crop": "crops/e76c67d05c89a60ef2098f276dcbda37e4f595a2970cb353884de29251934320.png", "masked_text": "Скажите, господин⟦1⟧ Бурачков⟦2⟧, а у вас⟦3⟧ тут⟦4⟧, в⟦5⟧", "slots": 5}
+{"item_id": "k50b5759b08", "crop": "crops/605b5ed67fdbafe630e89a8f76db58770d9f7951258cf618f95f94f1e319e9ce.png", "masked_text": "Должны в⟦1⟧ нем⟦2⟧ жит⟦3⟧ черты.", "slots": 3}
+{"item_id": "kdb993d62f5", "crop": "crops/90f0d06e5298591d213e22b8c7a538a979f79d3d0ad5ef814bdb4ac868016e7e.png", "masked_text": "интеллигенции. Цар⟦1⟧, крайне недовольный темой бе-", "slots": 1}
+{"item_id": "kf73acab572", "crop": "crops/5a3d7da2f2d90255b83601dc023a5d9ad6c776576f71a8b40d55bfd719de169d.png", "masked_text": "тиф⟦1⟧, и вам⟦2⟧ почудилос⟦3⟧.", "slots": 3}
+{"item_id": "kf5db4708e7", "crop": "crops/73788d7ffd0b7693fd34769c7ac5d964c11d92cf6bd630bfb8a9275a332d50fa.png", "masked_text": "утеса не бросаются. Любов⟦1⟧ замѣнили флиртом⟦2⟧,", "slots": 2}
+{"item_id": "k493c00952d", "crop": "crops/d263731b21d354072040aac5151d77e804b805a8f2b919bc8c9904434512c552.png", "masked_text": "только штыками: пулей все равно не достанеш⟦1⟧.", "slots": 1}
+{"item_id": "kea3f1fab2e", "crop": "crops/f94bea8cac481912756e170e2c90d545167ad2aece3d55a5913aea83b8d07e2d.png", "masked_text": "полненія, а с⟦1⟧ ними и многіе другіе факты, могут⟦2⟧ быт⟦3⟧ подве-", "slots": 3}
+{"item_id": "keed0905110", "crop": "crops/7e246b7188c0aef9375707d361ffb2a9cf00346b2962fbb894824476740aaf81.png", "masked_text": "Поѣзд⟦1⟧ вышел⟦2⟧ ночью, часов⟦3⟧ в⟦4⟧ девят⟦5⟧, под⟦6⟧", "slots": 6}
+{"item_id": "kdf2260e7c6", "crop": "crops/85846eb51b4bc6e9213613b112413091d047b4b5d7b9f26d1465c22a05ed2553.png", "masked_text": "тес⟦1⟧ при мнѣ.", "slots": 1}
+{"item_id": "k5b574b5c14", "crop": "crops/488dc88edee273173ed9e40b3b8f5994eee5c7fb2f36be6d3f519f576c696e3f.png", "masked_text": "можно кокетничат⟦1⟧ и вертѣт⟦2⟧ им⟦3⟧ как⟦4⟧ ей угодно.", "slots": 4}
+{"item_id": "kae14116478", "crop": "crops/31b0e0070f2ec454a0096e08343f04dbba64dcabc5dfdd22c9eded694be4cb17.png", "masked_text": "Он⟦1⟧ передал⟦2⟧ бинокл⟦3⟧ княгинѣ и показал⟦4⟧", "slots": 4}
+{"item_id": "k5d939f7c7c", "crop": "crops/d359c38d5d3d8572da00f50a186bda90909806466ef696e0de3070e080dcfcd9.png", "masked_text": "однако, ни гугу. А она ревет⟦1⟧. Тоска меня взяла.", "slots": 1}
+{"item_id": "kdab12b31ca", "crop": "crops/4a647b67892874161080518708a56002b074de3e62cab1f4d56a105b4fbc5b6a.png", "masked_text": "общіе, может⟦1⟧ быт⟦2⟧, и разберетес⟦3⟧.", "slots": 3}
+{"item_id": "kfb77db7e6d", "crop": "crops/8d87393f7a9b1e9fd3096813f37d4178291b71f2d138e04d34ef572a467b19cc.png", "masked_text": "„Вы можете затоптат⟦1⟧ в⟦2⟧ гряз⟦3⟧\", слышал⟦4⟧ он⟦5⟧ слова Але-", "slots": 5}
+{"item_id": "k0d9c08a2a2", "crop": "crops/9bb818c4704c47f6305508a5222b53b26bc87bd77de957da59b943b339b3d244.png", "masked_text": "денег⟦1⟧. Всѣ, якобы, истрачен⟦2⟧.", "slots": 2}
+{"item_id": "kc5350e56b9", "crop": "crops/ff5f58ecbb7dcd8dd8bae3c119a8ec418e9e7ad4d789da4d8c9a1e400de9b231.png", "masked_text": "которых⟦1⟧ мог⟦2⟧ озират⟦3⟧ сотни акров⟦4⟧ неогражденной равнины, и бук-", "slots": 4}
+{"item_id": "k6db31f3226", "crop": "crops/ffa9c0e31505ad63597bb34674d170a338452b6a997d20bcfc98abb4db444bff.png", "masked_text": "Пуст⟦1⟧ ты меня убьеш⟦2⟧, -", "slots": 2}
+{"item_id": "kf65189f04b", "crop": "crops/37db0841ad54d547700ded7401cc2c42f950c0e48af38b34b035e753c42a422e.png", "masked_text": "теченіем⟦1⟧ льдинами, и искат⟦2⟧ новой стоянки. Часто", "slots": 2}
+{"item_id": "kcaa94202d5", "crop": "crops/70a71ae07298ec3ce5bcd19819eb25f4f8e3aa4a753ba6ab02990ce7228120c6.png", "masked_text": "Чебурдаев⟦1⟧. — Значит⟦2⟧, по-вашему, мое дѣло -не-", "slots": 2}
+{"item_id": "k6391af643f", "crop": "crops/eb1081b62bfd6b795f80c52d7a1cb21461b55549c3bdcdd8c28f37503594ee6e.png", "masked_text": "нером⟦1⟧, да сразу и кончит⟦2⟧ всю музыку!", "slots": 2}
+{"item_id": "kdc4ecf686f", "crop": "crops/772c7e5774a6e8988476a87620b34e18c48690f77cd584dd75f4ee306fae2230.png", "masked_text": "щечках⟦1⟧, глазенки большіе такіе - смотрят⟦2⟧ так⟦3⟧... и", "slots": 3}
+{"item_id": "k435e48d302", "crop": "crops/1ba97eb8a7640ca0bab5a77be1cc26b8a70d5d0ed93ec3355ce3e04b73e12dcd.png", "masked_text": "в. Граничар⟦1⟧, 28. ІХ. 1917), Androsace hedraeantha Grsb. (от⟦2⟧ Цар⟦3⟧ Борис⟦4⟧ III", "slots": 4}
+{"item_id": "k2c58b23b3f", "crop": "crops/66f03b2497a57f8534faf2d88597f5cc9b279b42f3f3472139ddb4518474d308.png", "masked_text": "их можно вправду принят⟦1⟧ за сочиненные Игорем", "slots": 1}
+{"item_id": "k31f4d089e7", "crop": "crops/595bdef3c7c0ed501d7b14b3c357d14959f82e79ca08a29eaafda5c0cf7f32ab.png", "masked_text": "смѣяс⟦1⟧, повисла у него на шеѣ, как⟦2⟧ всегда, радуяс⟦3⟧ на зна-", "slots": 3}
+{"item_id": "k4ba3335bd3", "crop": "crops/cdcbb7a7f4b62ada00e8d72ef8725de1830adf70e8e75e1f7b9bb1eff49f52c2.png", "masked_text": "поворачивался и хотѣл⟦1⟧ видѣт⟦2⟧ сзади свою курточку; но все-", "slots": 2}
+{"item_id": "ka28684f004", "crop": "crops/c4b7f1ea9fe9ecaac302a9629ca0c6e3a7c6bb81c63feb68bbc9843a0dd4c1ca.png", "masked_text": "н. вернувшис⟦1⟧ в родную деревню,", "slots": 1}
+{"item_id": "k083e855b16", "crop": "crops/07c7ccabaf0ae76b523b270804558b1840dac66e32b2d5ffd4170a3da6001c7d.png", "masked_text": "сил⟦1⟧ Константин⟦2⟧ Павлович⟦3⟧, удивленный ея простотою,", "slots": 3}
+{"item_id": "kd78cf7e6f7", "crop": "crops/1f3fc9694cb369d0182772741787789a9877ba4a7ee3d2d82bb05511f9cdce05.png", "masked_text": "Все, что приходит⟦1⟧, то прошло,", "slots": 1}
+{"item_id": "kcb471420be", "crop": "crops/6880ae0180152fcc48ac5d1f228e1cefeceb0eac7cb4eb99d4c1e4cad3c0d42b.png", "masked_text": "Ест⟦1⟧ люди: мысли их⟦2⟧ и жесты", "slots": 2}
+{"item_id": "k6c5f77080f", "crop": "crops/bb9b67387fcb2a8cba04bdf33eac430c74ca37a7cc369f81e47a4eb7060b556b.png", "masked_text": "покинули гаван⟦1⟧ Амстердама. Так⟦2⟧ как⟦3⟧ Баренц⟦4⟧ взял⟦5⟧", "slots": 5}
+{"item_id": "k4c3e749319", "crop": "crops/9e5339e1e7d4683b79eb2243ac1c1892d0e42cfdb774a7e66da2fd21e629e340.png", "masked_text": "неопреодолимую ненавист⟦1⟧ к существовавшему до сих", "slots": 1}
+{"item_id": "k9111316cdc", "crop": "crops/80736b42cd9793e250e526a90881b8a98b8bc8d48fff157a1d746870761a1aca.png", "masked_text": "ден⟦1⟧ я дотронулся до его подошвы кусочком⟦2⟧ бумаги; он⟦3⟧", "slots": 3}
+{"item_id": "k14d24cad0f", "crop": "crops/a3f22c12b087dcfd4bc3a62cff6417f9b708873f85dbcc97fbba5daf18c1254a.png", "masked_text": "одном⟦1⟧ мѣстѣ всю ноч⟦2⟧, а идти домой спат⟦3⟧ до утра.", "slots": 3}
+{"item_id": "kff050dbebb", "crop": "crops/859cfee4d2b53a6e7982e771fd92f4592f71f6803d600d1c9ab1fecd6bea8161.png", "masked_text": "не принят⟦1⟧ за таковое же удовольствіе еще ранче произ-", "slots": 1}
+{"item_id": "k717741ee94", "crop": "crops/4c818b99afa8e88527e94b963a457d70a1e6bbcbfa533ce766a760613fc9cc17.png", "masked_text": "но в⟦1⟧ одно и то-же время откормит⟦2⟧ корову и получит⟦3⟧ от⟦4⟧ нея много", "slots": 4}
+{"item_id": "k7e31dba67b", "crop": "crops/de0af2bdb4ff6a321fcb2d2d4a6bfbc3230b1fa89d760a006a4b8be129140c75.png", "masked_text": "в русскую реч⟦1⟧, невыносимо тягостны, но чаще всего", "slots": 1}
+{"item_id": "kde969ef7b9", "crop": "crops/8da4d73b1ae74334063496b057980bb724890d2cd00a247c7132c1e2cf3bab5f.png", "masked_text": "отдаться. И когда уж⟦1⟧ кончилос⟦2⟧ все-подошли", "slots": 2}
+{"item_id": "k1a0d1f659a", "crop": "crops/40f8feb361da75aa92bb2e57026b05337286a790922a5d77bd8dd60f5be60e85.png", "masked_text": "Внѣ пониманія, что ест⟦1⟧ лучистый ден⟦2⟧,", "slots": 2}
+{"item_id": "k990f8a5c4c", "crop": "crops/13df94cb94d5c944147b79886f6888d1d85f19832702ec9dfce46768a4b8c965.png", "masked_text": "значившіяся разновидности, которых⟦1⟧ признаки сдѣлалис⟦2⟧ в⟦3⟧ зна-", "slots": 3}
+{"item_id": "kfdd2a80034", "crop": "crops/a6743aadd265f5bde07f09a3859d3f81805c525065557ced3c08111a88dc10ce.png", "masked_text": "139. — Арсеній Суханов⟦1⟧. Изслѣдованіе. Част⟦2⟧ вто-", "slots": 2}
+{"item_id": "k97a1f4bb00", "crop": "crops/3d0c925e93783c129c1ec648b81ca11be970a4d3101462641bc0da55408cf00c.png", "masked_text": "что?!“ Ну, брат⟦1⟧, и крикнула! - Я так⟦2⟧ и вздрогнул⟦3⟧.", "slots": 3}
+{"item_id": "k6f74ea96b9", "crop": "crops/0a5a8ea130c5cd8b911896e98952ae546463ec91e6b74252e3b61c91edea666a.png", "masked_text": "тяты и щепяты. В⟦1⟧ четыре мѣсяца он⟦2⟧ очен⟦3⟧ ясно выра-", "slots": 3}
+{"item_id": "k395363aa88", "crop": "crops/65c9099861fec7ca79654c3d5d11cd8ebe9166acf02336c8f87f3d49f57003b0.png", "masked_text": "чала инстинктивными криками, которые в⟦1⟧ очен⟦2⟧ короткое", "slots": 2}
+{"item_id": "kc7ed75c595", "crop": "crops/41227ee749f9fb10bc40c7e01e1d8c1d0a4636e18d6dad8fee58294d86873ed2.png", "masked_text": "дут⟦1⟧ на Балаклаву - народом⟦2⟧ некультурным⟦3⟧ и", "slots": 3}
+{"item_id": "kd42f08ffd3", "crop": "crops/3d87c65a1c050d9f1fdc8335745fd63e5cdb79a7e5871fe468c4716af530c268.png", "masked_text": "торых⟦1⟧ ест⟦2⟧ повод⟦3⟧ полагат⟦4⟧, что виды одного рода обособилис⟦5⟧ во", "slots": 5}
+{"item_id": "kf6b069340d", "crop": "crops/67d0150d4baa36c4ee831fc58f6d11974c0c4be41361676982fccf16997c92c7.png", "masked_text": "- Послушайте, Берегов⟦1⟧!! Вы меня можете убит⟦2⟧,", "slots": 2}
+{"item_id": "k813e3398e6", "crop": "crops/60e83398f5eaad2271f13b24d2d027d7fbb70e828de7168a6e4ea030c16d8c96.png", "masked_text": "когда ему было сто десят⟦1⟧ дней, я раз⟦2⟧, играя с⟦3⟧ ним⟦4⟧", "slots": 4}
+{"item_id": "ke03e16f911", "crop": "crops/067c4db3827334a6053110781d37d4a370f589774856b9e3eb0e33b00e183736.png", "masked_text": "сти не может⟦1⟧. Эти причины становятся дѣйствительными лиш⟦2⟧ при-", "slots": 2}
+{"item_id": "ke0f50b6b2b", "crop": "crops/25f8566e8e174f4e9ad96d42c442036bce625f0a4460b63666e33682fd73555e.png", "masked_text": "достигнет⟦1⟧.", "slots": 1}
+{"item_id": "k5480c759a3", "crop": "crops/af84d85ffd3098a08ab375117c4fe88f02d8aa9f222ba218848345cc6d9cdb88.png", "masked_text": "с⟦1⟧ трудом⟦2⟧ пробиралис⟦3⟧ по усѣянному ледяными глы-", "slots": 3}
+{"item_id": "kc1fc4e50c4", "crop": "crops/2f8281ac5b7de310ff70392ec08a1ad14400242f71686095e971d6740892b8a3.png", "masked_text": "Музыкантов⟦1⟧", "slots": 1}
+{"item_id": "k9d82510482", "crop": "crops/1c3bb18eb615cada79a3c86c6adf747e44471302cb69e51a56561c50f1a5e667.png", "masked_text": "и търсят⟦1⟧ своя директор⟦2⟧, рѣлкитѣ планински растения: Achillea Kellereri", "slots": 2}
+{"item_id": "k5a228d603c", "crop": "crops/bca6c3d1b1cd4a4ac23011b3cd3a25c7a460e9d500a5fcb6be2aadf7c5fa0527.png", "masked_text": "ка, ибо может⟦1⟧ двигаться лиш⟦2⟧ самыми мелкими, медленными шагами.", "slots": 2}
+{"item_id": "k991fac1278", "crop": "crops/99d938be0c9ad3dbd6c71f6486f9f7d0aea693c342910f5e59fb1f9ba3fdce00.png", "masked_text": "Хорошо быт⟦1⟧ богачем⟦2⟧, еще лучше при этом⟦3⟧", "slots": 3}
+{"item_id": "kfef63d6e42", "crop": "crops/3a0936ec16774d03355931af139dd83cb9ee474dfc10d42bf9f1fac205160348.png", "masked_text": "готовы, убогій вы человѣк⟦1⟧, надават⟦2⟧ ему", "slots": 2}
+{"item_id": "k2d3d22b5ef", "crop": "crops/b1e8cc8e22e9a402fdd51b09d8b5bf8a5716f87bc37efddb88ac676784627b4e.png", "masked_text": "В⟦1⟧ ея глазах⟦2⟧ дрожит⟦3⟧ печал⟦4⟧,", "slots": 4}
+{"item_id": "ke8fefdc341", "crop": "crops/a1bb51354c531a3eb7b33e2db860c0b41ca3fdef959b134b54bd730a98e7ac5c.png", "masked_text": "ніе! Профессор⟦1⟧ Оуен⟦2⟧ тотчас⟦3⟧ замѣтил⟦4⟧, что зуб⟦5⟧, хотя и стол⟦6⟧", "slots": 6}
+{"item_id": "k9e9dcc389f", "crop": "crops/1e56f51963368f9cb96dbef722fa636beb3c14231f1d060adceed39d8dd3f0e5.png", "masked_text": "лиш⟦1⟧ бы к⟦2⟧ тому представлялис⟦3⟧ случаи...", "slots": 3}
+{"item_id": "k65c46b1abe", "crop": "crops/da85dae8b9ca4e36404fded232e852b107087c113e625bfe260f3271fcc067c1.png", "masked_text": "ганный вид⟦1⟧ и долго плакал⟦2⟧. Цѣлий час⟦3⟧ послѣ этого он⟦4⟧", "slots": 4}
+{"item_id": "k9ba119f6be", "crop": "crops/d67eb12e9956db7a55f6a9b1b5d02aac740e26c27f2a262c05f8218bdf4724d0.png", "masked_text": "топталас⟦1⟧ ватага закутанных⟦2⟧ в⟦3⟧ мѣха дикарей, пер-", "slots": 3}
+{"item_id": "k47a23d811a", "crop": "crops/329b31c40ea3397b7cbe5410a1977c9c605fb2c4b321cef15db02aa144f4f7b8.png", "masked_text": "ками, не хочу, не хочу... ѣхат⟦1⟧ надо, ѣхат⟦2⟧, ѣхат⟦3⟧!", "slots": 3}
+{"item_id": "kcbb4b8c2ba", "crop": "crops/73b572e7b49e476b670283994af1cf2956f3410519fc3d5af2527b0f5cb2a90a.png", "masked_text": "входя в⟦1⟧ ея кабинет⟦2⟧; но разсужденіе это, прежде имѣвшее та-", "slots": 2}
+{"item_id": "kf641d0d0a8", "crop": "crops/c28f89781388db480a918cbf8fef52a447f07ac9c46047432fb0f3f5f92bd763.png", "masked_text": "зад⟦1⟧. „Но высказат⟦2⟧ что же? какое рѣшеніе?\" говорил⟦3⟧ он⟦4⟧", "slots": 4}
+{"item_id": "kf0bfd20c44", "crop": "crops/d9e6a9db545eb69ee34e22721398fa76fd90013852b902a26948d98fcb76842f.png", "masked_text": "чтоб⟦1⟧ тут⟦2⟧ дѣйствовали опыт⟦3⟧ или какая-нибуд⟦4⟧ ассоціація", "slots": 4}
+{"item_id": "kc3f2182526", "crop": "crops/9ddf5c4589520eade786dceda0857d0df32e869aa1f0afb03c364e4b65269b54.png", "masked_text": "В⟦1⟧ них⟦2⟧ ускользающая дал⟦3⟧", "slots": 3}
+{"item_id": "k4078070d4f", "crop": "crops/0e07fae086aafa0ebf56dce7227a3fb3fed42af6fc65c4cd9caeecdf09d44b81.png", "masked_text": "и повторяющійся во многих⟦1⟧ других⟦2⟧ случаях⟦3⟧; а именно, когда", "slots": 3}
+{"item_id": "kdf050a8f7c", "crop": "crops/fd166cebed7b9e532d5b2c9d504eccea5ee3cac68de7bdd9c8bca05c5eb18c7f.png", "masked_text": "(от⟦1⟧ Цар⟦2⟧ Борис⟦3⟧ III, край Охридското езеро, 21. VIII. 1918), Lilium jankae", "slots": 3}
+{"item_id": "kebb8329ed4", "crop": "crops/586340b259c58476aea4a3e2378d044d042ff0a78e8d9a0326f18d0d1763ed7c.png", "masked_text": "расцвѣли новыя надежды. Снова появилас⟦1⟧ открытая", "slots": 1}
+{"item_id": "kb41ba2ebf9", "crop": "crops/21bc51203573602dc80cf2fa0d5a2f0b2ee25394da4eff7f5b5044400041f25d.png", "masked_text": "ния градинар⟦1⟧ Антон⟦2⟧ Краус⟦3⟧) (фиг. 20 и 21), в⟦4⟧ което ся насадени водни", "slots": 4}
+{"item_id": "kc904b66ff4", "crop": "crops/b77977bd3d4afc86f6b8180ccb09ebadd26103758782cfe1a7b576cd2612ac56.png", "masked_text": "поднеся опят⟦1⟧ ко рту мой палец⟦2⟧ в⟦3⟧ своей рукѣ, он⟦4⟧ сдви-", "slots": 4}
+{"item_id": "k8bc1e8c3e4", "crop": "crops/cf30dfa3c262c395244412832b631eaed367992e418eb3c2f2ad5d59a51851ae.png", "masked_text": "удовольствіе. Но сегодня удовольствіе это отравлялос⟦1⟧ воспоми-", "slots": 1}
+{"item_id": "k3c15e9eccb", "crop": "crops/719c26bee787dc8f35f5100715add0a2e8cbee73674b20dcb93a1b0e69c8a281.png", "masked_text": "Когда увидим⟦1⟧ луч⟦2⟧, сред⟦3⟧ чащи, на тропинкѣ.", "slots": 3}
+{"item_id": "kaf5b2f5f60", "crop": "crops/6cce5d3415487b7642632539e2d6edf67a26c7c2a532515479aa393f90739c6a.png", "masked_text": "в⟦1⟧ гостиной убѣждался, что случилос⟦2⟧ что-то. Мысли его, как⟦3⟧", "slots": 3}
+{"item_id": "k5cdb2c6382", "crop": "crops/3a3ef38c0149531ee1975d529f8fba58f0ff276602efc3b96afb7a4cd656491e.png", "masked_text": "скоро-ли их⟦1⟧ покормят⟦2⟧.", "slots": 2}
+
+exec
+/bin/zsh -lc 'magick zoom/015.png -crop 1200x220+0+0 +repage zoom/015-detail.png
+magick zoom/092.png -crop 1700x260+900+0 +repage zoom/092-detail.png' in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import json,collections
+items=[json.loads(x) for x in open('items.jsonl')]
+answers=[json.loads(x) for x in open('answers.jsonl')]
+answers[15]['pre1918']='no'
+with open('answers.jsonl','w') as f:
+ for a in answers: f.write(json.dumps(a,ensure_ascii=False)+'\\n')
+assert len(items)==len(answers)
+for r,a in zip(items,answers):
+ assert r['item_id']==a['item_id']
+ expected={str(i) for i in range(1,r['slots']+1)}
+ assert set(a['slots'])==expected
+ assert set(a['confidence'])==expected
+ assert all(x in ['ъ','ь','other','u'] for x in a['slots'].values())
+ assert all(x in ['high','low'] for x in a['confidence'].values())
+ assert a['pre1918'] in ['yes','no','unclear']
+counts=collections.Counter(x for a in answers for x in a['slots'].values())
+print('Validated count, order, slot coverage:',len(answers),'items')
+print('Slot calls:',dict(counts))
+print('Items with unmarked final hard signs:',sum(bool(a['unmarked_final_hard_signs']) for a in answers))
+PY" in /private/tmp/ru4e2/sol_packs/ru4e/ctx07/r2
+ succeeded in 0ms:
+Validated count, order, slot coverage: 94 items
+Slot calls: {'ь': 89, 'ъ': 155, 'other': 1}
+Items with unmarked final hard signs: 0
+
+codex
+94 items done. Slot calls: ъ 155, ь 89, other 1, u 0. Items with unmarked final hard signs: 0. Count, order, and slot coverage validated.
+
+The glyphs are generally distinct by the hard sign’s leftward top flag, though heavy ink and wear sometimes reduce clarity.
+tokens used
+83,082
+94 items done. Slot calls: ъ 155, ь 89, other 1, u 0. Items with unmarked final hard signs: 0. Count, order, and slot coverage validated.
+
+The glyphs are generally distinct by the hard sign’s leftward top flag, though heavy ink and wear sometimes reduce clarity.

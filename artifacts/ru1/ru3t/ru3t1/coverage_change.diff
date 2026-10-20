@@ -1,0 +1,31 @@
+--- artifacts/ru1/ru3t/ru3t1/ru2t_coverage.bound.py	2026-10-17 23:46:54
++++ scripts/secondary/ru2t_coverage.py	2026-10-17 23:39:01
+@@ -48,12 +48,12 @@
+     return events
+ 
+ 
+-def coverage(scan, rollout, directory, items):
++def coverage(scan, rollout, directory, items, image_fields=('crop',)):
+     """Trace dependencies at each matched view, preserving command/view order."""
+     records = list(scan_rollout.rows(rollout))
+     scan_rollout.resolve(records, scan_rollout.CALL_TYPES)
+     scan_rollout.resolve_templates(records, Path(directory).resolve())
+-    origins = {i['crop']: {i['crop']} for i in items}
++    origins = {i[field]: {i[field]} for i in items for field in image_fields}
+     witnessed = {}; log = []
+     matches = {}
+     for match in scan['image_matches']:
+@@ -83,11 +83,11 @@
+         for match in matches.get(ordinal, []):
+             for crop in origins.get(match['path'], set()):
+                 witnessed.setdefault(crop, []).append(dict(record=ordinal, image=match['path']))
+-    assigned = {i['crop'] for i in items}
++    assigned = {i[field] for i in items for field in image_fields}
+     direct = assigned & set(scan['images_viewed'])
+     derived = (assigned & set(witnessed)) - direct
+     unviewed = assigned - direct - derived
+     return dict(direct=len(direct), derived=len(derived), unviewed=len(unviewed),
+                 assigned_crops=len(assigned), direct_crops=sorted(direct), derived_crops=sorted(derived),
+-                unviewed_crops=sorted(unviewed), dropped_items=[i['item_id'] for i in items if i['crop'] in unviewed],
++                unviewed_crops=sorted(unviewed), dropped_items=[i['item_id'] for i in items if all(i[field] in unviewed for field in image_fields)],
+                 witnesses=witnessed, replay_log=log)

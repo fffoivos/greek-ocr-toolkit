@@ -18,7 +18,7 @@ __all__ = ['DOUBLE_RATIO', 'Crossing', 'CutLetter', 'CutSpan', 'GuideLines', 'Se
 
 # A second text line inside the crop: its band's letter support ≥ DOUBLE_RATIO × the main band's. Set on the 44
 # o4d_lines fixtures against the implementer's provisional labels (7 double: 0.27–0.61; 20 single: ≤ 0.22) and
-# checked on rendered two-line crops (docs/GLYPHS_PLAN.md).
+# checked on rendered two-line crops (docs/records/glyphs/GLYPHS_PLAN.md).
 DOUBLE_RATIO = .25
 DOUBLE_BODIES = 0   # body count is reported but not gated: a second line cut by the crop has none (fixture line22)
 

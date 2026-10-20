@@ -1,0 +1,108 @@
+<title>Accent Fixing Options</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+/* Layout: a decision memo — verdict box first, then one table per option, then the alignment map and the test plan; one reading column, tables scroll on their own. */
+:root{--bg:#f7f5f0;--fg:#1d1a16;--muted:#6b645a;--line:#d9d3c8;--panel:#fffdf9;--accent:#2f5d8a;--ok:#2e7d4f;--warn:#b26a00;--bad:#a93a2f;--soft:#ece7dd;
+--display:"Source Serif 4",Georgia,serif;--body:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;--mono:"IBM Plex Mono",Menlo,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17161a;--fg:#ebe6dc;--muted:#a39b8e;--line:#3a373f;--panel:#201f24;--accent:#8fb6e0;--ok:#7fc39a;--warn:#e2a64a;--bad:#e2796c;--soft:#2a282e;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#17161a;--fg:#ebe6dc;--muted:#a39b8e;--line:#3a373f;--panel:#201f24;--accent:#8fb6e0;--ok:#7fc39a;--warn:#e2a64a;--bad:#e2796c;--soft:#2a282e;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.5;margin:0;padding-block:28px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:880px;margin:0 auto;min-width:0}
+h1{font-family:var(--display);font-weight:600;font-size:2rem;line-height:1.15;margin:0 0 6px;text-wrap:balance}
+h2{font-family:var(--display);font-weight:600;font-size:1.35rem;margin:36px 0 8px;text-wrap:balance}
+h3{font-size:.95rem;font-weight:600;margin:18px 0 6px}
+p,li{max-width:70ch}p{margin:0 0 10px}ul{padding-left:20px;margin:0 0 10px}li{margin:3px 0}
+.meta{color:var(--muted);font-size:.9rem;margin-bottom:18px}.note{color:var(--muted);font-size:.86rem}
+.verdict{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--accent);padding:14px 16px;margin:16px 0}
+.verdict p{margin:0 0 8px}.verdict p:last-child{margin:0}
+.tbl{overflow-x:auto;border:1px solid var(--line);background:var(--panel);margin:8px 0 14px}
+table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:560px}
+th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:.74rem;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--soft)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}tr:last-child td{border-bottom:0}
+code{font-family:var(--mono);font-size:.84em;background:var(--soft);padding:1px 5px;border-radius:3px}
+.g{color:var(--ok);font-weight:600}.w{color:var(--warn);font-weight:600}.b{color:var(--bad);font-weight:600}
+a{color:var(--accent)}
+</style>
+<main>
+<h1>Accent Fixing Options</h1>
+<p class="meta">Decision memo for the owner · 16 Oct 2026 · spell-checker track (branch <code>opus/spellcheck</code>, head 9cb598dd). Every figure is measured on the 1,264 three-way Wikisource lines against <b>print truth</b>, the blind two-reader pixel adjudication of all 189 Google-vs-Wikisource mark differences. Examples per class: <a href="https://claude.ai/artifact/4bQm77YCsSfe1YMtvxCuq4">options sheet</a>; adjudication: <a href="https://claude.ai/artifact/Qx3PKeHuUuYZhCmRXFzEBw">print-truth sheet</a>.</p>
+
+<div class="verdict">
+<p><b>Recommendation: the combined design, with the money spent on the mark reader.</b> Deterministic pre-pass → lexicon proposes → a purpose-built mark reader decides whether the proposed mark is PRINTED. No HOLD in training labels. No ML restorer or LLM step for now.</p>
+<p>The reason: your rule "transcribe what is printed" makes the image the only admissible judge. Every option therefore depends on the same component, a reader that tells which mark is on the vowel. The lexicon's only job is to point the reader at the few vowels worth checking. That lowers the error rate the reader must achieve from about 0.02% to about 1.5% per vowel judged. A restorer trained on normalised text adds proposals the reader would have to reject. In 15 of the 34 cases where Google read the print correctly, it would have "corrected" toward the normalised form.</p>
+</div>
+
+<h2>What the evidence says first</h2>
+<ul>
+<li><b>The reference normalises.</b> Of the 189 Google-vs-Wikisource differences, 147 are printed as the Wikisource form, 34 as Google's form, 2 as neither, and 6 are unresolved. Real Google mark errors: <b>149</b>, about 0.9% of mark-bearing vowels.</li>
+<li><b>Compound marks dominate the errors.</b> 57 of the 149 (38%) involve breathing + accent on one vowel, although compound marks are only 3.9% of vowels.</li>
+<li><b>Base rate.</b> At 0.9% errors per vowel, a reader that judges every vowel needs a false-change rate of ≤ 0.024% to reach 95% precision at 50% recall. Today's shape classifier makes 0.16% (held-out books, τ 0.998). The recogniser, a pixel model trained on Google's labels, makes 0.5%.</li>
+<li><b>The mark extractor is the first bottleneck.</b> It credits ascender ink as marks, takes specks and "!" dots for subscripts, misses elision apostrophes, and cuts split letters. In ᾗσι the η prints as two pieces, so the perispomeni sits outside the vowel window and is never counted. The fixes are in Sol run S2 now.</li>
+</ul>
+
+<h2>Option 1 — image only</h2>
+<div class="tbl"><table>
+<tr><th>Measure</th><th class="n">Today (classifier)</th><th class="n">Recogniser as reader</th><th>Purpose-built reader (estimate)</th></tr>
+<tr><td>Recall of the 149 real errors (all books)</td><td class="n">28 (18.8%) at τ 0.998</td><td class="n">≈55%</td><td>bounded by visible ink: 143 of 149 resolvable by eye</td></tr>
+<tr><td>Recall, held-out books only</td><td class="n">8 of 88 (9.1%)</td><td class="n">—</td><td>—</td></tr>
+<tr><td>Precision against print, held-out</td><td class="n b">30.8%</td><td class="n b">≈56%</td><td>needs false-change ≤ 0.024%/vowel for 95% when judging every vowel</td></tr>
+<tr><td>Coverage (vowels it will judge)</td><td class="n">23% at τ 0.998</td><td class="n">100%</td><td>target ≥ 70%</td></tr>
+<tr><td>Free training labels</td><td colspan="3">≈2.7 M agreeing vowels (Google = recogniser) over 124,669 polytonic training lines; label noise 0.3%. Compound classes become trainable (650 compound vowels on the 1,264 lines alone).</td></tr>
+<tr><td>What it can never do</td><td colspan="3">Choose when the ink is ambiguous (fused breathing under a perispomeni, worn bold type, subscript cut off at the crop edge): it must abstain. That is your rule anyway.</td></tr>
+<tr><td>Cost</td><td colspan="3">Extractor fixes (S2, running). Vowel location over the training collection needs recogniser forward passes, a Clariden GPU job of a few hours. Then a small CNN on vowel crops (GPU, about 1–2 h), and owner review on the held-out sheet.</td></tr>
+</table></div>
+<p class="note">The hand-built feature classifier does not improve with more data: on a book-separated learning curve it plateaus at 78–94% accuracy, depending on which books are held out. A purpose-built reader has to learn from pixels. Its achievable false-change rate is the one number not yet measured; it is the first go/no-go below.</p>
+
+<h2>Option 2 — ML diacritic restorer</h2>
+<div class="tbl"><table>
+<tr><th>Measure</th><th class="n">Measured</th><th>Note</th></tr>
+<tr><td>Training text</td><td class="n">55 M + 14 M tokens</td><td>Ancient (First1K/Perseus scholarly editions) + 19th-century polytonic (Wikisource transcriptions, which normalise: 34 of 189 here). Both teach normalised orthography, not print conventions.</td></tr>
+<tr><td>Context-free lower bound (most frequent form)</td><td class="n">88.4% words</td><td>On the proofread text of these lines. 25% of words have an ambiguous mark-stripped key; context only helps there.</td></tr>
+<tr><td>Proposes the printed form for a real error</td><td class="n">96 of 149 (64%)</td><td>Before any ink check. Real-word errors: about half.</td></tr>
+<tr><td>Normalises a correct print reading</td><td class="n b">15 of 34</td><td>Each one must be vetoed by the reader.</td></tr>
+<tr><td>Changes a word Google had right (vs reference)</td><td class="n b">382 of 5,645 (6.8%)</td><td>So it can never apply on its own; it is a proposer at best.</td></tr>
+<tr><td>Combined with option 1</td><td colspan="2">Under "lexical correctness never overrides the ink", it adds no admissible correction the reader would not confirm anyway. Its only value is choosing which alternative to show the reader, and the lexicon already does that for 112 of the 149 errors.</td></tr>
+<tr><td>Cost</td><td colspan="2">A character transformer: GPU hours on Clariden plus 2 Sol tasks; scoring needs print truth, not normalised text.</td></tr>
+</table></div>
+
+<h2>Option 3 — the hybrid as built (baseline)</h2>
+<div class="tbl"><table>
+<tr><th>Column</th><th class="n">Decisions</th><th class="n">= print</th><th class="n">Precision</th><th class="n">Recall of 149</th><th>Note</th></tr>
+<tr><td>ACCEPT (ink confirms)</td><td class="n">30</td><td class="n">29</td><td class="n g">96.7%</td><td class="n">19.5%</td><td>Almost all positional graves in the dev books; only 3 corrections on held-out books</td></tr>
+<tr><td>HOLD (ink does not contradict)</td><td class="n">44</td><td class="n">30</td><td class="n b">68%</td><td class="n">+20%</td><td>Not admissible: 8 of its changes normalise a correct print (διαρκῇ, ἀτυχή, ἑσιώπα, παιάνας, δέσμῃ …)</td></tr>
+<tr><td>Reachable in principle</td><td colspan="5">112 of 149: constraint 12, positional grave 19, lexicon-unique 28, competing 4, real-word 49 (via the ink-contradicts stage). Not reachable: no attested one-cluster variant 22, guards 11, other 4.</td></tr>
+</table></div>
+
+<h2>Combined design (recommended)</h2>
+<div class="tbl"><table>
+<tr><th>Stage</th><th>Pool the reader judges</th><th class="n">Real errors in pool</th><th>Reader false-change rate allowed for 95% precision at 50% recall</th></tr>
+<tr><td>Deterministic: constraints, grave by position and slope</td><td>impossible words; final acutes</td><td class="n">31</td><td>already 29 of 30 right</td></tr>
+<tr><td>Lexicon proposes (Google form unattested)</td><td>≈89 words</td><td class="n">32</td><td class="g">≈1.5% per word: today's classifier nearly suffices; coverage is the gap</td></tr>
+<tr><td>Ink-contradicts (Google form attested, another mark attested)</td><td>≈2,300 words</td><td class="n">49</td><td class="w">≈0.1% per word: needs the purpose-built reader</td></tr>
+<tr><td>Not proposable</td><td>—</td><td class="n">37</td><td>a reader judging every vowel (option 1 alone), later, if its false rate allows</td></tr>
+</table></div>
+<p>Accept only what the reader confirms is printed. Abstain otherwise; ambiguous ink keeps Google's label. The restorer and the LLM step are left out until the reader's exposure, not its accuracy, is the bottleneck.</p>
+
+<h2>Alignment with the E3 weakness table (v2_test, per seed)</h2>
+<div class="tbl"><table>
+<tr><th>Weakness</th><th>Size</th><th>Combined design</th><th>Option 1 only</th><th>Option 2 risk</th></tr>
+<tr><td>Rough ↔ smooth breathing</td><td class="n">≈1,000 swaps</td><td>lexicon finds unattested ones; real-word pairs (ἡ/ἠ, ὡς/ὧς) need the reader's breathing classes</td><td>yes, if the reader separates the two shapes (blind readers did so from same-line references)</td><td>normalises toward the frequent form</td></tr>
+<tr><td>Acute → grave, word-final</td><td class="n">1,004 (659 final)</td><td>positional + slope; acute-print books follow the print</td><td>slope</td><td>low</td></tr>
+<tr><td>Iota subscript</td><td class="n">319 del + 273 ins</td><td>lexicon proposes; reader needs speck rejection and crop-edge abstention</td><td>yes after S2</td><td class="b">high: ταύρω, κωμωδία printed without</td></tr>
+<tr><td>Acute ↔ perispomeni</td><td class="n">570 + 218</td><td>reader; fused bold type abstains</td><td>yes</td><td>medium</td></tr>
+<tr><td>Dialytika</td><td class="n">15% mark error</td><td>reader only (two dots); never from the lexicon</td><td>yes</td><td class="b">high: editions omit it</td></tr>
+<tr><td>Compound marks</td><td class="n">38% of real errors</td><td>needs compound classes and full-vowel windows (ᾗσι)</td><td>same</td><td>—</td></tr>
+</table></div>
+<p class="note">Outside this tool under every option: base-letter errors (22% of polytonic edits), joint errors (6%), space/punctuation (14%), burst/geometry (30%), capitals and numerics.</p>
+
+<h2>Test plan and go/no-go</h2>
+<ul>
+<li><b>Instrument:</b> the 1,264 three-way lines with print truth (149 real errors, 34 normalisation traps), held-out books reported separately; the per-slot line metric from S2; your 33 sheet notes as machine-checked expectations; the held-out sheet published after every iteration.</li>
+<li><b>Reader go/no-go:</b> false-change rate ≤ 0.1% per judged vowel on held-out agreement vowels, and ≤ 0.05% for a whole-line pass; compound-class recall reported; normalisation traps corrected = 0.</li>
+<li><b>Stage go/no-go for training labels:</b> precision against print with an exact 95% lower bound ≥ 95% per stage, on held-out books; otherwise the stage stays proposal-only.</li>
+<li><b>Order:</b> S2 extractor fixes (running) → reader trained on agreement labels (Clariden) → combined engine re-scored → owner sheet.</li>
+</ul>
+<p class="note">Open for you: the θρασύς card on the print-truth sheet. Both blind readers read a grave there; your reading was an acute.</p>
+</main>

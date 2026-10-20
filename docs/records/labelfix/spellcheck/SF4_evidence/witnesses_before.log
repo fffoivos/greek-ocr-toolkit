@@ -1,0 +1,154 @@
+FFFFF                                                                    [100%]
+=================================== FAILURES ===================================
+__________ test_clipped_capital_overhead_diaeresis_must_hold[\u0399] ___________
+
+base = 'Ι'
+
+    @pytest.mark.parametrize('base', ['Ι','Υ'])
+    def test_clipped_capital_overhead_diaeresis_must_hold(base):
+        r = capital_diaeresis(base)
+        ev = r['detector']['slots'][0]['evidence']
+        assert ev['clipped_top'] and len(ev['above']) == 2
+        assert all(b['touches_border'] for b in ev['above'])
+        result = overlay(dict(id='synthetic', label=r['recogniser_text'], script_class='greek_poly'),
+                         r, 'ensemble_ab', dict(detector='s6', r1_sha256='A', policy_sha256='test'))
+>       assert result['status'] == 'hold', result
+E       AssertionError: {'line_id': 'synthetic', 'original_label_sha256': '2d0be6504dd4b8493aa4efad0077313f5341553dabed57ef8db44fb3ab255a9e', 'changes': [{'start': 1, 'letter': 'Ι', 'from': '̈', 'to': '', ...}], 'hold_slots': [], ...}
+E       assert 'corrected' == 'hold'
+E         
+E         - hold
+E         + corrected
+
+/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/tests/labelfix/test_sf4_review.py:72: AssertionError
+__________ test_clipped_capital_overhead_diaeresis_must_hold[\u03a5] ___________
+
+base = 'Υ'
+
+    @pytest.mark.parametrize('base', ['Ι','Υ'])
+    def test_clipped_capital_overhead_diaeresis_must_hold(base):
+        r = capital_diaeresis(base)
+        ev = r['detector']['slots'][0]['evidence']
+        assert ev['clipped_top'] and len(ev['above']) == 2
+        assert all(b['touches_border'] for b in ev['above'])
+        result = overlay(dict(id='synthetic', label=r['recogniser_text'], script_class='greek_poly'),
+                         r, 'ensemble_ab', dict(detector='s6', r1_sha256='A', policy_sha256='test'))
+>       assert result['status'] == 'hold', result
+E       AssertionError: {'line_id': 'synthetic', 'original_label_sha256': '0ba4673fa829e97f18006da8dcf197962e9a263e0678243884f5789e93d85739', 'changes': [{'start': 1, 'letter': 'Υ', 'from': '̈', 'to': '', ...}], 'hold_slots': [], ...}
+E       assert 'corrected' == 'hold'
+E         
+E         - hold
+E         + corrected
+
+/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/tests/labelfix/test_sf4_review.py:72: AssertionError
+______ test_owner_page_must_match_runtime_for_diagnostic_E_below_evidence ______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x11dfa1f10>
+
+    def test_owner_page_must_match_runtime_for_diagnostic_E_below_evidence(monkeypatch):
+        from scripts.labelfix import owner_pages_build_combined as p
+        r = clean('ι')
+        r['detector']['slots'][0]['evidence']['clipped_bottom'] = True
+        r['peer_predictions']['E'][0]['parts'] = ['subscript']
+        monkeypatch.setattr(p, 'LINE_TEXT', {'synthetic':r['recogniser_text']})
+        monkeypatch.setattr(p, 'R1', {('synthetic',0):r['r1_predictions'][0]})
+        monkeypatch.setattr(p, 'COVERAGE', {'synthetic':r['coverage']})
+        expected = compose_runtime(r, 'ENSEMBLE_AB')
+        actual, _ = p.combine('synthetic', deserialize(r['detector']), 'ENSEMBLE_AB',
+                               peer_predictions={0:r['peer_predictions']['B'][0]},
+                               peer_coverage=r['peer_coverage']['B'])
+        assert expected['hold_slots'][0]['reasons'] == ['detector_clipped_bottom']
+>       assert actual.slots[0]['label_status'] == expected['slots'][0]['label_status']
+E       AssertionError: assert 'ACCEPT' == 'HOLD'
+E         
+E         - HOLD
+E         + ACCEPT
+
+/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/tests/labelfix/test_sf4_review.py:88: AssertionError
+___________ test_implicit_changes_must_require_notes_to_page_binding ___________
+
+tmp_path = PosixPath('/private/var/folders/5q/65_c_z89577cz_zxgkpkz36m0000gn/T/pytest-of-foivoskarounos-zamparloukos/pytest-1815/test_implicit_changes_must_req0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x11df80050>
+
+    def test_implicit_changes_must_require_notes_to_page_binding(tmp_path, monkeypatch):
+        from scripts.labelfix import owner_implicit_changes as mod
+        paths = {}
+        digests = {}
+        for name, text in [('old','ά'), ('new','α')]:
+            page = tmp_path/(name+'.html'); page.write_text(text)
+            digests[name] = hashlib.sha256(page.read_bytes()).hexdigest()
+            side = tmp_path/(name+'.json')
+            side.write_text(json.dumps(dict(page_sha256=digests[name], lines={
+                'synthetic':dict(reading=text, line_reading=dict(slots=[
+                    dict(display_slot=1, bbox=[1,1,3,3])]))})))
+            paths[name] = (page, side)
+        notes = tmp_path/'unbound_notes.jsonl'
+        notes.write_text('{"line_id":"synthetic","note":""}\n')
+        argv = ['owner_implicit_changes']
+        for name in ('old','new'):
+            argv += ['--'+name+'-page',str(paths[name][0]),'--'+name+'-boxes',str(paths[name][1])]
+        argv += ['--reviewed-page-sha256',digests['old'],'--new-page-sha256',digests['new'],
+                 '--notes',str(notes),'--out',str(tmp_path/'result.json')]
+        monkeypatch.setattr('sys.argv', argv)
+>       with pytest.raises(ValueError, match='binding'):
+E       Failed: DID NOT RAISE ValueError
+
+/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/tests/labelfix/test_sf4_review.py:111: Failed
+________ test_modifier_apostrophe_alias_composes_without_slot_mismatch _________
+
+    def test_modifier_apostrophe_alias_composes_without_slot_mismatch():
+        # U+02BC is isalpha(), so recogniser_slots creates a slot for it. SF3's
+        # elision renderer drops that codepoint but leaves its slot behind.
+        r = clean('δ')
+        r['recogniser_text'] = 'δʼ'
+        r['detector']['slots'][0].update(apostrophe=True, word_final=True)
+        r['detector']['slots'].append(dict(start=1,end=2,base='ʼ',parts=[],unnamed=[],
+            localisation_unknown=False,segmentation_uncertain=False,word_final=False,
+            evidence=dict(clipped_top=False,clipped_bottom=False)))
+>       result = compose_runtime(r,'ENSEMBLE_AB')
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/tests/labelfix/test_sf4_review.py:124: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/artifacts/labelfix_sf4/before/greekocr/labelfix/release_gate.py:353: in compose_runtime
+    return compose(runtime.get('recogniser_nfd',runtime['recogniser_text']),runtime['detector'],
+/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/artifacts/labelfix_sf4/before/greekocr/labelfix/release_gate.py:335: in compose
+    serial=serialize(compose_reading(text,raw,predictions,coverage,mode,k1_flags,**kwargs))
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/artifacts/labelfix_sf4/before/greekocr/labelfix/release_gate.py:324: in compose_reading
+    rd,removed=R.apply_constraints(replace(raw,text=rendered,slots=slots))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/artifacts/labelfix_sf4/before/greekocr/labelfix/reading.py:276: in apply_constraints
+    candidate, removed = _normalise_constraints(reading, enabled_rules=enabled_rules)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+reading = LineReading(text='δ’', slots=[{'start': 0, 'end': 1, 'base': 'δ', 'parts': [], 'unnamed': [], 'localisation_unknown': ...ne, 'peer_coverage': None}], unnamed=[], opening_quotes=[], removed_by_constraint=[], constraint_flags=[], geometry={})
+enabled_rules = frozenset({'C1:breathing_not_initial', 'C1:smooth_breathing_on_rho', 'C2:breathing_with_dialytika', 'C2:mark_on_consonant', 'C2:two_accents_one_letter', 'C2:two_breathings', ...})
+
+    def _normalise_constraints(reading: LineReading, *, enabled_rules=APPLIED_CONSTRAINT_RULES):
+        """Return a copy with qualified impossible marks removed, plus a receipt.
+    
+        None enables all rules for offline qualification. Held-back proposals and
+        tied conflicts are parallel flags, never deletions. Missing marks are never
+        supplied. Base letters, punctuation, physical evidence and input are intact.
+        """
+        from . import constraints as C
+        enabled = CONSTRAINT_RULES if enabled_rules is None else frozenset(enabled_rules)
+        slots = [dict(s, parts=list(s.get('parts', ()))) for s in reading.slots]
+        removed, flags = [], list(reading.constraint_flags)
+        # Output NFD offsets differ from the recogniser offsets as marks change.
+        # Join by letter order, retaining each original slot/start in all receipts.
+        text_cls = clusters(nfd(reading.text))
+        letters = [c for c in text_cls if c.base.isalpha()]
+        if len(letters) != len(slots) or any(c.base != s['base'] for c,s in zip(letters, slots)):
+>           raise ValueError('reading letters and evidence slots differ')
+E           ValueError: reading letters and evidence slots differ
+
+/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/artifacts/labelfix_sf4/before/greekocr/labelfix/reading.py:135: ValueError
+=========================== short test summary info ============================
+FAILED ../../Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/tests/labelfix/test_sf4_review.py::test_clipped_capital_overhead_diaeresis_must_hold[\u0399]
+FAILED ../../Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/tests/labelfix/test_sf4_review.py::test_clipped_capital_overhead_diaeresis_must_hold[\u03a5]
+FAILED ../../Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/tests/labelfix/test_sf4_review.py::test_owner_page_must_match_runtime_for_diagnostic_E_below_evidence
+FAILED ../../Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/tests/labelfix/test_sf4_review.py::test_implicit_changes_must_require_notes_to_page_binding
+FAILED ../../Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-spellcheck/tests/labelfix/test_sf4_review.py::test_modifier_apostrophe_alias_composes_without_slot_mismatch
+5 failed in 0.67s

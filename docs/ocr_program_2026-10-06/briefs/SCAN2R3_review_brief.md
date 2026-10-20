@@ -1,0 +1,2 @@
+# SCAN2R3 — re-review of scanner v4.5.2 (gpt-6.1-sol, medium, network OFF, READ-ONLY; write only out/scan2r3/REVIEW.md)
+Criteria of docs/ocr_program_2026-10-06/briefs/SCAN2R_review_brief.md; confirm SCAN2R H1–H3 and SCAN2R2 H1 closed (re-run all five probes, try two new helper-overwrite/self-overwrite variants and one loop/path variant); rescan verdicts justified by P1–P3 only. Last line exactly: `SCAN2R3: <PASS|FAIL> | blocking <n> | high <n> | medium <n> | rescan justified <n>/15`
