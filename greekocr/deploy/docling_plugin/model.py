@@ -60,13 +60,17 @@ class GlossapiOcrModel(BaseOcrModel):
             from .recognizer.inference import Recognizer
 
             opts = self.options
+            if opts.config_sha256 is not None:
+                if sha256_file(str(opts.checkpoint/'config.json')) != opts.config_sha256:
+                    raise ValueError('OCR config sha256 mismatch')
+            pinned_weights = opts.checkpoint/'model.safetensors' if opts.checkpoint.is_dir() else opts.checkpoint
             if opts.checkpoint_sha256 is not None:
-                if sha256_file(str(opts.checkpoint)) != opts.checkpoint_sha256:
+                if sha256_file(str(pinned_weights)) != opts.checkpoint_sha256:
                     raise ValueError("OCR checkpoint sha256 mismatch")
                 # A .pt pin must not silently resolve to different sibling weights.
                 if opts.checkpoint.suffix == ".pt" and opts.checkpoint.with_suffix(".safetensors").exists():
                     raise ValueError("pinned .pt has a safetensors sibling; pin that artifact explicitly")
-            self.recognizer = Recognizer(str(opts.checkpoint), str(opts.codec), opts.device)
+            self.recognizer = Recognizer(str(opts.checkpoint), str(opts.codec) if opts.codec else None, opts.device)
         return self.recognizer
 
     def _record(self, record):

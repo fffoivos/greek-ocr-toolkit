@@ -1,1 +1,1 @@
-"""Preserved implementation detail; use greekocr public APIs."""
+"""Preserved implementation detail: compatibility namespace for greekocr.train."""

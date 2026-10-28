@@ -1,0 +1,25 @@
+# REL0-S4b — Sol: build the public line dataset (Greek OCR lines v0.n), 28 Oct 2026
+
+Implement the builder you designed: docs/programme_20261028/RELEASE_v0/{DATASET_BUILD_DESIGN.md,CROSSWALK.md} (yours, REL0-S4a), under PLAN.md rev 2 §3 (layout, real-line view fields 1–9, synthetic table, acceptance) and the owner brief items 3, 5, 6 (one public dataset, all lines, agreed metadata, **no licence fields anywhere**, detailed source to find the exact book and page, main branch only, synthetic as its own config with per-line operations/origin and configured vs realised distributions).
+
+## Probe results (run on Clariden 28 Oct; local copies in out/RELEASE_v0/probes/{discovery-001,full-001,synthetic-001}, without keys.sqlite / *.files.jsonl which stay on Clariden at /iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/release_v0/probes/)
+- S1 v4 subset `ref_364871.jsonl`: 364,871 distinct row_id. Old pools: union_0 306,922 + union_1 57,251 = 364,173, both fully inside S1 (rhs_only 0) → the 698 extra S1 keys are additions, no removals.
+- prepared005 non-harvest pools retain 364,870 of the 364,871 (lhs_only 1 key = the eval-crop removal).
+- Gennadius-inclusive harvest release (`/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/release_with_gennadius_cached_v4`, metadata.jsonl 497,556) = HF `harvest-20261025` exactly (497,556 both sides); prepared005 harvest pools hold 497,554 (lhs_only 2 = the two removals) = train 428,357 + dev 16,350 + test 52,847.
+- Synthetic A12 build (`/capstor/scratch/cscs/fffoivos/greek-ocr-e3/scaling_w3/mix1_runs/MIX1D-8d25940f-export-001/prep/A12`): train 190,486 / val 9,208 / reserved 3,999 = 203,693, build_info.json SHA e81aa95b…; fonts carry sha16 only (no full font SHA); prepared005 synthetic = A12 train. `old_synth` (control_synthetic_7) also 203,693 — keep separate, do not merge by recipe name.
+- Only probe input errors: three large TRANSFER.json receipts needing explicit selectors (non-blocking).
+- HF archive pinned snapshots on Clariden: `/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/release_v0/sources/hf_archive/{staging-v4 @8ee9cb2e4c880f450c69b9c45cd683765d4da755, harvest-20261025 @103c6dcd1e5dac6d72a1048462cd5b1864600cca}` (PULL_RECEIPT.json there records full commits).
+
+## Build
+- `scripts/release_v0_dataset/build_dataset.py` + `build.sbatch` + `COMMANDS.md`: credential-free CPU builder on Clariden reading only pinned sources, writing a fresh `--out` in the exact HF repo layout of PLAN §3 (tables/, data/real/, data/synthetic/, synthetic/RECIPE.json + BUILD/ + OPS.md, registry/, decisions/, manifests/ incl. MANIFEST.json, SHA256SUMS, BUILD_RECEIPT.json, COVERAGE.json, INPUT_LOCK.json), README.md card (owner items; selection roles per PLAN §3 card bullet; Astra label-quality sample 33/412; licence removed intentionally; known gaps section with placeholders for issue numbers), and HF `configs` YAML.
+- Original image bytes copied, never decoded/re-encoded; trainer payloads copied from prepared005 shards. Every closed file ≤1,000,000,000 B (target ≈512 MB), checked after close; overflow → part files.
+- No licence column in any table or view (drop `license`/`licence`/rights fields from every source).
+- Real-line view fields per PLAN §3 1–9, with `trained_in` = the three v0 model ids for rows drawn by prepared005 (train pools), and keyed `training_membership` (pool, trainer_line_id, consumed image/label variant). Evaluation rows (harvest dev/test, seal04 dev/test) carry their role explicitly.
+- Synthetic table per PLAN §3 synthetic fields, from A12 for all three splits; computed vs recovered fields separated; `font_sha16` where only that exists; nulls with reasons in `historical_unknown_fields`; `RECIPE.json` from A12 build evidence; `OPS.md` from probe OP_IMPLEMENTATIONS.json; configured vs realised distributions per split.
+- Resumable by stage/batch with idempotent outputs; `--smoke N` mode (a few books from each population + 1 synthetic shard) for a bounded first run.
+- `scripts/release_v0_dataset/accept_dataset.py`: byte checks (every manifest path/bytes/sha256) and the semantic checks of PLAN §3 acceptance (keys/status/reasons, FKs row→box→page→book, split + instrument reconciliation with registry, the counts above **by key**, image/label identities vs sources, references/coverage, sample feature replay, HF config load of each config using `datasets` if installed else pyarrow). Runs on a local build dir and on a downloaded copy.
+- Resource estimate (bytes per table, file counts, CPU-hours) printed by `--plan`.
+Tests on tiny fixtures (incl. no-licence assertion, shard cap, key reconciliation failure modes, smoke layout); delete pytest basetemp after.
+
+If you find a documentation or provenance gap, add it to docs/programme_20261028/RELEASE_v0/GAPS.md (what / where / impact / fix); don't fix it here.
+Write scope: `scripts/release_v0_dataset/`, `tests/release_v0_dataset/`, DATASET_BUILD_DESIGN.md/CROSSWALK.md updates, GAPS.md. Another Sol run is editing `scripts/release_v0_publish/`, `.gitignore`, `VERSIONS.md`, `MODELS.json`, `tests/train/` — do not touch those. No SSH/network/git. One-line report at the end.

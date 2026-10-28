@@ -12,7 +12,8 @@ class GlossapiOcrOptions(OcrOptions):
     kind: ClassVar[Literal["glossapi"]] = "glossapi"
     lang: list[str] = Field(default_factory=lambda: ["el", "en"])
     checkpoint: Path
-    codec: Path
+    codec: Path | None = None
+    config_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     recognition_mode: Literal["textlayer", "detector", "oriented"] = "textlayer"
     crop_scale: float = Field(default=3.0, gt=0, allow_inf_nan=False)
     device: str = "cpu"

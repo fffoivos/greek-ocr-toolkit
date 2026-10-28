@@ -14,19 +14,70 @@ ENTRIES=json.loads((ROOT/'greekocr/_vendor/origins.json').read_text())
     pytest.param(entry, marks=pytest.mark.skip(reason=
         'historical binding; green at opus/spellcheck@408ed69b9; see docs/cleanup_20261019/TEST_RECORDS.md'))
     if entry['path'] in {'greekocr/_vendor/bench/common.py', 'greekocr/_vendor/bench/e1_common.py',
-                         'greekocr/_vendor/bench/e1_readout.py', 'greekocr/_vendor/train/mix.py'}
+                         'greekocr/_vendor/bench/e1_readout.py'}
     else entry for entry in ENTRIES
 ], ids=lambda e:e['path'])
 def test_every_vendor_file_has_origin_and_exact_bytes(entry):
     path=ROOT/entry['path']
-    assert hashlib.sha256(path.read_bytes()).hexdigest()==entry['vendored_sha256']
+    if entry.get('record_type') == 'live':
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == entry['vendored_sha256']
+        mapping = ROOT/entry['consolidation']
+        assert entry['consolidation'] == 'greekocr/train/CONSOLIDATION.md'
+        assert hashlib.sha256(mapping.read_bytes()).hexdigest() == entry['consolidation_sha256']
+        assert entry['path'] in mapping.read_text()
+        source = ROOT/entry['origin']
+        if entry['origin'] == 'greekocr/_vendor/train/detector_common.py':
+            historical = next(e for e in ENTRIES if e.get('record_type') == 'historical'
+                              and e['path'] == entry['origin'])
+            assert entry['source_sha256'] == historical['source_sha256']
+            assert historical['historical_id'] in entry['historical_records']
+        else:
+            assert hashlib.sha256(source.read_bytes()).hexdigest() == entry['source_sha256']
+        return
+    if entry.get('record_type') != 'historical':
+        assert hashlib.sha256(path.read_bytes()).hexdigest()==entry['vendored_sha256']
     assert Path(entry['origin']).is_absolute() and len(entry['source_sha256'])==64
     if entry['transform']=='byte-identical':assert entry['source_sha256']==entry['vendored_sha256']
     if entry['commit'] is not None:assert len(entry['commit'])==40
     assert entry['path'] in (ROOT/'docs/INVENTORY.md').read_text()
-    if 'logic_sha256' in entry:
+    if 'logic_sha256' in entry and entry.get('record_type') != 'historical':
         from scripts.vendor_sources import logic_hash
         assert logic_hash(path.read_text())==entry['logic_sha256']
+
+
+def _canonical_sha(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def test_original_ledger_records_preserved():
+    # Bind every original field, including source path, source/vendored/logic SHAs
+    # and commit. Adding live records cannot silently rewrite historical identity.
+    original = [{k: v for k, v in e.items()
+                 if k not in {'record_type', 'historical_id', 'superseded_by'}}
+                for e in ENTRIES if e.get('record_type') != 'live']
+    assert len(original) == 1108
+    assert _canonical_sha(original) == '553cf98ce2b0c037052dc5ab03d80b276c3a70c886e87524efabb8b073a81676'
+
+
+def test_historical_and_live_references_are_complete():
+    live = [e for e in ENTRIES if e.get('record_type') == 'live']
+    by_path = {e['path']: e for e in live}
+    historical = {e['historical_id']: e for e in ENTRIES if e.get('record_type') == 'historical'}
+    assert len(by_path) == len(live) == 40
+    assert len(historical) == 17
+    for hid, old in historical.items():
+        original = {k: v for k, v in old.items()
+                    if k not in {'record_type', 'historical_id', 'superseded_by'}}
+        assert _canonical_sha(original) == hid
+        assert old['path'] in old['superseded_by']
+        for path in old['superseded_by']:
+            assert hid in by_path[path]['historical_records']
+    for current in live:
+        for hid in current['historical_records']:
+            assert current['path'] in historical[hid]['superseded_by']
+    # Exactly one current byte contract per path, including unaffected vendors.
+    current_paths = [e['path'] for e in ENTRIES if e.get('record_type') != 'historical']
+    assert len(set(current_paths)) == len(current_paths)
 
 
 def test_all_vendored_files_are_in_inventory():
@@ -36,7 +87,7 @@ def test_all_vendored_files_are_in_inventory():
     fixture_roots = {ROOT/Path(*Path(path).parts[:3]) for path in origins
                      if path.startswith('tests/fixtures/')}
     for root in (ROOT/'greekocr/_vendor', ROOT/'greekocr/deploy/docling_plugin',
-                 ROOT/'docs/origins', *sorted(fixture_roots)):
+                 ROOT/'docs/origins', ROOT/'greekocr/train', *sorted(fixture_roots)):
         for path in root.rglob('*'):
             if path.is_file() and '__pycache__' not in path.parts and path.name!='origins.json':
                 relative=str(path.relative_to(ROOT))

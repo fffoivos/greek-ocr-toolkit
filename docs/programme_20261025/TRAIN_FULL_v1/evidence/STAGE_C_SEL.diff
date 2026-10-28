@@ -1,0 +1,651 @@
+--- c826ff52/forecast.py
++++ new/forecast.py
+@@ -32,13 +32,15 @@
+         w=v['width_mult'];batch=64 if w==2 else 256
+         updates=8*math.ceil(1586454/batch)
+         stage_a_train=10*v['trial_training_seconds_stage_a']
+-        scale=71886/16787
++        scale=71887/16787
+         if measured:
+             new=next(r for r in measured['costs'] if r['width_mult']==w)
+             training=new['projected_train_hours']*3600
+             loss=new['loss_seconds_mean']; full=new['cer_seconds_mean'];ck=new['checkpoint_seconds']
+             archive_seconds=new['loss_checkpoint_seconds_mean']
+             archive_bytes=new['loss_checkpoint_bytes_max']
++            selection=new['selection_seconds_mean']
++            full_bytes=new['full_state_bytes']
+         else:
+             training=stage_a_train
+             loss=v['loss_eval_seconds_mean']*scale
+@@ -47,7 +49,9 @@
+             archive_seconds=1.  # scratch serialize+fsync+SHA+reload; unmeasured sensitivity
+             # FP32 state tensor payload rounded up + codec/config/ZIP allowance.
+             archive_bytes={1.:20_000_000,1.5:41_000_000,2.:70_000_000}[w]
+-        eval_s=254*loss+4*full
++            selection=full*437/71887  # provisional; fresh C smoke must time actual epoch loader
++            full_bytes={1.:60_000_000,1.5:115_000_000,2.:195_000_000}[w]
++        eval_s=254*loss+4*full+8*selection
+         durable_saves_upper=math.ceil(updates/20)+254+4+8
+         checkpoint_s=durable_saves_upper*ck+254*archive_seconds
+         base=(training+eval_s+checkpoint_s)/3600
+@@ -66,10 +70,30 @@
+             if fraction>=1:
+                 raise ValueError('restart process unstable; no finite forecast')
+             total=(base+startup/3600)/(1-fraction)
+-            cases[name]=dict(GPU_hours=total,wall_hours_excluding_queue=total,
++            # Count 23h segment renewals explicitly. Preemptions reset the
++            # warning timer; counting against aggregate run time is conservative.
++            usable_hours=23-600/3600
++            renewals=0
++            for _ in range(100):
++                count=max(0,math.ceil(total/usable_hours)-1)
++                if count==renewals:
++                    break
++                renewals=count
++                total=(base+(1+renewals)*startup/3600+renewals*ck/3600)/(1-fraction)
++            else:
++                raise ValueError('segment renewal forecast did not converge')
++            yields=math.ceil(hazard*total)+renewals
++            cases[name]=dict(segment_renewals=renewals,segment_usable_hours=usable_hours,
++                renewal_startup_GPU_h=renewals*startup/3600,
++                retained_yield_inodes_assumed=yields,
++                retained_yield_bytes_estimate=yields*full_bytes,
++                storage_bytes_estimate=254*archive_bytes+(7+yields)*full_bytes+1_000_000_000,
++                GPU_hours=total,wall_hours_excluding_queue=total,
+                 expected_interruptions=hazard*total,restart_seconds_assumed=startup,
+                 lost_seconds_per_interruption_assumed=lost,hazard_per_hour=hazard)
+         costs.append(dict(width_mult=w,batch=batch,updates=updates,training_GPU_h=training/3600,
++            selection_rows=437,selection_epoch_evaluations=8,selection_seconds=selection,
++            selection_GPU_h=8*selection/3600,full_state_bytes_estimate=full_bytes,
+             loss_eval_seconds=loss,loss_eval_GPU_h=254*loss/3600,CER_GPU_h=4*full/3600,
+             checkpoint_GPU_h=checkpoint_s/3600,eval_over_training=eval_s/training,
+             retained_loss_checkpoints=254,loss_checkpoint_bytes_estimate=archive_bytes,
+@@ -85,7 +109,8 @@
+             exposure_node_hours=exposure,preemptions=len(preempt),node_failures=len(nodefail),
+             interruptions_per_allocated_node_hour=rate,median_interrupted_seconds=statistics.median(allocation_seconds),
+             max_restart=max(int(r[8]) for r in parents),failed_parent_allocations=sum(r[2]=='FAILED' for r in parents)),
+-        budget=dict(owner_cap_GPU_h=350,used_GPU_h_owner_verified=437.63,already_over_cap_GPU_h=87.63),
++        budget=dict(historical_cap_GPU_h=350,used_GPU_h_owner_verified_before_C=437.63,already_over_historical_cap_GPU_h=87.63,
++            owner_stage_C_authority_GPU_h=82,authority='owner 2026-10-27: 82 GPU-h all three; smoke/accounting tracked separately'),
+         costs=costs,totals={k:sum(c['scenarios'][k]['GPU_hours'] for c in costs) for k in ('low','expected','high')},
+         assumptions=['Stage A training rates; Stage B dev-only timings scaled by all-panel row ratio until real C smoke',
+             'row-count scaling does not measure test width/length/CPU-CTC cost; refresh mandatory',
+@@ -93,7 +118,11 @@
+             'startup 30/120/600 seconds and checkpoint .15 seconds are sensitivity assumptions until C smoke',
+             '254 retained model archives: provisional 1 second each; bytes rounded estimates; refresh from new-seal smoke',
+             'same node hazard applied to non-exclusive single-GPU jobs is unqualified; queue delay excluded',
+-            'full 23h allocation warning yields after all work is durable; additional starts beyond time limit not budget-free'],
++            'eight seal04-dev437 epoch selection CER passes explicitly included; fresh smoke measures the actual loader',
++            '23h minus 600s usable segments; ceil(total/usable)-1 conservative renewals include startup+yield save; preemptions reset actual timer',
++            'yield hardlinks retain old full-state inodes after rolling replacement; assume every forecast interruption yields (conservative)',
++            'storage estimate includes 254 models + four CER full states + best/last/rolling + all forecast yields + 1GB logs margin; no bound on arbitrary requeues',
++            'late-run archive verification and full-size sampler startup remain unmeasured; high is not a bound'],
+         options_if_over_25_percent=['keep full cadence and approve measured cost',
+             'owner can authorize a coarser loss cadence in a new bound plan',
+             'optimize identical full-coverage evaluator then repeat qualification; no silent subsampling'])
+--- c826ff52/run.py
++++ new/run.py
+@@ -28,7 +28,7 @@
+     return pools
+ 
+ 
+-def install(runtime_path, *, evaluator=None, study=False):
++def install(runtime_path, *, evaluator=None, study=False, selection_pool=None):
+     from train import train as trainer
+     import s1_segment
+     from full_hook import segment_class
+@@ -38,10 +38,17 @@
+     panels = ('seal04_dev', 'harvest_dev') if study else None
+     names = {c['name'] for c in runtime['components']} | set(panels) if study else None
+     pools = load_pools(runtime, names)
+-    if study:
++    selection = 'seal04_dev' if study else (selection_pool or 'validation')
++    if selection not in ('validation', 'seal04_dev'):
++        raise ValueError('unsupported selection pool')
++    if selection == 'seal04_dev':
+         # S1's epoch diagnostic requires split=val. This is an in-memory role
+         # view of the exact seal04 dev bytes/labels, never an evaluation filter.
+         pools['validation'] = [dict(r, split='val') for r in pools['seal04_dev']]
++    selection_binding = dict(name=selection, pool=runtime['pools'][selection],
++        rows=len(pools['validation']),
++        identity_sha256=digest([(r['line_id'], r['label_ids']) for r in pools['validation']]), role='val',
++        rule='best.pt and bad_epochs use only this loader CER; tests report only')
+     mix = dict(seed=runtime['seed'], codec_version=runtime['codec_version'], components=runtime['components'])
+     if sum(c['fraction'] for c in mix['components'] if c['kind'] == 'synthetic') != .5:
+         raise ValueError('S1 synthetic fraction changed')
+@@ -76,13 +83,14 @@
+             # These fields are validated by the original Segment constructor.
+             recipe_sha256s=[digest(dict(hook=sha(ROOT / 'full_hook.py'), run=sha(__file__),
+                                         data=runtime['_sha256']))],
+-            validation=runtime['pools']['seal04_dev' if study else 'validation'],
++            validation=runtime['pools'][selection],
+             epochs={str(epoch): {role: dict(rows=len(rr), distinct_lines=len({r['line_id'] for r in rr}),
+                 real_rows=sum(mix['components'][r['_component']]['kind'] == 'real' for r in rr) if role == 'train' else len(rr),
+                 draw_sha256=digest([
+                 (r['line_id'], r.get('_component'), r.get('_pool_index')) for r in rr]))
+                 for role, rr in roles.items()} for epoch, roles in assembled.items()})
+ 
++    trainer.full_selection = selection_binding
+     trainer.full_pools = pools
+     trainer.validate = validate
+     trainer.load_rows = load_rows
+--- c826ff52/stage_c.py
++++ new/stage_c.py
+@@ -44,6 +44,7 @@
+         cer_steps=cer, loss_every_drawn_lines=par['bs']*2 if (smoke or fixture) else 50000,
+         loss_checkpoint_policy='every loss point including final; immutable model+codec+config; SHA in loss record',
+         durable_every=2 if (smoke or fixture) else 20, smoke=smoke, fixture=fixture,
++        selection_pool='seal04_dev',
+         instruments=list(PANELS), seed_reruns='SKIPPED by owner 2026-10-26; variance unmeasured',
+         test_policy='report-only; no selection, stopping or parameter changes')
+ 
+@@ -109,7 +110,7 @@
+                 or not data_package_matches(read(runtime_path).get('package_sha256'), runtime_path)
+                 or config != make_run(runtime_path, Path(bound(config['adopted'])).stem, smoke=config['smoke'])):
+             raise ValueError('foreign/changed Stage C run')
+-    trainer, rt = run.install(runtime_path)
++    trainer, rt = run.install(runtime_path, selection_pool='seal04_dev')
+     trainer._runtime()
+     torch = trainer.torch
+     if bool(rt.get('mock')) != fixture or config['fixture'] != fixture:
+@@ -150,12 +151,20 @@
+         raise ValueError('full run must have exactly 254 loss points')
+     trainer.PATIENCE = args.epochs+1
+     output = Path(output)
+-    binding = dict(config=config, loss_plan=args.loss_plan, evaluation_steps=args.cer_steps)
++    selection = trainer.full_selection
++    if selection['name'] != 'seal04_dev' or selection['pool'] != rt['pools']['seal04_dev']:
++        raise ValueError('Stage C selection must be the exact seal04 dev view')
++    immutable(output/'SELECTION_POOL.json', selection)
++    print('[selection] seal04_dev rows=%d identity=%s' %
++          (selection['rows'], selection['identity_sha256']), flush=True)
++    binding = dict(config=config, loss_plan=args.loss_plan, evaluation_steps=args.cer_steps, selection=selection)
+     immutable(output/'RUN_BINDING.json',binding)
+     atomic(output/'LOSS_CADENCE.json',args.loss_plan)
+     # These rows and the epoch diagnostic are the inherited seal04 dev only;
+     # neither held-out test panel participates in best/patience.
+-    status = trainer.train(args)
++    from selection_diagnostics import instrument
++    with instrument(trainer, selection, output):
++        status = trainer.train(args)
+     if status:
+         return status
+     ck = torch.load(output/'segment.pt',map_location='cpu',weights_only=False)
+@@ -239,6 +248,9 @@
+         # Python/torch/data startup and is polled by the Segment boundary hook.
+         os.environ['S1_TRACE']='1' if config['smoke'] else '0'
+         os.environ.pop('S1_FORCE_SPLIT_STEP',None)
++        from memory_diagnostics import MemoryMonitor
++        monitor = MemoryMonitor(output, info)
++        monitor.start()
+         try:
+             stop=os.environ.get('TF_C_STOP')
+             if stop and Path(stop).exists() and not (output/'segment.pt').exists():
+@@ -247,6 +259,7 @@
+             else:
+                 status=execute(config,output,fixture=fixture)
+             if status==75:
++                monitor.sample('yield')
+                 checkpoint=None
+                 if (output/'segment.pt').exists():
+                     archive=output/'yields'/('%s-%s-%d.pt'%(job,restart,time.time_ns()))
+@@ -264,6 +277,7 @@
+             atomic(output/('FAILURE_%d.json'%time.time_ns()),dict(error=repr(e),config=config))
+             raise
+         finally:
++            info['memory_receipt'] = spec(monitor.close())
+             info['ended_unix']=time.time()  # measured worker end, never controller upper bound
+             atomic(allocation,info)
+ 
+@@ -372,6 +386,9 @@
+     from stage_c_isolation import reconcile
+     trainer._runtime()
+     costs=[]
++    memory=[]
++    selection_reports=[]
++    runtime=read(bound(p['runtime']))
+     for width in (1.,1.5,2.):
+         pair=[next(e for e in p['runs'] if e['name']=='w%g-%s'%(width,role)) for role in ('control','requeue')]
+         checks=[]
+@@ -380,6 +397,29 @@
+             cfg=read(bound(e['config']))
+             c=complete(e['output'],cfg)
+             ck=torch.load(bound(c['checkpoint']),map_location='cpu',weights_only=False)
++            selection=read(Path(e['output'])/'SELECTION_POOL.json')
++            from run import load_pools
++            selected=load_pools(runtime, {'seal04_dev'})['seal04_dev']
++            from common import digest
++            expected_identity=digest([(r['line_id'],r['label_ids']) for r in selected])
++            if (selection['name']!='seal04_dev' or selection['pool']!=runtime['pools']['seal04_dev']
++                    or selection['rows']!=437 or selection['identity_sha256']!=expected_identity
++                    or ck['receipt']['validation']!=selection['pool']
++                    or c['binding']['selection']!=selection):
++                raise ValueError('actual selection pool/provenance is not seal04 dev437')
++            epoch_eval=[spec(f) for f in Path(e['output']).glob('SELECTION_EVAL_*.json')]
++            if not epoch_eval or any(read(bound(f))['selection']!=selection for f in epoch_eval):
++                raise ValueError('actual best.pt loader evaluation attestation missing/changed')
++            selection_reports.append(dict(run=e['name'], selection=selection, evaluations=epoch_eval))
++            from memory_diagnostics import summarize
++            allocations=[read(f) for f in Path(e['output']).glob('ALLOCATION_*.json')]
++            # A killed worker cannot emit a final sample; preserve that receipt
++            # and require end diagnostics for every allocation with a measured worker end.
++            if any('ended_unix' in a and 'memory_receipt' not in a for a in allocations):
++                raise ValueError('completed segment memory receipt missing')
++            refs=[a['memory_receipt'] for a in allocations if 'memory_receipt' in a]
++            m=summarize(refs)
++            memory.append(dict(run=e['name'], **m))
+             if (ck['state_sha256']!=trainer.checkpoint_state_sha256(ck) or c['mock']
+                     or ck['binding']['device']!='cuda' or ck['binding']['workers']!=6):
+                 raise ValueError('invalid real CUDA checkpoint')
+@@ -425,7 +465,11 @@
+         mean=sum(t['seconds'] for t in timing)/sum(t['samples'] for t in timing)
+         batch=read(bound(pair[0]['config']))['parameters']['bs']
+         train=8*math.ceil(1586454/batch)*mean
+-        eval_seconds=254*statistics.mean(loss)+4*statistics.mean(full)
++        selection_times=[read(f)['seconds'] for f in Path(pair[0]['output']).glob('SELECTION_EVAL_*.json')]
++        if len(selection_times)<2:
++            raise ValueError('both smoke epoch selection evaluations must be timed')
++        selection_mean=statistics.mean(selection_times)
++        eval_seconds=254*statistics.mean(loss)+4*statistics.mean(full)+8*selection_mean
+         checkpoint=read(Path(pair[0]['output'])/'CHECKPOINT_COST.json')
+         loss_records=[read(bound(s)) for s in completions[0]['loss_evaluations']]
+         saves=[r['checkpoint_save']['seconds'] for r in loss_records if r['checkpoint_save']['created']]
+@@ -436,7 +480,9 @@
+         starts=[read(f)['seconds'] for f in resumed.glob('STARTUP_*.json') if read(f)['first_step']>1]
+         if not starts:
+             raise ValueError('measured resume startup missing')
+-        costs.append(dict(width_mult=width,loss_seconds_mean=statistics.mean(loss),loss_seconds_max=max(loss),
++        costs.append(dict(width_mult=width,selection_seconds_mean=selection_mean,
++            selection_rows=437,selection_epoch_evaluations=8,
++            full_state_bytes=max(c['checkpoint']['bytes'] for c in completions),loss_seconds_mean=statistics.mean(loss),loss_seconds_max=max(loss),
+             cer_seconds_mean=statistics.mean(full),update_seconds=mean,checkpoint_seconds=checkpoint['seconds'],
+             loss_checkpoint_seconds_mean=statistics.mean(saves),loss_checkpoint_seconds_max=max(saves),
+             loss_checkpoint_bytes_max=archive_bytes,projected_loss_checkpoint_GPU_h=254*statistics.mean(saves)/3600,
+@@ -446,6 +492,7 @@
+             restart_startup_seconds_mean=statistics.mean(starts),restart_startup_seconds_max=max(starts)))
+     report=dict(status='BIT_IDENTICAL',mock=False,package_sha256=p['payload_sha256'],
+         runtime_sha256=p['runtime']['sha256'],plan=spec(plan_path),costs=costs,
++        selection=selection_reports,memory=memory,
+         isolation=reconcile(plan_path,sacct,sacct_sha),
+         signal='actual scancel --batch --signal=TERM -> persistent request -> optimizer boundary -> 75 -> scontrol requeue')
+     atomic(out,report)
+--- /dev/null
++++ new/memory_diagnostics.py
+@@ -0,0 +1,156 @@
++"""Read-only Linux job-cgroup + aggregate lane-tree PSS diagnostics.
++
++Unavailable/racing counters are recorded, never invented or used to alter training.
++A smoke readout reports actual counters, including unlimited limits and
++unavailable measurements explicitly; diagnostics never select/stop a model.
++"""
++import os
++from pathlib import Path
++import re
++import threading
++import time
++from common import atomic
++
++
++def cgroups(proc=Path('/proc'), job_id=None):
++    memberships = [r.split(':', 2) for r in (proc/'self/cgroup').read_text().splitlines()]
++    mounts = [r.split() for r in (proc/'self/mountinfo').read_text().splitlines()]
++    found = []
++    for fields in mounts:
++        sep = fields.index('-')
++        fs, options = fields[sep+1], fields[sep+3]
++        if fs not in ('cgroup2', 'cgroup') or (fs == 'cgroup' and 'memory' not in options.split(',')):
++            continue
++        member = next((r[2] for r in memberships if
++            (fs == 'cgroup2' and r[0] == '0') or (fs == 'cgroup' and 'memory' in r[1].split(','))), None)
++        if member is None:
++            continue
++        root, mount = Path(fields[3]), Path(fields[4])
++        try:
++            current = mount / Path(member).relative_to(root)
++        except ValueError:
++            continue
++        while current == mount or mount in current.parents:
++            is_job = bool(job_id and re.search(r'(?:^|[_.-])job[_-]'+re.escape(str(job_id))+r'(?:[_.-]|$)', current.name))
++            found.append((current, fs, is_job))
++            if current == mount:
++                break
++            current = current.parent
++    return found
++
++
++def read_cgroup(path, version, is_job=False):
++    result = dict(path=str(path), version=version, job_scope=is_job)
++    files = ('memory.peak', 'memory.max', 'memory.current', 'memory.events') if version == 'cgroup2' else (
++        'memory.max_usage_in_bytes', 'memory.limit_in_bytes', 'memory.usage_in_bytes',
++        'memory.failcnt', 'memory.oom_control')
++    result['raw'], result['errors'] = {}, {}
++    for name in files:
++        try:
++            result['raw'][name] = (path/name).read_text().strip()
++        except OSError as e:
++            result['errors'][name] = str(e)
++    raw = result['raw']
++    if version == 'cgroup2':
++        for name in ('peak', 'max', 'current'):
++            value = raw.get('memory.'+name)
++            result[name+'_bytes'] = int(value) if value and value.isdigit() else value
++        result['events'] = {k:int(v) for k,v in (r.split() for r in raw.get('memory.events','').splitlines())}
++    else:
++        for name, key in [('peak','max_usage_in_bytes'), ('max','limit_in_bytes'), ('current','usage_in_bytes')]:
++            value = raw.get('memory.'+key)
++            result[name+'_bytes'] = int(value) if value and value.isdigit() else None
++        result['events'] = {k:int(v) for k,v in (r.split() for r in raw.get('memory.oom_control','').splitlines())}
++        result['failcnt'] = raw.get('memory.failcnt')
++    return result
++
++
++def tree_pss(pid, proc=Path('/proc')):
++    todo, seen, records, errors = [pid], set(), [], []
++    while todo:
++        current = todo.pop()
++        if current in seen:
++            continue
++        seen.add(current)
++        try:
++            children = (proc/str(current)/'task'/str(current)/'children').read_text().split()
++            todo.extend(map(int,children))
++            values = (proc/str(current)/'smaps_rollup').read_text().splitlines()
++            pss = next(int(r.split()[1])*1024 for r in values if r.startswith('Pss:'))
++            records.append(dict(pid=current, pss_bytes=pss))
++        except (OSError, StopIteration, ValueError) as e:
++            errors.append(dict(pid=current,error=str(e)))
++    return dict(root_pid=pid, processes=records, pss_bytes=sum(r['pss_bytes'] for r in records), errors=errors)
++
++
++class MemoryMonitor:
++    def __init__(self, output, allocation, *, interval=30., proc=Path('/proc')):
++        self.output, self.allocation, self.proc = Path(output), dict(allocation), proc
++        self.interval, self.samples, self.errors = interval, [], []
++        self.lock, self.stop = threading.Lock(), threading.Event()
++        self.thread = None
++        self.path = self.output/('MEMORY_%s_%s_%d.json' %
++            (allocation['job_id'], allocation['restart_count'], time.time_ns()))
++
++    def sample(self, reason):
++        with self.lock:
++            item = dict(reason=reason, unix=time.time(), tree=tree_pss(os.getpid(),self.proc), cgroups=[])
++            try:
++                item['cgroups'] = [read_cgroup(*c) for c in cgroups(self.proc,self.allocation['job_id'])]
++            except (OSError, ValueError) as e:
++                item['cgroup_error'] = str(e)
++            self.samples.append(item)
++            atomic(self.path, dict(schema='TRAIN_FULL-memory-v1',allocation=self.allocation,
++                samples=self.samples, note='PSS sum over live lane descendants; job counters shared across batch/step cgroups; unavailable counters explicit'))
++
++    def start(self):
++        self.sample('start')
++        def loop():
++            while not self.stop.wait(self.interval):
++                try:
++                    self.sample('periodic')
++                except Exception as e:
++                    self.errors.append(repr(e))
++        self.thread = threading.Thread(target=loop,daemon=True)
++        self.thread.start()
++
++    def close(self):
++        self.stop.set()
++        if self.thread:
++            self.thread.join()
++        self.sample('end')
++        if self.errors:
++            data = __import__('json').loads(self.path.read_text())
++            data['monitor_errors'] = self.errors
++            atomic(self.path,data)
++        return self.path
++
++
++def summarize(paths):
++    from common import bound, read, spec
++    reports = [read(bound(s)) for s in paths]
++    samples = [s for r in reports for s in r['samples']]
++    jobs = [g for s in samples for g in s['cgroups'] if g['job_scope']]
++    complete = [s for s in samples if s['tree']['processes'] and not s['tree']['errors']]
++    peaks = [g['peak_bytes'] for g in jobs if isinstance(g.get('peak_bytes'),int)]
++    limits = [g['max_bytes'] for g in jobs if isinstance(g.get('max_bytes'),int)]
++    problems = [r.get('monitor_errors',[]) for r in reports if r.get('monitor_errors')]
++    if not jobs:
++        problems.append('job scope not visible in cgroup hierarchy')
++    if not complete:
++        problems.append('no complete process-tree PSS sample')
++    if any(g['errors'] or 'oom_kill' not in g['events'] for g in jobs):
++        problems.append('some job counters unavailable; inspect raw receipts')
++    if not any(s['reason']=='end' for s in samples):
++        problems.append('end sample unavailable')
++    peak = max(peaks) if peaks else None
++    limit = min(limits) if limits else None
++    events = {k:max((g['events'][k] for g in jobs if k in g['events']),default=None)
++              for k in ('oom','oom_kill')}
++    return dict(receipts=paths, capture_status='PARTIAL' if problems else 'COMPLETE',
++        diagnostic_problems=problems, job_peak_bytes=peak, job_limit_bytes=limit,
++        job_limits_observed=sorted({str(g.get('max_bytes')) for g in jobs}),
++        job_headroom_bytes=limit-peak if peak is not None and limit is not None else None,
++        events_max=events, aggregate_pss_bytes_max=max((s['tree']['pss_bytes'] for s in complete),default=None),
++        complete_pss_samples=len(complete), total_samples=len(samples),
++        capacity_qualified=False, limitation='short smoke only; full-size epoch/long-lived loader headroom remains unmeasured; unlimited/inaccessible limits do not prove enforcement')
+--- /dev/null
++++ new/selection_diagnostics.py
+@@ -0,0 +1,30 @@
++"""Attest and time the actual epoch loader feeding best.pt; no metric changes."""
++from contextlib import contextmanager
++from pathlib import Path
++import time
++from common import atomic, digest
++
++
++@contextmanager
++def instrument(trainer, selection, output):
++    import eval_cer
++    original = eval_cer.evaluate
++
++    def measured(model, loader, *args, **kwargs):
++        rows = loader.dataset.rows
++        identity = digest([(r['line_id'], r['label_ids']) for r in rows])
++        if len(rows) != selection['rows'] or identity != selection['identity_sha256']:
++            raise ValueError('best.pt selection loader differs from attested seal04 dev')
++        tick = time.monotonic()
++        result = original(model, loader, *args, **kwargs)
++        seconds = time.monotonic() - tick
++        atomic(Path(output)/('SELECTION_EVAL_%d.json' % time.time_ns()),
++            dict(selection=selection, seconds=seconds, result=result,
++                 purpose='epoch CER used by best.pt/best metric/bad_epochs; no test panels'))
++        return result
++
++    eval_cer.evaluate = measured
++    try:
++        yield
++    finally:
++        eval_cer.evaluate = original
+--- /dev/null
++++ new/tests/test_memory_diagnostics.py
+@@ -0,0 +1,66 @@
++from pathlib import Path
++import os
++import sys
++import pytest
++PKG=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(PKG))
++from common import atomic,read,spec
++from memory_diagnostics import cgroups,read_cgroup,tree_pss,MemoryMonitor,summarize
++
++
++def fixture_proc(tmp_path):
++    proc=tmp_path/'proc';(proc/'self').mkdir(parents=True)
++    mount=tmp_path/'cgroup';job=mount/'uid_1/job_123';step=job/'step_0';step.mkdir(parents=True)
++    (proc/'self/cgroup').write_text('0::/slurm/uid_1/job_123/step_0\n')
++    (proc/'self/mountinfo').write_text(f'29 23 0:26 /slurm {mount} rw - cgroup2 cgroup rw\n')
++    for p in (step,job,mount/'uid_1',mount):
++        for key,value in {'memory.peak':'9000','memory.max':'110000','memory.current':'8000','memory.events':'low 0\nhigh 0\nmax 0\noom 0\noom_kill 0'}.items():
++            (p/key).write_text(value)
++    for pid,children,pss in [(os.getpid(),'42',200),(42,'',100)]:
++        task=proc/str(pid)/'task'/str(pid);task.mkdir(parents=True)
++        (task/'children').write_text(children)
++        (proc/str(pid)/'smaps_rollup').write_text(f'Rss: 999 kB\nPss: {pss} kB\n')
++    return proc,job
++
++
++def test_job_scope_mount_root_mapping_PSS_shared_RSS_and_yield_end_receipts(tmp_path):
++    proc,job=fixture_proc(tmp_path)
++    found=cgroups(proc,'123')
++    assert [p for p,v,is_job in found if is_job]==[job]
++    assert tree_pss(os.getpid(),proc)['pss_bytes']==300*1024
++    output=tmp_path/'out';output.mkdir()
++    m=MemoryMonitor(output,dict(job_id='123',restart_count=0),proc=proc,interval=.01)
++    m.start();m.sample('periodic');m.sample('yield');path=m.close()
++    assert {s['reason'] for s in read(path)['samples']} >= {'start','periodic','yield','end'}
++    r=summarize([spec(path)])
++    assert r['job_peak_bytes']==9000 and r['job_limit_bytes']==110000
++    assert r['aggregate_pss_bytes_max']==300*1024 and r['events_max']==dict(oom=0,oom_kill=0)
++    assert r['capacity_qualified'] is False
++    (job/'memory.events').write_text('oom 1\noom_kill 1')
++    assert read_cgroup(job,'cgroup2',True)['events']['oom_kill']==1
++
++
++def test_missing_counters_or_unreadable_PSS_never_fabricate_memory(tmp_path):
++    proc,job=fixture_proc(tmp_path)
++    (job/'memory.peak').unlink()
++    r=read_cgroup(job,'cgroup2',True)
++    assert 'memory.peak' in r['errors'] and r['peak_bytes'] is None
++    output=tmp_path/'out';output.mkdir()
++    m=MemoryMonitor(output,dict(job_id='123',restart_count=1),proc=proc)
++    m.start();path=m.close()
++    partial=summarize([spec(path)])
++    assert partial['capture_status']=='PARTIAL' and partial['job_peak_bytes'] is None
++    assert partial['diagnostic_problems']
++    (proc/'42/smaps_rollup').unlink()
++    assert tree_pss(os.getpid(),proc)['errors'][0]['pid']==42
++
++
++def test_unlimited_job_cgroup_is_reported_not_mislabelled_enforced(tmp_path):
++    proc,job=fixture_proc(tmp_path)
++    (job/'memory.max').write_text('max')
++    output=tmp_path/'out';output.mkdir()
++    m=MemoryMonitor(output,dict(job_id='123',restart_count=1),proc=proc)
++    m.start();path=m.close()
++    r=summarize([spec(path)])
++    assert r['job_limit_bytes'] is None and r['job_headroom_bytes'] is None
++    assert r['job_limits_observed']==['max'] and r['capacity_qualified'] is False
+--- /dev/null
++++ new/tests/test_stage_c_forecast.py
+@@ -0,0 +1,25 @@
++from pathlib import Path
++import sys
++PKG=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(PKG))
++from common import atomic
++from forecast import forecast
++
++
++def test_epoch_validation_renewals_and_retained_yield_inodes_are_counted(tmp_path):
++    costs=[dict(width_mult=w,projected_train_hours=t,loss_seconds_mean=60.,
++        cer_seconds_mean=100.,checkpoint_seconds=.1,loss_checkpoint_seconds_mean=.1,
++        loss_checkpoint_bytes_max=1000,selection_seconds_mean=2.,full_state_bytes=10000,
++        restart_startup_seconds_mean=100.,restart_startup_seconds_max=150.)
++        for w,t in [(1.,12.),(1.5,13.),(2.,28.)]]
++    smoke=tmp_path/'smoke.json';atomic(smoke,dict(costs=costs))
++    r=forecast(PKG.parent/'evidence',tmp_path/'forecast.json',smoke)
++    for row in r['costs']:
++        assert row['selection_GPU_h']==16/3600
++        for name,case in row['scenarios'].items():
++            assert case['retained_yield_bytes_estimate']==case['retained_yield_inodes_assumed']*10000
++            assert case['storage_bytes_estimate']>254000+case['retained_yield_bytes_estimate']
++            if row['width_mult']==2:
++                assert case['segment_renewals']>=1
++                assert case['renewal_startup_GPU_h']>0
++    assert r['budget']['owner_stage_C_authority_GPU_h']==82
+--- /dev/null
++++ new/tests/test_stage_c_selection.py
+@@ -0,0 +1,88 @@
++"""Regression for Astra H1: observe the loader that actually drives best.pt."""
++from pathlib import Path
++from types import SimpleNamespace
++import sys
++import pytest
++PKG=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(PKG))
++from common import atomic,bound,digest,read,spec
++from test_package import mock_runtime
++
++
++def distinct_runtime(tmp_path):
++    from prepare import write_pool
++    import run
++    path=mock_runtime(tmp_path)
++    rt=read(path)
++    rows=run.load_pools(rt,{'seal04_dev'})['seal04_dev'][:3]
++    # Legacy validation is 8 different line IDs; seal04 dev is 3.
++    rt['pools']['seal04_dev']=write_pool(tmp_path/'distinct_seal04',rows)
++    atomic(path,rt)
++    return path
++
++
++def test_stage_c_best_loader_provenance_and_all_reporting_panels(tmp_path,monkeypatch):
++    import run
++    import mock_worker
++    import stage_c
++    from train import train as trainer
++    import s1_segment
++    monkeypatch.setattr(s1_segment,'Segment',s1_segment.Segment)
++    monkeypatch.setattr(run,'install',mock_worker.mock_install)
++    path=distinct_runtime(tmp_path)
++    config=stage_c.make_run(path,'w1-h13',fixture=True)
++    config['parameters']['epochs']=8
++    config.update(total_updates=32,target_drawn_lines=config['parameters']['epoch_rows']*8,cer_steps=[8,16,24,32])
++    seen=[]
++    import eval_cer
++    def epoch_eval(model,loader,*args,**kwargs):
++        ids=[r['line_id'] for r in loader.dataset.rows]
++        assert ids==['seal04_dev0','seal04_dev1','seal04_dev2']
++        assert all(r['split']=='val' for r in loader.dataset.rows)
++        seen.append(ids)
++        return dict(cer=len(seen)*.01,blank_rate=0.)
++    monkeypatch.setattr(eval_cer,'evaluate',epoch_eval)
++    for k in ('S1_DEADLINE_EPOCH','TF_C_STOP','S1_FORCE_SPLIT_EPOCH','S1_FORCE_SPLIT_STEP'):
++        monkeypatch.delenv(k,raising=False)
++    output=tmp_path/'full'
++    assert stage_c.execute(config,output,fixture=True)==0
++    import torch
++    state=torch.load(output/'segment.pt',map_location='cpu',weights_only=False)
++    assert len(seen)==8 and state['global_step']==32
++    assert state['best']==dict(metric=.01,epoch=1) and state['bad_epochs']==7
++    best=torch.load(output/'best.pt',map_location='cpu',weights_only=False)
++    assert best['epoch']==1
++    rt=read(path)
++    assert state['receipt']['validation']==rt['pools']['seal04_dev']
++    assert state['receipt']['epochs']['1']['val']['rows']==3
++    selection=read(output/'SELECTION_POOL.json')
++    assert selection['rows']==3 and selection['name']=='seal04_dev'
++    assert len(list(output.glob('SELECTION_EVAL_*.json')))==8
++    complete=stage_c.complete(output,config)
++    for item in complete['evaluations']+complete['loss_evaluations']:
++        assert set(read(bound(item))['instruments'])==set(stage_c.PANELS)
++    assert (output/'last.pt').exists()
++
++
++def test_same_stage_b_view_full_reporting_and_full_pass_enforcement(tmp_path,monkeypatch):
++    import run
++    from train import train as trainer
++    import s1_segment
++    monkeypatch.setattr(s1_segment,'Segment',s1_segment.Segment)
++    path=distinct_runtime(tmp_path)
++    b,rt=run.install(path,study=True)
++    b_selection=b.full_selection.copy()
++    b_rows=b.shared_validation(None,None)
++    c,rt=run.install(path,selection_pool='seal04_dev')
++    assert c.full_selection==b_selection and c.shared_validation(None,None)==b_rows
++    assert {'seal04_test','harvest_test'}<=set(c.full_pools)
++    # Exercise the actual provenance branch with production-mode full-pass policy.
++    rt['mock']=False;rt['train_rows']=8
++    mix=c.validate(path)
++    real=c.full_pools['real'];syn=c.full_pools['synthetic']
++    rows=[dict(r,_component=ci,_pool_index=i) for ci,pool in enumerate((real,syn)) for i,r in enumerate(pool)]
++    args=SimpleNamespace(full_smoke=False)
++    c.training_provenance(args,mix,{1:{'train':rows}})
++    rows[0]=dict(rows[1])
++    with pytest.raises(ValueError,match='exactly one pass'):
++        c.training_provenance(args,mix,{1:{'train':rows}})

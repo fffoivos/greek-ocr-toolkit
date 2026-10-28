@@ -1,0 +1,12 @@
+# REL0-S2b — Sol: close REL0-S2 follow-ups (provenance contract, package data, historical adapters), 28 Oct 2026
+
+Context: REL0-S2 delivered `greekocr/train/` + Docling loader (report `tests/train/REL0_S2_REPORT.md`; plan docs/programme_20261028/RELEASE_v0/PLAN.md rev 2 §2; gaps docs/programme_20261028/RELEASE_v0/GAPS.md "Checkpoint A" items 3, 4, 5). The coordinator authorises these follow-ups:
+
+1. **Provenance contract (GAPS A3).** Update `greekocr/_vendor/origins.json` and `tests/test_provenance_cli_api.py` so they describe the consolidated live paths: keep every historical source identity (origin path + original SHA256) as historical records, add the new live-path entries (pointing to `greekocr/train/CONSOLIDATION.md` and its SHAs), and make the test check the new contract (live bytes match the ledger; historical identities preserved and referenced). Do not weaken unrelated assertions. Target: the full touched suite from REL0-S2 passes with 0 failures.
+2. **Package data (GAPS A5).** Add `greekocr.train` package-data patterns (codec JSON, schema, CONSOLIDATION.md, LEGACY_COMPARISON.diff if needed at runtime) to `pyproject.toml`; build a wheel into a temp dir and verify the files are present and `import greekocr.train` + codec load work from the installed wheel in a throwaway venv/target dir; delete the temp build after.
+3. **Historical adapters (GAPS A4).** Do not fabricate adapters. In `greekocr/train/` make the optional historical overlay/selection modes that need `bench.e4_recovery`, `e4_wave1c`, `e4_replay`, `s1_scaling` fail with a clear "historical mode not included in this release; see sealed package <path>" error when requested, and document the scope in CONSOLIDATION.md. Inference/export/training paths used by the release must be unaffected (equivalence tests still pass).
+4. Rerun `scripts/release_v0_publish/inventory.py` at the end and refresh its receipt.
+
+Tests: the REL0-S2 touched-suite command (in REL0_S2_REPORT.md) plus the new tests; report counts; delete pytest basetemps after passing. Update GAPS.md statuses for A3/A4/A5 (resolved / scoped out) with one line each.
+If you find a documentation or provenance gap, add it to docs/programme_20261028/RELEASE_v0/GAPS.md (what / where / impact / fix); don't fix it here.
+Write scope: `greekocr/_vendor/origins.json`, `tests/test_provenance_cli_api.py`, `pyproject.toml`, `greekocr/train/`, `tests/train/`, `scripts/release_v0_publish/` receipts, GAPS.md. No git operations. One-line report at the end.

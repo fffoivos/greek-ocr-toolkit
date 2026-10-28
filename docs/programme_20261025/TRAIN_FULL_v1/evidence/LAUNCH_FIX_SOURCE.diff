@@ -1,0 +1,136 @@
+--- parent/chain.py
++++ current/chain.py
+@@ -41,6 +41,7 @@
+     if (output / 'COMPLETE.json').exists():
+         raise ValueError('run is already complete; no continuation allocation needed')
+     if args.mode == 'train':
++        from verify import package_matches
+         # These are concrete signed-off evidence files supplied by the coordinator.
+         review = read(args.review)
+         if review.get('verdict') != 'PASS' or review.get('package_sha256') != sha(ROOT / 'PAYLOAD.json'):
+@@ -52,7 +53,7 @@
+             raise ValueError('smoke identity missing')
+         if (review.get('runtime_sha256') != sha(args.runtime)
+                 or identity.get('runtime_sha256') != sha(args.runtime)
+-                or identity.get('package_sha256') != sha(ROOT / 'PAYLOAD.json')):
++                or not package_matches(identity.get('package_sha256'))):
+             raise ValueError('review/smoke applies to another data population or package')
+         if not args.owner_go:
+             raise ValueError('owner launch go required')
+--- parent/job.sbatch
++++ current/job.sbatch
+@@ -18,7 +18,7 @@
+ source "$TF_PACKAGE/runtime_env.sh"
+ "$TF_PYTHON" -B "$TF_PACKAGE/verify.py"
+ export S1_DEADLINE_EPOCH
+-S1_DEADLINE_EPOCH=$(squeue -h -j "$SLURM_JOB_ID" -o %e | xargs -I{} date -d '{}' +%s)
++S1_DEADLINE_EPOCH=$(SLURM_TIME_FORMAT=standard squeue -h -j "$SLURM_JOB_ID" -o %e | xargs -I{} date -d '{}' +%s)
+ [[ "$S1_DEADLINE_EPOCH" =~ ^[0-9]+$ ]]
+ # Forward the allocation warning through srun; S1 handles it at an optimizer boundary.
+ child=''
+--- parent/reuse_audit.py
++++ current/reuse_audit.py
+@@ -15,6 +15,10 @@
+ def compatible():
+     from verify import verify
+     current = verify()
++    from verify import PARENT_SHA as launch_parent, launch_compatibility
++    if sha(ROOT / 'PAYLOAD.json') != launch_parent:
++        launch_compatibility()
++        current = read(ROOT / 'launch_parent_payload.json')
+     parent_path = ROOT / 'audit_parent_payload.json'
+     if sha(parent_path) != PARENT_SHA:
+         raise ValueError('unrecognized audit parent payload')
+--- parent/run.py
++++ current/run.py
+@@ -86,13 +86,13 @@
+ 
+ def execute(runtime_path, output, *, smoke=False, mock=False):
+     if not mock:
+-        from verify import verify
++        from verify import verify, package_matches
+         verify()
+     trainer, runtime = install(runtime_path)
+     if bool(runtime.get('mock')) != mock:
+         raise ValueError('mock/production mismatch')
+     if not mock:
+-        if runtime.get('package_sha256') != sha(ROOT / 'PAYLOAD.json'):
++        if not package_matches(runtime.get('package_sha256')):
+             raise ValueError('prepared runtime belongs to another package')
+         trainer._runtime()
+         if str(trainer.torch.__version__) != '2.11.0+cu128' or trainer.torch.version.cuda != '12.8':
+--- parent/verify.py
++++ current/verify.py
+@@ -25,6 +25,72 @@
+     return payload
+ 
+ 
++# BEGIN LAUNCH COMPATIBILITY
++PARENT_SHA = '294c3458c0d1fbbb45c61dcac2e11e8fab92f1ce10558cf9576ecccaabd30aac'
++
++
++def launch_compatibility():
++    """Prove the sole operational change, retaining original data/smoke bytes."""
++    import hashlib
++    payload = verify()
++    parent_path = ROOT / 'launch_parent_payload.json'
++    if sha(parent_path) != PARENT_SHA:
++        raise ValueError('unrecognized launch parent payload')
++    parent = read(parent_path)
++    edits = {
++        'job.sbatch': [('SLURM_TIME_FORMAT=standard squeue', 'squeue')],
++        'run.py': [
++            ('from verify import verify, package_matches', 'from verify import verify'),
++            ("not package_matches(runtime.get('package_sha256'))", "runtime.get('package_sha256') != sha(ROOT / 'PAYLOAD.json')")],
++        'chain.py': [
++            ('        from verify import package_matches\n', ''),
++            ("not package_matches(identity.get('package_sha256'))", "identity.get('package_sha256') != sha(ROOT / 'PAYLOAD.json')")],
++        'reuse_audit.py': [(
++            "    from verify import PARENT_SHA as launch_parent, launch_compatibility\n"
++            "    if sha(ROOT / 'PAYLOAD.json') != launch_parent:\n"
++            "        launch_compatibility()\n"
++            "        current = read(ROOT / 'launch_parent_payload.json')\n", '')],
++    }
++    additions = set(payload['files']) - set(parent['files'])
++    if additions != {'launch_parent_payload.json', 'tests/test_launch_fix.py'}:
++        raise ValueError('unexpected launch payload additions')
++    changed = set()
++    for name, entry in parent['files'].items():
++        if name not in payload['files']:
++            raise ValueError('missing launch parent file: ' + name)
++        if payload['files'][name] == entry:
++            continue
++        changed.add(name)
++        text = (ROOT / name).read_text()
++        if name == 'verify.py':
++            start = text.index('# BEGIN LAUNCH COMPATIBILITY\n')
++            end = text.index('# END LAUNCH COMPATIBILITY\n', start)
++            text = text[:start] + text[end + len('# END LAUNCH COMPATIBILITY\n\n\n'):]
++        elif name in edits:
++            for new, old in edits[name]:
++                if text.count(new) != 1:
++                    raise ValueError('launch edit not exact: ' + name)
++                text = text.replace(new, old)
++        else:
++            raise ValueError('nonoperational launch change: ' + name)
++        if hashlib.sha256(text.encode()).hexdigest() != entry['sha256']:
++            raise ValueError('launch change exceeds declared edit: ' + name)
++    if changed != {'job.sbatch', 'run.py', 'chain.py', 'verify.py', 'reuse_audit.py'}:
++        raise ValueError('unexpected launch change set')
++    return dict(parent_sha256=PARENT_SHA, changed=sorted(changed), added=sorted(additions),
++                policy='scheduler format and exact historical artifact binding only')
++
++
++def package_matches(value):
++    if value == sha(ROOT / 'PAYLOAD.json'):
++        return True
++    if value != PARENT_SHA:
++        return False
++    launch_compatibility()
++    return True
++# END LAUNCH COMPATIBILITY
++
++
+ if __name__ == '__main__':
+     verify()
+     print('TRAIN_FULL_PAYLOAD_VERIFIED')

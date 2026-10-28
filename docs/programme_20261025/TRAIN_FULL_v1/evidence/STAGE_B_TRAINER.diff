@@ -1,0 +1,28 @@
+--- Stage_A/vendor/train/train.py
++++ Stage_B/vendor/train/train.py
+@@ -122,6 +122,7 @@
+     p.add_argument("--bs", type=int, default=256)
+     p.add_argument("--accum", type=int, default=1, help="gradient accumulation steps")
+     p.add_argument("--lr", type=float, default=6.5e-4)
++    p.add_argument("--beta1", type=float, default=0.9, help="AdamW beta1; beta2 stays 0.999")
+     p.add_argument("--wd", type=float, default=0.05)
+     # WP-A iv: optimizer recipe deltas for FUTURE runs. Defaults reproduce the S16 recipe EXACTLY so
+     # S19-BKO Arm 0 (masked rerun) isolates the mask delta; opt in for T1'-era runs.
+@@ -144,6 +145,8 @@
+                    help="strict weights-only initialization; fresh optimizer/scheduler/step/RNG")
+     p.add_argument("--selftest", action="store_true", help="no data: model forward/backward check")
+     args = p.parse_args(argv)
++    if not 0 <= args.beta1 < 1:
++        p.error("--beta1 must lie in [0,1)")
+     if args.width_mult != 1.0 and (args.arch != "compact" or args.head != "nfd"):
+         p.error("--width-mult requires compact with --head nfd")
+     if args.epoch_rows is not None and args.epoch_rows < 1:
+@@ -904,7 +907,7 @@
+     # WP-A iv: opt-in optimizer recipe deltas (defaults reproduce S16 exactly).
+     opt_params = (no_decay_param_groups(model, args.wd) if args.no_decay_norm_bias
+                   else model.parameters())
+-    opt = torch.optim.AdamW(opt_params, lr=args.lr, weight_decay=args.wd)
++    opt = torch.optim.AdamW(opt_params, lr=args.lr, weight_decay=args.wd, betas=(args.beta1, 0.999))
+     steps_per_epoch = len(train_sampler)
+     opt_steps_per_epoch = ceil_div(steps_per_epoch, args.accum)
+     total_opt_steps = sum(ceil_div(n, args.accum) for n in horizons)

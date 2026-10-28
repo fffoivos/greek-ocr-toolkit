@@ -1,35 +1,18 @@
-# Overnight run 19→20 Oct 2026 — owner summary (coordinator; written 2026-10-20 08:40 Athens, updated at the end of the run)
+# Owner summary — updated 2026-10-22 17:00 Athens — ALL THREE TASKS CLOSED
 
-## Done tonight
-- Repo clean-up merged into cleanup/20261019 (main fast-forwarded locally, NOT pushed).
-- Content gate 0.3 + segmentation 0.9-s5 + pipeline 0.3.2; census_05 full run: 592,466 rows → ADMIT 457,991 / DROP 56,435 / HOLD 78,040; admitted_train 364,871; leaks 0; Astra: census integrity PASS.
-- Release v3 (train export): 168,637 W1+W2 rows, labels = raw Google import (0 edits land), Astra CP3: PASS.
-- Benchmark 0.2 SEALED (seal04): test 2,253 / dev 437 rows, 16 classes, drawn from split2 test/dev editions only (zero subtraction from training), last-filtered by Sol (350 flagged = 248 replaced + 102 unfilled); diacritics NOT qualified by the last filter. Coverage: test 16/16 classes non-empty but 2/16 at full quota; dev 14/16 non-empty, 6/16 full; modern Cyrillic = Serbian only.
-- Scaling data (SCALE1): ref_208k, ref_364871 (actual max; < the planned 420k), tgt_208k (supply-limited: 11/16 classes exhausted) — all exposure audits 0.
-- (Pruned 11:50 on your instruction: the wave-3 part-2 novelty data work I had started — M-family manifests, P1 pool, C2 column, G audit — is stopped and shelved; not part of the mandate.)
-- Wave 2 (H7 recipe retest): package built, inventory OK on the 3rd attempt (row-key bug, then a hand-written deploy receipt), benchmark bound with 0 exposure; the first smoke FAILED on a missing linefactory binary (only the inventory job built it). One more smoke is authorised with a subprocess-target check; if it fails again, wave 2 waits for you. Production = ctrl + add × 3 seeds (≈15 GPU-h) after Astra 3b PASS. NOT launched as of 09:30.
+## The three things
+1. **Repo cleanup:** done. Public repo https://github.com/fffoivos/greek-ocr-toolkit; branches merged and deleted.
+2. **Row filtering + correcting:** done. Census_06 over 592,466 lines (456,967 admitted / 84,754 held / 50,745 dropped; 16/16 invariants). Release v4 = 167,946 clean lines (W1 50,622 / W2 117,324), raw labels, 904 polytonic corrections as the registered overlay, 207,243 crops byte-exact, zero crop gaps. Sol xhigh acceptance: ACCEPT (two single-row quality notes). Path: /iopsstor/scratch/cscs/fffoivos/greek-ocr-e3/release_v4/rel4_c06_full_01.
+3. **Experiments:**
+   - **Wave 2 on v4 — DONE, Astra CP4 PASS.** Nine runs (ctrl / add / add_corr × 3 seeds; 36.7 requested GPU-h). Internal test CER: ctrl 1.236 / add 1.274 / add_corr 1.269 % → the preregistered "add" hypothesis is refuted (−0.04 pp). Benchmark seal04 test CER: ctrl 4.03 / add 2.32 / add_corr 2.28 % → adding the v4 rows nearly halves the benchmark error. Corrections: +0.04 pp test, −0.05 pp dev. Astra: interpretable; seal04 stays diagnostic_only. Results + reviews: docs/programme_20261019/SIMPLIFICATION/wave2/.
+   - **Task 2 (value of the correction tools) — DONE, Astra PASS (2026-10-22 15:46).** Old recipe on the old model (wave 1c, 211,451 rows, raw labels) vs the same data under the new filtering (196,227 rows) vs filtered + corrected (167 corrections), all scored on raw AND corrected+filtered references (benchmark 2,232 admitted lines with the correction overlay; internal test 39,434 admitted lines with corrected labels). Result: no measurable improvement from filtering or correcting the initial recipe's own data (benchmark CER 3.66 / 3.66 / 3.66; internal 1.28 / 1.28 / 1.29; differences inside seed noise). Reason: only 167 of 1,071 corrections touch the initial recipe's rows; the 904 accent corrections are on the newly harvested rows. With those rows in training (extra arms), corrections give a small consistent gain (2.08 → 2.05) and the new data itself gives the large one (3.66 → 2.08). Report + reviews: docs/programme_20261019/SIMPLIFICATION/task2/. Cost 44.4 requested GPU-h.
+   - **Scaling ladder S1 — DONE, Astra PASS (2026-10-22 17:00).** 8 cells × 3 seeds, all 24 runs complete (74.6 GPU-h). Benchmark CER (seal04 test, raw): ×1 2.61 / 2.49, ×1.5 2.37 / 2.23, ×2 2.24 / 2.10 (208k / 365k rows). Width ×1→×2 = −15.6% relative; nearly doubling the data = another 0.12–0.14 pp at each width; both together 2.61 → 2.10 (−19.5%). Targeted subset: no reliable gain. Same ordering on the cleaned internal test. Astra's next step: measure ×1.5 and ×2 inference latency on the deployment CPU before choosing the production width. Scope: S1 trained on the v3 population (364,871 rows), not v4; 20/24 runs still improving at epoch 8 (no convergence floor claimed). Results + reviews: docs/programme_20261019/SIMPLIFICATION/s1/.
 
-## Decisions I took under the mandate (you may override)
-1. "degraded" benchmark class = relative (bottom 5% confidence within source) — admission removes every low-confidence line.
-2. Benchmark draw: forced editions' non-locked rows drawable; cap 50 per class×edition; deficits reported, never substituted.
-3. vertical_turned class: orientation alone is not a crop violation (re-read with the class stated).
-4. Replacements: same scope + source only, else UNFILLED; deterministic pairing.
-5. Wave 2: the two never-built locked strata (200 mark-enriched, 400 Wikisource) dropped; add_corr arm DROPPED — corrections reach only 167 of 364,864 training rows (RU1 mostly on census HOLD rows; N1: 478 on forced test editions, 151 train rows all census HOLD).
-6. Scaling data: option B (natural-frequency reference over release v3 ∪ v_c; targeted only at 208k).
-7. M-family rulings Q7–Q10 (see NIGHT_STATE.json decisions).
+## Method since 21 Oct 10:40
+Owner rule: I decide, Sol executes, Astra reviews; no other session. Plan + cut-reviews: docs/programme_20261019/SIMPLIFICATION/. Checkpoints used: CP3B (1 BLOCK → fixed → PASS), CP4 PASS, CP4B review 2 PASS; Sol xhigh pre-checks on v4 and the S1 packet.
 
-## Sequence note (honest)
-- The overnight census/release were run WITHOUT the polytonic corrections (I kept sf7 as unaudited against your ruling), so release v3 was filtered but barely corrected. Being redone as census 06 / release v4; wave 2 launches on v4 with all three arms. Four failed job attempts on the wave-2 package (two inventory, two smoke; each a defect untested on real data) cost about four hours; the wave-2 lead session was lost when the Mac disk filled and I now drive its passes.
+## Budget
+Wave cap 350 requested GPU-h (owner, 21 Oct). Spent so far ≈ 42 requested GPU-h (wave 2 + S1 preparation); S1 forecast 209 more.
 
-## Owner ruling 10:47
-- sf7 (polytonic tool) IS released. Census 06 re-runs with polytonic in scope, release v4 applies the edits, wave 2 launches on v4 with add_corr restored. In progress.
-
-## Timeline (as of 11:45)
-- 14:32: sf7 jobs RUNNING (5 parents; longest limit 2:53) → census 06 bind + smoke + full (≈4–6 h) → release v4 → wave-2 inventory/smoke/Astra 3b → launch; realistic wave-2 launch: night of 20→21 Oct. S1 (scaling): package qualified on Clariden (3rd attempt); ×2 cells need resumable 12-h segments and one targeted cell is dropped to fit the 150 GPU-h cap (amendment A1); smoke + Astra 4b next; launches after wave 2.
-
-## Only gate left for you
-- main push (I never push).
-
-## Where things are
-- State: docs/programme_20261019/NIGHT_STATE.json; ledger: memory post_e3_plans_state.md; reviews: docs/records/reviews/astra_program_review_2026-10-06/ (CENSUS05R, CP3; CP3B/CP4/CP4B briefs ready).
-- Clariden $W=/iopsstor/scratch/cscs/fffoivos/greek-ocr-e3: census_05_20261020, release_v3, benchmark_0.2/seal04, scaling_w3, e4_wave2_rel3_20261020.
+## Needs you
+Nothing. Next report: S1 results (after the aggregate) with the results review.

@@ -14,16 +14,27 @@ from __future__ import annotations
 import math
 import importlib
 import unicodedata
+from pathlib import Path
 
 import numpy as np
 import torch
 
 from . import ckpt_io
-from .codec import Codec, load_codec, greedy_decode_line
-from .model import DET_PAD_MARGIN, build_model, masked_forward
+from greekocr.train.cer import Codec, load_codec, greedy_decode_line
+from greekocr.train.model import DET_PAD_MARGIN, build_model, masked_forward
 
 class Recognizer:
-    def __init__(self, ckpt_path: str, codec_path: str, device: str = "cpu") -> None:
+    def __init__(self, ckpt_path: str, codec_path: str | None = None, device: str = "cpu") -> None:
+        if Path(ckpt_path).is_dir():
+            from greekocr.train.export import load_release
+            self.model, self.codec, self.config = load_release(ckpt_path)
+            if codec_path is not None and ckpt_io.sha256_file(codec_path) != self.config['codec_sha256']:
+                raise ValueError('external codec differs from release codec')
+            self.model.to(device)
+            self.device = device
+            return
+        if codec_path is None:
+            raise ValueError('legacy checkpoint requires codec_path')
         self.codec: Codec = load_codec(codec_path)
         # Load (state_dict, metadata) via ckpt_io: prefer explicit/sibling safetensors;
         # otherwise try the supplied resume .pt using torch's restricted weights-only loader.
@@ -53,11 +64,11 @@ class Recognizer:
             raise ValueError("checkpoint must use this codec's NFD CTC head and class count")
         arch = meta.get("arch", "compact")
         try:  # arch-registry signature (rec/ A/B lane); returns (model, codec)
-            built = build_model(n_classes=n_classes, arch=arch, verbose=False)
+            built = build_model(n_classes=n_classes, arch=arch, width_mult=float(meta.get("width_mult", 1.0)), verbose=False)
         except TypeError:  # pre-registry signature
             built = build_model(n_classes=n_classes, verbose=False)
         self.model = built[0] if isinstance(built, tuple) else built
-        self.model.load_state_dict(sd)
+        self.model.load_state_dict(sd, strict=True)
         self.model.eval().to(device)
         self.device = device
 
@@ -75,15 +86,26 @@ class Recognizer:
             # tensor's implicit conv zero-pad or another strip's width, so the reading is deterministic
             # regardless of batch composition / wmax. The mask (input_lengths) handles attention; this
             # halo handles the conv boundary — together they make serving batch-invariant.
-            canvas_w = max(ws) + DET_PAD_MARGIN
-            batch = torch.zeros(len(idxs), 1, 48, canvas_w)
-            for j, i in enumerate(idxs):
-                s = strips[i]
-                bg = float(np.median(s[:, -2:]))
-                batch[j, 0, :, : s.shape[1]] = torch.from_numpy(s)
-                batch[j, 0, :, s.shape[1] :] = bg  # ALWAYS fill the remainder with this strip's own bg
-            batch = ((batch - 0.5) / 0.5).to(self.device)
-            in_lens = torch.tensor([math.ceil(w / 4) for w in ws])
+            if hasattr(self, 'config'):
+                # Release parity uses the trainer's uint8 crop and collate path,
+                # including integer-rounded own-background padding.
+                from greekocr.train.data import collate_strips
+                samples = [dict(image=np.rint(strips[i]*255).astype(np.uint8),
+                                width=ws[j], label=np.array([], dtype=np.int64),
+                                script_class='inference') for j, i in enumerate(idxs)]
+                collated = collate_strips(samples)
+                batch = collated['images'].to(self.device)
+                in_lens = collated['input_lengths']
+            else:
+                canvas_w = max(ws) + DET_PAD_MARGIN
+                batch = torch.zeros(len(idxs), 1, 48, canvas_w)
+                for j, i in enumerate(idxs):
+                    s = strips[i]
+                    bg = float(np.median(s[:, -2:]))
+                    batch[j, 0, :, : s.shape[1]] = torch.from_numpy(s)
+                    batch[j, 0, :, s.shape[1] :] = bg  # ALWAYS fill the remainder with this strip's own bg
+                batch = ((batch - 0.5) / 0.5).to(self.device)
+                in_lens = torch.tensor([math.ceil(w / 4) for w in ws])
             log_probs = masked_forward(self.model, batch, in_lens)  # [B, T, C] (mask-aware arches)
             probs = log_probs.exp()
             for j, i in enumerate(idxs):

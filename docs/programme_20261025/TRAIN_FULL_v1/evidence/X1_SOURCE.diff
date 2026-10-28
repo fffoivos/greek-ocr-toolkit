@@ -1,0 +1,1343 @@
+--- 0446ee734d2c867c/compare.py
++++ 385856ea2166d931/compare.py
+@@ -9,6 +9,25 @@
+ 
+ FIELDS = ('model', 'opt', 'sched', 'rng', 'epoch', 'batch_position', 'iterator_created',
+           'global_step', 'best', 'bad_epochs', 'health', 'trace', 'draw_chain', 'draw_position')
++
++
++def forced_requeue_proof(resumed, allocations):
++    """The first allocation must have yielded the archived step-3 bytes.
++
++    segment.pt is rewritten on continuation, so authenticate the immutable
++    archive rather than trying to bind the old yield's now-stale rolling path.
++    """
++    resumed = Path(resumed)
++    yield_path = resumed / 'SEGMENT_YIELD.json'
++    yielded = read(yield_path)
++    if (int(yielded['restart_count']) != 0 or not any(
++            x['job_id'] == yielded['job_id'] and int(x['restart_count']) == 0
++            and x['mode'] == 'smoke-requeue' for x in allocations)):
++        raise ValueError('first-allocation forced requeue yield missing')
++    archive = resumed / 'checkpoints/step-000000003.pt'
++    if sha(archive) != yielded['checkpoint']['sha256']:
++        raise ValueError('forced requeue did not yield the exact step-3 checkpoint')
++    return dict(yield_record=spec(yield_path), archived_checkpoint=spec(archive), step=3)
+ 
+ 
+ def compare(control, resumed, out):
+@@ -25,8 +44,8 @@
+         raise ValueError('continuation state is not BIT_IDENTICAL')
+     baseline = read(control / 'COMPLETE.json')
+     split = read(resumed / 'COMPLETE.json')
+-    if baseline['binding']['evaluation_steps'] != [2, 4] or split['binding']['evaluation_steps'] != [2, 4]:
+-        raise ValueError('two real smoke evaluations required')
++    if baseline['binding']['evaluation_steps'] != [3, 6] or split['binding']['evaluation_steps'] != [3, 6]:
++        raise ValueError('two full smoke evaluations required')
+     if baseline['binding']['mock'] or split['binding']['mock']:
+         raise ValueError('mock cannot qualify real CUDA smoke')
+     if baseline['binding']['runtime'] != split['binding']['runtime']:
+@@ -34,19 +53,44 @@
+     allocations = [read(p) for p in resumed.glob('ALLOCATION_*.json')]
+     if not any(int(x['restart_count']) >= 1 for x in allocations):
+         raise ValueError('actual scheduler restart evidence missing')
+-    if a['binding']['device'] != 'cuda' or a['binding']['workers'] != 6 or a['binding']['width_mult'] != 2.0:
+-        raise ValueError('smoke did not use S1 width2/CUDA/six-worker profile')
++    forced = forced_requeue_proof(resumed, allocations)
++    forced_state = torch.load(forced['archived_checkpoint']['path'], map_location='cpu', weights_only=False)
++    if (forced_state['global_step'] != 3 or forced_state['state_sha256'] != trainer.checkpoint_state_sha256(forced_state)):
++        raise ValueError('invalid forced requeue checkpoint')
++    if a['binding']['device'] != 'cuda' or a['binding']['workers'] != 6 or a['binding']['width_mult'] != 1.0:
++        raise ValueError('smoke did not use S1 width1/CUDA/six-worker profile')
+     if a['binding'] != b['binding']:
+         raise ValueError('smoke parameters differ')
+-    for step in (2, 4):
++    for step in (3, 6):
+         left = read(control / 'eval' / ('step-%09d.json' % step))
+         right = read(resumed / 'eval' / ('step-%09d.json' % step))
+         if left['instruments'] != right['instruments']:
+             raise ValueError('checkpoint metrics differ after requeue')
++    from loss_journal import records
++    plans = [v['binding']['loss_plan'] for v in (baseline, split)]
++    if plans[0] != plans[1] or plans[0]['steps'] != [2, 4, 6]:
++        raise ValueError('three loss evals straddling requeue required')
++    for folder in (control, resumed):
++        events, torn = records(folder / 'loss_eval.jsonl')
++        if torn is not None or [v['step'] for v in events] != plans[0]['steps']:
++            raise ValueError('missing/duplicate smoke loss point')
++        for event in events:
++            from common import bound
++            bound(event['record'])
++    for point in plans[0]['points']:
++        name = 'step-%09d.json' % point['step']
++        left, right = (read(folder / 'loss_eval' / name) for folder in (control, resumed))
++        for key in ('step', 'drawn_lines', 'model_sha256', 'thresholds', 'instruments'):
++            if left[key] != right[key]:
++                raise ValueError('loss-only continuation differs: ' + key)
++        if left['drawn_lines'] != point['drawn_lines']:
++            raise ValueError('loss cadence draw count changed')
+     atomic(out, dict(status='BIT_IDENTICAL', mock=False, fields=list(FIELDS),
+         control=spec(control / 'COMPLETE.json'), resumed=spec(resumed / 'COMPLETE.json'),
+         runtime_sha256=baseline['binding']['runtime']['sha256'],
+-        allocations=allocations, package_sha256=sha(ROOT / 'PAYLOAD.json')))
++        allocations=allocations, width_mult=1.0, loss_steps=plans[0]['steps'],
++        full_steps=[3, 6], forced_requeue_step=3, forced_requeue=forced,
++        package_sha256=sha(ROOT / 'PAYLOAD.json')))
+ 
+ 
+ if __name__ == '__main__':
+--- 0446ee734d2c867c/full_hook.py
++++ 385856ea2166d931/full_hook.py
+@@ -15,7 +15,7 @@
+ PANELS = ('seal04_dev', 'seal04_test', 'harvest_dev', 'harvest_test')
+ 
+ 
+-def evaluate_panel(model, data, references, codec, device):
++def evaluate_panel(model, data, references, codec, device, *, decode=True):
+     import torch
+     from train.data import ManifestDataset, make_loader
+     from train.model import amp_dtype_for, autocast_ctx, masked_forward
+@@ -37,14 +37,18 @@
+                 raise ValueError('nonfinite checkpoint evaluation loss')
+             loss_sum += float(loss) * len(indices)
+             n += len(indices)
+-            ids = lp.argmax(-1)
+-            for i, index in enumerate(indices):
+-                row = data[index]
+-                hyp = greedy_decode_line(ids[i, :int(batch['input_lengths'][i])].tolist(), codec)
+-                predictions.append(dict(id=row['line_id'], hyp=hyp))
+-                pairs.append((dict(text=references[row['line_id']]), hyp))
+-    if n != len(data) or len({r['id'] for r in predictions}) != n:
++            if decode:
++                ids = lp.argmax(-1)
++                for i, index in enumerate(indices):
++                    row = data[index]
++                    hyp = greedy_decode_line(ids[i, :int(batch['input_lengths'][i])].tolist(), codec)
++                    predictions.append(dict(id=row['line_id'], hyp=hyp))
++                    pairs.append((dict(text=references[row['line_id']]), hyp))
++    if n != len(data) or (decode and len({r['id'] for r in predictions}) != n):
+         raise ValueError('incomplete/duplicate eval coverage')
++    if not decode:
++        return dict(ctc_loss=loss_sum / n, loss_sum_target_normalized=loss_sum, rows=n,
++                    loss='same fp32 CPU CTCLoss(blank=0,zero_infinity=True,mean); sample-weighted dataset mean'), []
+     return dict(ctc_loss=loss_sum / n, loss_sum_target_normalized=loss_sum, rows=n,
+                 loss='same fp32 CPU CTCLoss(blank=0,zero_infinity=True,mean); sample-weighted dataset mean',
+                 score=aggregate(pairs), predictions=predictions,
+@@ -59,19 +63,104 @@
+             if self.total != args.epochs * ((args.epoch_rows + args.bs - 1) // args.bs):
+                 raise ValueError('actual S1 sampler horizon differs from sealed packed-tail recipe')
+             self.every = args.full_every
++            self.loss_points = {p['step']: p for p in args.loss_plan['points']}
++            self.timing = dict(samples=0, seconds=0., max_seconds=0.)
++            self.timing_path = self.path.parent / ('BATCH_TIMING_%d.json' % time.time_ns())
++            self.tick = time.monotonic()
++            self.timed_epoch = None
++            if self.saved:
++                # Every crossed point has a pre-eval durable segment. Only that
++                # last point can be unfinished; earlier missing records refuse.
++                from loss_journal import append_point
++                for step in self.loss_points:
++                    if step > self.saved['global_step']:
++                        continue
++                    log = self.path.parent / 'loss_eval' / ('step-%09d.json' % step)
++                    if log.exists():
++                        prior = read(log)
++                        if prior['runtime_sha256'] != runtime['_sha256']:
++                            raise ValueError('loss log belongs to another runtime')
++                        append_point(self.path.parent / 'loss_eval.jsonl', log)
++                    elif step < self.saved['global_step']:
++                        raise ValueError('missing historical loss evaluation')
++                if self.saved['global_step'] in self.loss_points:
++                    self.checkpoint_loss(self.saved['global_step'])
+             if (self.saved and cadence(self.saved['global_step'], self.total, self.every)
+                     and (self.saved['global_step'] < self.total or self.saved['batch_position'] == 0)):
+                 self.checkpoint_eval(self.saved['global_step'])
++            self.tick = time.monotonic()
++
++        def note(self, epoch, position, indices, rows, loss, step):
++            # Match S1 timing qualification's synchronized measurements in the
++            # smoke. Production keeps the original asynchronous execution.
++            if self.args.full_smoke and self.t.torch.cuda.is_available():
++                self.t.torch.cuda.synchronize(next(self.model.parameters()).device)
++            now = time.monotonic()
++            if self.timed_epoch == epoch:
++                duration = now - self.tick
++                self.timing['samples'] += 1
++                self.timing['seconds'] += duration
++                self.timing['max_seconds'] = max(self.timing['max_seconds'], duration)
++            self.timed_epoch = epoch
++            self.tick = now
++            super().note(epoch, position, indices, rows, loss, step)
++            point = self.loss_points.get(step)
++            if point and point['drawn_lines'] != self.draws:
++                raise ValueError('actual training draws differ from loss cadence plan')
+ 
+         def full_due(self, step):
+-            return step < self.total and step % self.every == 0
++            return step in self.loss_points or (step < self.total and step % self.every == 0)
+ 
+         def save(self, epoch, position, step, *rest):
+             super().save(epoch, position, step, *rest)
++            if step in self.loss_points:
++                self.checkpoint_loss(step)
+             # At the final update use the completed-epoch commit (CSV/best/last
+             # already present), rather than the preceding last-batch cursor.
+             if cadence(step, self.total, self.every) and (step < self.total or position == 0):
+                 self.checkpoint_eval(step)
++            atomic(self.timing_path, dict(**self.timing,
++                mean_update_seconds=self.timing['seconds'] / self.timing['samples'] if self.timing['samples'] else None,
++                excludes='checkpoint/evaluation; first batch of each epoch/startup excluded',
++                runtime_sha256=runtime['_sha256']))
++            self.tick = time.monotonic()
++
++        def checkpoint_loss(self, step):
++            from loss_journal import append_point
++            from train.cer import load_codec
++            log = self.path.parent / 'loss_eval' / ('step-%09d.json' % step)
++            model_sha = self.t.checkpoint_state_sha256(self.model.state_dict())
++            if log.exists():
++                prior = read(log)
++                if (prior['runtime_sha256'] != runtime['_sha256'] or prior['step'] != step
++                        or prior['drawn_lines'] != self.draws or prior['model_sha256'] != model_sha):
++                    raise ValueError('existing loss evaluation binding changed')
++            else:
++                rng, mode = self.rng(), self.model.training
++                started = time.monotonic()
++                try:
++                    codec = load_codec(self.args.codec)
++                    device = next(self.model.parameters()).device
++                    results = {}
++                    for name in PANELS:
++                        result, predictions = evaluator(self.model, pools[name], runtime['references'][name],
++                                                         codec, device, decode=False)
++                        if predictions or 'score' in result or result['rows'] != len(pools[name]):
++                            raise ValueError('loss-only evaluator decoded or changed coverage')
++                        results[name] = result
++                    atomic(log, dict(schema='TRAIN_FULL-loss-eval-v1', step=step,
++                        drawn_lines=self.draws, thresholds=self.loss_points[step]['thresholds'],
++                        model_sha256=model_sha, runtime_sha256=runtime['_sha256'], instruments=results,
++                        elapsed_seconds=time.monotonic() - started,
++                        test_policy='report_only; never selection/stopping/parameter adjustment'))
++                finally:
++                    self.restore_rng(rng)
++                    self.model.train(mode)
++            append_point(self.path.parent / 'loss_eval.jsonl', log)
++            if runtime.get('mock') and os.environ.get('TRAIN_FULL_TEST_PAUSE_LOSS_STEP') == str(step):
++                atomic(self.path.parent / 'TEST_PAUSED.json', dict(step=step, loss_only=True))
++                import signal
++                signal.pause()
+ 
+         def checkpoint_eval(self, step):
+             target = self.path.parent / 'checkpoints' / ('step-%09d.pt' % step)
+--- 0446ee734d2c867c/loss_cadence.py
++++ 385856ea2166d931/loss_cadence.py
+@@ -0,0 +1,33 @@
++"""Actual drawn-line cadence, including S1's shuffled partial batch.
++
++Planning uses the exact frozen assembler/sampler, with local RNGs only. It neither
++decodes images nor changes the epoch draw order. Final is included once.
++"""
++def plan(trainer, runtime, pools, epochs, epoch_rows, bs, every):
++    from train.data import PackedWidthBatchSampler
++    if min(epochs, epoch_rows, bs, every) < 1:
++        raise ValueError('positive loss cadence/horizon required')
++    components = runtime['components']
++    groups = [pools[c['name']] for c in components]
++    fractions = [c['fraction'] for c in components]
++    draws, step, points = 0, 0, []
++    for epoch in range(1, epochs + 1):
++        rr, _ = trainer.assemble(groups, fractions, runtime['seed'], epoch,
++                                 epoch_rows, exact_rows=True)
++        sampler = PackedWidthBatchSampler([r['width'] for r in rr], bs,
++                                         seed=runtime['seed'], shuffle=True)
++        sampler.set_epoch(epoch)
++        for indices in sampler:
++            before = draws
++            draws += len(indices)
++            step += 1
++            if draws // every > before // every:
++                points.append(dict(step=step, drawn_lines=draws,
++                    thresholds=list(range((before // every + 1) * every,
++                                          draws // every * every + 1, every))))
++    if not points or points[-1]['step'] != step:
++        points.append(dict(step=step, drawn_lines=draws, thresholds=[]))
++    return dict(every_drawn_lines=every, includes_final=True, points=points,
++                steps=[p['step'] for p in points], count=len(points),
++                total_drawn_lines=draws, total_updates=step,
++                policy='actual real+synthetic draws; frozen shuffled partial batches; final once')
+--- 0446ee734d2c867c/loss_journal.py
++++ 385856ea2166d931/loss_journal.py
+@@ -0,0 +1,56 @@
++"""Append-only JSONL index of immutable per-point loss records.
++
++Point files publish first. A crash before index append is reconciled from them.
++A torn final append is preserved, newline-terminated and explicitly witnessed by
++a recovery record; no existing byte is overwritten or truncated.
++"""
++import hashlib
++import json
++import os
++from pathlib import Path
++from common import read, spec
++
++
++def records(path):
++    path = Path(path)
++    lines = path.read_bytes().splitlines(keepends=True) if path.exists() else []
++    entries, pending = [], None
++    for line in lines:
++        try:
++            item = json.loads(line)
++        except ValueError:
++            if pending is not None:
++                raise ValueError('multiple corrupt loss-journal records')
++            pending = line.rstrip(b'\n')
++            continue
++        if pending is not None:
++            if item != dict(torn_append_sha256=hashlib.sha256(pending).hexdigest()):
++                raise ValueError('unwitnessed corrupt loss-journal record')
++            pending = None
++        else:
++            entries.append(item)
++    return entries, pending
++
++
++def append_point(journal, point):
++    journal, point = Path(journal), Path(point)
++    prior, torn = records(journal)
++    value = read(point)
++    entry = dict(step=value['step'], drawn_lines=value['drawn_lines'],
++                 instruments=value['instruments'], record=spec(point))
++    matches = [v for v in prior if v['step'] == entry['step']]
++    if matches and matches != [entry]:
++        raise ValueError('duplicate/changed loss-journal point')
++    if prior and not matches and prior[-1]['step'] >= entry['step']:
++        raise ValueError('out-of-order loss-journal append')
++    journal.parent.mkdir(parents=True, exist_ok=True)
++    with journal.open('ab') as stream:
++        raw = journal.read_bytes()
++        if raw and not raw.endswith(b'\n'):
++            stream.write(b'\n')
++        if torn is not None:
++            stream.write((json.dumps(dict(torn_append_sha256=hashlib.sha256(torn).hexdigest())) + '\n').encode())
++        if not matches:
++            stream.write((json.dumps(entry, sort_keys=True, allow_nan=False) + '\n').encode())
++        stream.flush()
++        os.fsync(stream.fileno())
+--- 0446ee734d2c867c/readout.py
++++ 385856ea2166d931/readout.py
+@@ -10,14 +10,26 @@
+     rt = read(runtime)
+     if m['fixture'] or rt['mock']:
+         raise ValueError('mock counts cannot describe the full dataset')
+-    # Constants copied from SHA-bound S1 qualification 3713868/3714223.
+-    step, checkpoint, validation, startup = .43168869393412024, 1.6060056961141527, 19.770273582078516, 175.89016032603104
+-    evaluation = None
++    historical = read(Path(__file__).with_name('s1_w1_timing.json'))
++    step = historical['seconds_per_update_including_epoch_validation']
++    checkpoint, validation, startup = 1.6060056961141527, 19.770273582078516, 175.89016032603104
++    evaluation, loss_evaluation, smoke_step = None, None, None
+     if smoke_control:
++        from common import bound, sha
+         smoke = read(Path(smoke_control) / 'COMPLETE.json')
+-        if smoke['binding']['mock'] or not smoke['binding']['smoke']:
+-            raise ValueError('real smoke required')
+-        evaluation = max(read(p['path'])['elapsed_seconds'] for p in smoke['evaluations'])
++        if (smoke['binding']['mock'] or not smoke['binding']['smoke']
++                or smoke['binding']['runtime']['sha256'] != sha(runtime)):
++            raise ValueError('real same-data x1 smoke required')
++        if smoke['binding']['recipe']['sha256'] != sha(Path(__file__).with_name('recipe.json')):
++            raise ValueError('smoke recipe differs')
++        evaluation = max(read(bound(p))['elapsed_seconds'] for p in smoke['evaluations'])
++        loss_evaluation = max(read(bound(p))['elapsed_seconds'] for p in smoke['loss_evaluations'])
++        timings = [read(p) for p in Path(smoke_control).glob('BATCH_TIMING_*.json')]
++        seconds = sum(r['seconds'] for r in timings)
++        samples = sum(r['samples'] for r in timings)
++        if not samples:
++            raise ValueError('smoke did not measure training update cost')
++        smoke_step = seconds / samples
+     forecasts = []
+     recipe = read(Path(__file__).with_name('recipe.json'))
+     if rt['train_rows'] != m['train_unique']:
+@@ -26,14 +38,34 @@
+         horizon = resolve(recipe, m['train_unique'], choice)
+         epochs, updates = horizon['epochs'], horizon['total_updates']
+         evals = horizon['checkpoint_steps']
+-        compute = updates * step + (updates // 100 + epochs) * checkpoint + epochs * validation + startup
+-        forecasts.append(dict(**horizon, updates=updates,
+-            optimizer_hours=updates * step / 3600,
+-            estimated_gpu_hours=(compute + len(evals) * evaluation) / 3600 if evaluation is not None else None,
++        # Width-independent draw count determines the number of threshold
++        # crossings; partial batches affect only their exact update locations.
++        every = recipe['loss_evaluation_every_drawn_lines']
++        loss_evals = (horizon['mixed_draws'] + every - 1) // every
++        update_time = smoke_step if smoke_step is not None else step
++        compute = updates * update_time + (updates // 100 + epochs + loss_evals) * checkpoint + epochs * validation + startup
++        extra = loss_evals * loss_evaluation + len(evals) * evaluation if evaluation is not None else None
++        fraction = loss_evals * loss_evaluation / (updates * update_time) if loss_evaluation is not None else None
++        total_fraction = extra / (updates * update_time) if extra is not None else None
++        forecasts.append(dict(**horizon, updates=updates, loss_evaluations=loss_evals,
++            optimizer_hours=updates * update_time / 3600,
++            historical_s1_w1_epoch_wall_projection_hours=updates * step / 3600,
++            smoke_mean_update_seconds=smoke_step,
++            estimated_gpu_hours=(compute + extra) / 3600 if extra is not None else None,
+             evaluation_seconds_from_real_smoke=evaluation,
++            loss_evaluation_seconds_from_real_smoke=loss_evaluation,
++            projected_loss_eval_hours=loss_evals * loss_evaluation / 3600 if loss_evaluation is not None else None,
++            projected_loss_eval_fraction_of_training=fraction,
++            projected_total_eval_hours=extra / 3600 if extra is not None else None,
++            projected_total_eval_fraction_of_training=total_fraction,
++            exceeds_25_percent=total_fraction > .25 if total_fraction is not None else None,
++            options_if_over_25_percent=[
++                'Keep every 50000 lines and reserve the measured overhead (owner choice).',
++                'Owner may explicitly choose a larger drawn-line interval; reseal and review.',
++                'Qualify a faster complete-instrument evaluator with exact loss parity; no silent subsampling.'],
+             training_recovery_startup_validation_hours=compute / 3600,
+-            minimum_12h_segments=__import__('math').ceil((compute + len(evals) * evaluation) / (12 * 3600)) if evaluation is not None else None,
+-            estimate_status='projection from S1 width2 timings; new width distribution, startup and preemptions can change it'))
++            minimum_12h_segments=__import__('math').ceil((compute + extra) / (12 * 3600)) if extra is not None else None,
++            estimate_status='projection; tiny x1 smoke widths may differ from full run; checkpoint/startup constants are S1 width2 allowances; queue, production iterator/replay and preemptions extra'))
+     result = dict(schema='TRAIN_FULL-owner-readout-v1', manifest=spec(manifest), runtime=spec(runtime),
+         dataset_unique_crops=m['dataset_unique_crops'], train_unique=m['train_unique'],
+         dataset_retained_rows=m['dataset_retained_rows'], by_split=m['dataset_by_split'],
+--- 0446ee734d2c867c/recipe.json
++++ 385856ea2166d931/recipe.json
+@@ -20,14 +20,15 @@
+     "epoch_rows": null,
+     "pack_bucket_tails": true,
+     "repeat_to_epoch_rows": true,
+-    "width_mult": 2.0,
++    "width_mult": 1.0,
+     "segment": true
+   },
+   "evaluation_every_updates": 50000,
+   "source": {
+     "package": "84351c178fddab61",
+     "deployed_commit": "284df89b6e1c8a2cb9709eeae77b0730dfbbd899",
+-    "trainer_commit": "71e72bfb4f7a70c74d90bcd256b2c9efa70f4aff"
++    "trainer_commit": "71e72bfb4f7a70c74d90bcd256b2c9efa70f4aff",
++    "cell": "w1/ref_364871/seed0"
+   },
+   "synthetic_fraction": [
+     1,
+@@ -53,5 +54,7 @@
+       "epochs": 12,
+       "default": false
+     }
+-  }
++  },
++  "loss_evaluation_every_drawn_lines": 50000,
++  "loss_evaluation_at_end": true
+ }
+--- 0446ee734d2c867c/reuse_audit.py
++++ 385856ea2166d931/reuse_audit.py
+@@ -15,9 +15,9 @@
+ def compatible():
+     from verify import verify
+     current = verify()
+-    from verify import PARENT_SHA as launch_parent, launch_compatibility
++    from verify import PARENT_SHA as launch_parent, data_compatibility
+     if sha(ROOT / 'PAYLOAD.json') != launch_parent:
+-        launch_compatibility()
++        data_compatibility()
+         current = read(ROOT / 'launch_parent_payload.json')
+     parent_path = ROOT / 'audit_parent_payload.json'
+     if sha(parent_path) != PARENT_SHA:
+--- 0446ee734d2c867c/run.py
++++ 385856ea2166d931/run.py
+@@ -75,6 +75,7 @@
+                 (r['line_id'], r.get('_component'), r.get('_pool_index')) for r in rr]))
+                 for role, rr in roles.items()} for epoch, roles in assembled.items()})
+ 
++    trainer.full_pools = pools
+     trainer.validate = validate
+     trainer.load_rows = load_rows
+     trainer.shared_validation = lambda args, mix: pools['validation']
+@@ -86,13 +87,13 @@
+ 
+ def execute(runtime_path, output, *, smoke=False, mock=False):
+     if not mock:
+-        from verify import verify, package_matches
++        from verify import verify, data_package_matches
+         verify()
+     trainer, runtime = install(runtime_path)
+     if bool(runtime.get('mock')) != mock:
+         raise ValueError('mock/production mismatch')
+     if not mock:
+-        if not package_matches(runtime.get('package_sha256')):
++        if not data_package_matches(runtime.get('package_sha256'), runtime_path):
+             raise ValueError('prepared runtime belongs to another package')
+         trainer._runtime()
+         if str(trainer.torch.__version__) != '2.11.0+cu128' or trainer.torch.version.cuda != '12.8':
+@@ -115,7 +116,7 @@
+                    codec=str(ROOT / 'vendor/codec/v2.1.json'), out_dir=str(Path(output).resolve()))
+     if smoke:
+         # Explicitly diagnostic: real model/profile, small draw horizon only.
+-        options.update(epochs=2, epoch_rows=128)
++        options.update(epochs=2, epoch_rows=192)
+     if mock:
+         options.update(epochs=2, epoch_rows=256, device='cpu', workers=0, pin_memory=False)
+     argv = []
+@@ -125,8 +126,14 @@
+         elif value is not None and value is not False:
+             argv.extend(['--' + key.replace('_', '-'), str(value)])
+     args = trainer.parse_args(argv)
+-    args.full_every = 2 if (smoke or mock) else cfg['evaluation_every_updates']
++    args.full_every = 3 if smoke else 2 if mock else cfg['evaluation_every_updates']
+     args.full_smoke = smoke
++    from loss_cadence import plan
++    # This planning uses only private sampler RNGs. The original trainer will
++    # initialize its own RNG identically after this read-only preflight.
++    trainer._runtime()
++    args.loss_plan = plan(trainer, runtime, trainer.full_pools, args.epochs, args.epoch_rows,
++                          args.bs, 128 if (smoke or mock) else cfg['loss_evaluation_every_drawn_lines'])
+     # Fixed eight-epoch horizon; tests never govern stopping. See recipe table.
+     trainer.PATIENCE = args.epochs + 1
+     total = args.epochs * ((args.epoch_rows + args.bs - 1) // args.bs)
+@@ -134,11 +141,12 @@
+     (Path(output) / 'eval').mkdir(exist_ok=True)
+     binding = dict(runtime=spec(runtime_path), recipe=spec(ROOT / 'recipe.json'),
+         total_updates=total, evaluation_steps=schedule(total, args.full_every), smoke=smoke, mock=mock,
+-        production_horizon=horizon)
++        production_horizon=horizon, loss_plan=args.loss_plan)
+     path = Path(output) / 'RUN_BINDING.json'
+     if path.exists() and read(path) != binding:
+         raise ValueError('run/config binding changed')
+     atomic(path, binding)
++    atomic(Path(output) / 'LOSS_CADENCE.json', args.loss_plan)
+     status = trainer.train(args)
+     if status == 0:
+         import torch
+@@ -148,9 +156,43 @@
+         eval_files = [Path(output) / 'eval' / ('step-%09d.json' % s) for s in schedule(total, args.full_every)]
+         for file in eval_files:
+             read(file)
++        loss_files = [Path(output) / 'loss_eval' / ('step-%09d.json' % s) for s in args.loss_plan['steps']]
++        from loss_journal import records
++        entries, torn = records(Path(output) / 'loss_eval.jsonl')
++        if torn is not None or [r['step'] for r in entries] != args.loss_plan['steps']:
++            raise ValueError('missing/duplicate loss journal points')
++        for expected, file in zip(args.loss_plan['points'], loss_files):
++            result = read(file)
++            if result['step'] != expected['step'] or result['drawn_lines'] != expected['drawn_lines']:
++                raise ValueError('loss evaluation differs from drawn-line schedule')
+         atomic(Path(output) / 'COMPLETE.json', dict(binding=binding, checkpoint=spec(Path(output) / 'segment.pt'),
+-            evaluations=[spec(p) for p in eval_files], state_sha256=state['state_sha256']))
++            evaluations=[spec(p) for p in eval_files], loss_evaluations=[spec(p) for p in loss_files],
++            loss_journal=spec(Path(output) / 'loss_eval.jsonl'), state_sha256=state['state_sha256']))
+     return status
++
++
++def plan_only(runtime_path, output):
++    """CPU-only exact production step list; read only narrow parquet columns."""
++    import pyarrow.parquet as pq
++    from train import train as trainer
++    from loss_cadence import plan
++    from verify import verify, data_package_matches
++    verify()
++    runtime = read(runtime_path)
++    if runtime.get('mock') or not data_package_matches(runtime.get('package_sha256'), runtime_path):
++        raise ValueError('real prepared data required')
++    pools = {c['name']: [r for file in runtime['pools'][c['name']]['files']
++                        for r in pq.read_table(bound(file), columns=['line_id', 'width']).to_pylist()]
++             for c in runtime['components']}
++    recipe = read(ROOT / 'recipe.json')
++    h = resolve(recipe, runtime['train_rows'], runtime.get('horizon_recipe', 'full'))
++    if h != runtime['horizon']:
++        raise ValueError('prepared horizon changed')
++    trainer._runtime()
++    result = plan(trainer, runtime, pools, h['epochs'], h['epoch_rows'],
++                  recipe['parameters']['bs'], recipe['loss_evaluation_every_drawn_lines'])
++    atomic(output, dict(**result, runtime=spec(runtime_path), recipe=spec(ROOT / 'recipe.json')))
++    return result
+ 
+ 
+ if __name__ == '__main__':
+@@ -158,5 +200,9 @@
+     p.add_argument('--runtime', required=True)
+     p.add_argument('--out', required=True)
+     p.add_argument('--smoke', action='store_true')
++    p.add_argument('--plan-only', action='store_true')
+     a = p.parse_args()
+-    raise SystemExit(execute(a.runtime, a.out, smoke=a.smoke))
++    if a.plan_only:
++        plan_only(a.runtime, a.out)
++    else:
++        raise SystemExit(execute(a.runtime, a.out, smoke=a.smoke))
+--- 0446ee734d2c867c/s1_w1_timing.json
++++ 385856ea2166d931/s1_w1_timing.json
+@@ -0,0 +1,18 @@
++{
++  "source": "w1_ref_364871_s0.csv",
++  "source_sha256": "b1201f16b408612beaac3fb3a69d729ac4369d12e400ac06e779b9e03dbed2ce",
++  "epoch_seconds": [
++    772.4,
++    676.2,
++    697.2,
++    683.9,
++    685.3,
++    684.9,
++    692.0,
++    688.1
++  ],
++  "epochs_seconds": 5580.0,
++  "updates": 53616,
++  "seconds_per_update_including_epoch_validation": 0.10407341092211281,
++  "scope": "historical S1 w1/ref_364871/s0, 3 concurrent seeds; CSV epoch walls, excludes initial startup and end epoch checkpoint I/O; new production shape unmeasured"
++}
+--- 0446ee734d2c867c/segment.py
++++ 385856ea2166d931/segment.py
+@@ -24,6 +24,9 @@
+             bound(complete['checkpoint'])
+             for entry in complete['evaluations']:
+                 bound(entry)
++            for entry in complete['loss_evaluations']:
++                bound(entry)
++            bound(complete['loss_journal'])
+             if complete['binding']['runtime'] != spec(a.runtime):
+                 raise ValueError('completed runtime changed')
+             return 0
+@@ -31,7 +34,7 @@
+                dict(job_id=os.environ['SLURM_JOB_ID'], restart_count=os.environ.get('SLURM_RESTART_COUNT', '0'),
+                     runtime=spec(a.runtime), mode=a.mode))
+         if a.mode == 'smoke-requeue' and int(os.environ.get('SLURM_RESTART_COUNT', '0')) == 0:
+-            os.environ['S1_FORCE_SPLIT_STEP'] = '2'
++            os.environ['S1_FORCE_SPLIT_STEP'] = '3'
+         else:
+             os.environ.pop('S1_FORCE_SPLIT_STEP', None)
+         os.environ['S1_TRACE'] = '1' if a.mode.startswith('smoke') else '0'
+--- 0446ee734d2c867c/tests/mock_worker.py
++++ 385856ea2166d931/tests/mock_worker.py
+@@ -1,5 +1,6 @@
+ """Only the test harness imports this. Real trainer/data/CTC, tiny mocked model."""
+ import argparse
++import os
+ from pathlib import Path
+ import sys
+ 
+@@ -10,6 +11,20 @@
+ 
+ 
+ def mock_install(*args, **kwargs):
++    if os.environ.get('TEST_INTERRUPT_LOSS_MARKER'):
++        from full_hook import evaluate_panel
++        def interrupted(*values, **options):
++            marker = Path(os.environ['TEST_INTERRUPT_LOSS_MARKER'])
++            if not options.get('decode', True) and not marker.exists():
++                import random
++                import numpy as np
++                import torch
++                random.random(); np.random.rand(); torch.rand(3)
++                values[0].eval()
++                marker.write_text('unfinished loss eval; RNG/mode must restore')
++                raise RuntimeError('test interrupted unfinished loss eval')
++            return evaluate_panel(*values, **options)
++        kwargs['evaluator'] = interrupted
+     trainer, runtime = original(*args, **kwargs)
+     trainer._runtime()
+     import torch
+@@ -30,6 +45,15 @@
+ 
+ 
+ run.install = mock_install
++# Test harness only: compare normal periodic evaluation against final-only, or
++# fail/kill inside an unfinished loss evaluation. Production exposes no override.
++import loss_cadence
++original_plan = loss_cadence.plan
++def test_plan(*args, **kwargs):
++    if os.environ.get('TEST_LOSS_EVERY'):
++        args = (*args[:-1], int(os.environ['TEST_LOSS_EVERY']))
++    return original_plan(*args, **kwargs)
++loss_cadence.plan = test_plan
+ 
+ if __name__ == '__main__':
+     p = argparse.ArgumentParser()
+--- 0446ee734d2c867c/tests/test_launch_fix.py
++++ 385856ea2166d931/tests/test_launch_fix.py
+@@ -60,22 +60,24 @@
+     assert trace.read_text() == 'standard'
+ 
+ 
+-def test_original_runtime_and_smoke_bytes_still_bind():
+-    proof = verify.launch_compatibility()
+-    assert proof['changed'] == ['chain.py', 'job.sbatch', 'reuse_audit.py', 'run.py', 'verify.py']
+-    assert verify.package_matches(verify.PARENT_SHA)
++def test_original_runtime_data_binds_but_x2_smoke_does_not():
++    proof = verify.data_compatibility()
++    assert proof['parent_sha256'] == verify.X2_SHA
++    assert not verify.package_matches(verify.PARENT_SHA)
++    assert not verify.package_matches(verify.X2_SHA)
+     assert verify.package_matches(sha(PKG / 'PAYLOAD.json'))
+-    assert not verify.package_matches('unreviewed-package')
+     evidence = PKG.parents[3] / 'out/TRAIN_FULL_v1/receipts_005'
+-    runtime = read(evidence / 'data_prepared_runtime.json')
+-    smoke = read(evidence / 'SMOKE_IDENTITY.json')
+-    assert runtime['package_sha256'] == smoke['package_sha256'] == verify.PARENT_SHA
+-    assert sha(evidence / 'data_prepared_runtime.json') == smoke['runtime_sha256']
+-    assert smoke['status'] == 'BIT_IDENTICAL' and smoke['mock'] is False
++    runtime = evidence / 'data_prepared_runtime.json'
++    assert verify.data_package_matches(read(runtime)['package_sha256'], runtime)
++    rt = read(runtime)
++    assert {n: rt['pools'][n]['rows'] for n in ('seal04_dev', 'seal04_test', 'harvest_dev', 'harvest_test')} == dict(
++        seal04_dev=437, seal04_test=2253, harvest_dev=16350, harvest_test=52847)
++    with pytest.raises(ValueError, match='exact prepared005'):
++        verify.data_package_matches(verify.PARENT_SHA, evidence / 'SMOKE_IDENTITY.json')
+ 
+ 
+-@pytest.mark.parametrize('target', ['recipe.json', 'job.sbatch', 'run.py', 'chain.py', 'verify.py', 'reuse_audit.py',
+-                                   'launch_parent_payload.json', 'extra.py'])
++@pytest.mark.parametrize('target', ['recipe.json', 'job.sbatch', 'common.py', 'horizon.py', 'manifest.py', 'prepare.py',
++                                   'launch_parent_payload.json', 'x2_recipe.json'])
+ def test_compatibility_refuses_even_resealed_extra_changes(tmp_path, monkeypatch, target):
+     root = tmp_path / 'package'
+     shutil.copytree(PKG, root, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+@@ -86,16 +88,16 @@
+     payload['files'][target] = dict(bytes=path.stat().st_size, sha256=sha(path))
+     atomic(root / 'PAYLOAD.json', payload)
+     with pytest.raises((ValueError, KeyError)):
+-        verify.package_matches(verify.PARENT_SHA)
++        verify.data_compatibility()
+ 
+ 
+-def test_train_submission_requires_new_review_but_accepts_original_smoke(tmp_path, monkeypatch):
++def test_train_submission_requires_new_review_and_new_x1_smoke(tmp_path, monkeypatch):
+     import chain
+     runtime = tmp_path / 'runtime.json'
+-    atomic(runtime, dict(package_sha256=verify.PARENT_SHA))
++    atomic(runtime, dict(package_sha256=sha(PKG / 'PAYLOAD.json')))
+     smoke = tmp_path / 'smoke.json'
+     atomic(smoke, dict(status='BIT_IDENTICAL', mock=False, runtime_sha256=sha(runtime),
+-                      package_sha256=verify.PARENT_SHA))
++                      package_sha256=sha(PKG / 'PAYLOAD.json')))
+     review = tmp_path / 'review.json'
+     current = dict(verdict='PASS', package_sha256=sha(PKG / 'PAYLOAD.json'),
+                    runtime_sha256=sha(runtime), smoke_identity=spec(smoke))
+@@ -106,6 +108,13 @@
+     with pytest.raises(ValueError, match='Astra package'):
+         chain.submit(args)
+     atomic(review, current)
++    s = read(smoke)
++    atomic(smoke, dict(s, package_sha256=verify.PARENT_SHA))
++    atomic(review, dict(current, smoke_identity=spec(smoke)))
++    with pytest.raises(ValueError, match='another data population or package'):
++        chain.submit(args)
++    atomic(smoke, s)
++    atomic(review, dict(current, smoke_identity=spec(smoke)))
+     calls = []
+     def command(argv, **kwargs):
+         calls.append(argv)
+--- 0446ee734d2c867c/tests/test_x1.py
++++ 385856ea2166d931/tests/test_x1.py
+@@ -0,0 +1,213 @@
++"""Owner correction: x1, actual drawn lines, loss only, exact continuation."""
++import json
++import os
++from pathlib import Path
++import signal
++import sys
++import time
++
++import pytest
++
++PKG = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(PKG))
++sys.path.insert(0, str(PKG / 'vendor'))
++from common import atomic, read, sha
++from loss_journal import append_point, records
++from test_package import mock_runtime, spawn
++
++
++def test_smoke_authenticates_forced_yield_against_immutable_step3(tmp_path):
++    from compare import forced_requeue_proof
++    from common import spec
++    archive = tmp_path / 'checkpoints/step-000000003.pt'
++    archive.parent.mkdir()
++    archive.write_bytes(b'step3')
++    rolling = tmp_path / 'segment.pt'
++    rolling.write_bytes(b'step3')
++    atomic(tmp_path / 'SEGMENT_YIELD.json', dict(job_id='123', restart_count='0', checkpoint=spec(rolling)))
++    allocations = [dict(job_id='123', restart_count='0', mode='smoke-requeue'),
++                   dict(job_id='123', restart_count='1', mode='smoke-requeue')]
++    rolling.write_bytes(b'final step6')
++    assert forced_requeue_proof(tmp_path, allocations)['step'] == 3
++    archive.write_bytes(b'wrong step')
++    with pytest.raises(ValueError, match='step-3 checkpoint'):
++        forced_requeue_proof(tmp_path, allocations)
++
++
++def test_exact_s1_x1_parameters_and_width_independent_horizon():
++    from horizon import resolve
++    e = PKG.parent / 'evidence'
++    original = read(e / 'w1_ref_364871_s0_E1_RUN_COMPLETE.json')
++    params = original['binding']['parameters']
++    recipe = read(PKG / 'recipe.json')
++    for name, value in recipe['parameters'].items():
++        assert value == (None if name == 'epoch_rows' else params[name]), name
++    assert params['width_mult'] == 1.0
++    assert original['artifact_hashes']['train_log.csv'] == sha(e / 'w1_ref_364871_s0.csv')
++    cell = read(e / 'w1_CELL_COMPLETE.json')
++    assert cell['completions']['w1_ref_364871_s0']['sha256'] == sha(e / 'w1_ref_364871_s0_E1_RUN_COMPLETE.json')
++    h = resolve(recipe, 793227)
++    assert h['total_updates'] == 198312 and h['mixed_draws'] == 12691632
++    assert h['checkpoint_steps'] == [50000, 100000, 150000, 198312]
++    assert (h['mixed_draws'] + 49999) // 50000 == 254
++    assert h == resolve(read(PKG / 'x2_recipe.json'), 793227)
++
++
++def test_draw_schedule_uses_shuffled_partial_batch_and_restores_rng():
++    import random
++    import numpy as np
++    import torch
++    from train import train as trainer
++    from loss_cadence import plan
++    trainer._runtime()
++    runtime = dict(seed=20261015, components=[dict(name='real', fraction=.5), dict(name='syn', fraction=.5)])
++    pools = {name: [dict(width=64 + (i % 3) * 128, line_id=f'{name}-{i}') for i in range(85)]
++             for name in ('real', 'syn')}
++    before = (random.getstate(), np.random.get_state(), torch.get_rng_state())
++    p = plan(trainer, runtime, pools, 3, 170, 64, 50)
++    after = (random.getstate(), np.random.get_state(), torch.get_rng_state())
++    assert before[0] == after[0] and np.array_equal(before[1][1], after[1][1]) and torch.equal(before[2], after[2])
++    assert p['total_drawn_lines'] == 510 and p['total_updates'] == 9
++    assert p['steps'] == sorted(set(p['steps']))
++    assert p['points'][-1]['step'] == 9
++    assert [t for r in p['points'] for t in r['thresholds']] == list(range(50, 501, 50))
++    assert any(r['drawn_lines'] != r['step'] * 64 for r in p['points'])
++    assert p == plan(trainer, runtime, pools, 3, 170, 64, 50)
++
++
++def test_loss_evaluator_never_decodes_and_matches_full_loss(tmp_path, monkeypatch):
++    import torch
++    import train.cer
++    import bench.score
++    from train.cer import load_codec
++    from run import load_pools
++    from full_hook import evaluate_panel
++    runtime = mock_runtime(tmp_path)
++    rr = load_pools(read(runtime))['seal04_test']
++    codec = load_codec(str(PKG / 'vendor/codec/v2.1.json'))
++    class Toy(torch.nn.Module):
++        def __init__(self):
++            super().__init__()
++            self.p = torch.nn.Parameter(torch.zeros(1))
++        def forward(self, x):
++            return (torch.zeros(len(x), x.shape[-1] // 4, codec.n_classes) + self.p).log_softmax(-1)
++    model = Toy()
++    refs = {r['line_id']: 'ABC' for r in rr}
++    full, _ = evaluate_panel(model, rr, refs, codec, torch.device('cpu'))
++    def refuse(*a, **k):
++        pytest.fail('loss-only evaluation attempted decoding/scoring')
++    monkeypatch.setattr(train.cer, 'greedy_decode_line', refuse)
++    monkeypatch.setattr(bench.score, 'aggregate', refuse)
++    loss, predictions = evaluate_panel(model, rr, refs, codec, torch.device('cpu'), decode=False)
++    assert predictions == [] and 'score' not in loss
++    assert loss['rows'] == len(rr) and loss['ctc_loss'] == full['ctc_loss']
++
++
++@pytest.mark.parametrize('torn', [b'{"ste', b'{"ste\n', b''])
++def test_append_only_journal_recovers_missing_index_and_torn_tail(tmp_path, torn):
++    journal = tmp_path / 'loss_eval.jsonl'
++    point = tmp_path / 'point.json'
++    atomic(point, dict(step=2, drawn_lines=128, instruments={'test': dict(ctc_loss=1., rows=5)}))
++    journal.write_bytes(torn)
++    append_point(journal, point)
++    first = journal.read_bytes()
++    assert first.startswith(torn)
++    append_point(journal, point)
++    assert journal.read_bytes() == first
++    entries, pending = records(journal)
++    assert pending is None and [r['step'] for r in entries] == [2]
++    atomic(point, dict(step=2, drawn_lines=129, instruments={}))
++    with pytest.raises(ValueError, match='changed'):
++        append_point(journal, point)
++
++
++@pytest.mark.parametrize('kill_step', [2, 4, 8])
++def test_kill_after_loss_before_full_eval_has_no_missing_or_duplicate_points(tmp_path, kill_step):
++    runtime = mock_runtime(tmp_path)
++    output = tmp_path / 'split'
++    c = spawn(runtime, output, {'TRAIN_FULL_TEST_PAUSE_LOSS_STEP': str(kill_step)})
++    deadline = time.monotonic() + 40
++    while not (output / 'TEST_PAUSED.json').exists() and c.poll() is None and time.monotonic() < deadline:
++        time.sleep(.05)
++    if not (output / 'TEST_PAUSED.json').exists():
++        c.kill(); c.wait(timeout=5)
++        pytest.fail((output / 'process.log').read_text())
++    os.kill(c.pid, signal.SIGKILL)
++    c.wait(timeout=5)
++    initial = (output / 'loss_eval.jsonl').read_bytes()
++    c = spawn(runtime, output)
++    assert c.wait(timeout=40) == 0, (output / 'process.log').read_text()
++    assert (output / 'loss_eval.jsonl').read_bytes().startswith(initial)
++    events, torn = records(output / 'loss_eval.jsonl')
++    assert torn is None and [r['step'] for r in events] == [2, 4, 6, 8]
++    assert [r['drawn_lines'] for r in events] == [128, 256, 384, 512]
++    complete = read(output / 'COMPLETE.json')
++    assert len(complete['loss_evaluations']) == 4 and len(complete['evaluations']) == 4
++
++
++def test_periodic_loss_evaluation_does_not_change_training_trajectory(tmp_path):
++    import torch
++    from train import train as trainer
++    from compare import FIELDS
++    trainer._runtime()
++    runtime = mock_runtime(tmp_path)
++    outputs = [tmp_path / 'periodic', tmp_path / 'final-only']
++    for out, env in zip(outputs, ({}, {'TEST_LOSS_EVERY': '100000'})):
++        c = spawn(runtime, out, env)
++        assert c.wait(timeout=40) == 0, (out / 'process.log').read_text()
++    states = [torch.load(o / 'segment.pt', map_location='cpu', weights_only=False) for o in outputs]
++    assert trainer.checkpoint_state_sha256({k: states[0][k] for k in FIELDS}) == trainer.checkpoint_state_sha256({k: states[1][k] for k in FIELDS})
++    assert len(read(outputs[0] / 'COMPLETE.json')['loss_evaluations']) == 4
++    assert len(read(outputs[1] / 'COMPLETE.json')['loss_evaluations']) == 1
++
++
++def test_unfinished_loss_eval_restarts_identically_without_publishing_partial_metrics(tmp_path):
++    import torch
++    from train import train as trainer
++    from compare import FIELDS
++    trainer._runtime()
++    runtime = mock_runtime(tmp_path)
++    output = tmp_path / 'interrupted'
++    marker = tmp_path / 'loss-interrupted.txt'
++    c = spawn(runtime, output, {'TEST_INTERRUPT_LOSS_MARKER': str(marker)})
++    assert c.wait(timeout=40) != 0 and marker.exists()
++    assert not (output / 'loss_eval/step-000000002.json').exists()
++    assert not (output / 'loss_eval.jsonl').exists()
++    c = spawn(runtime, output)
++    assert c.wait(timeout=40) == 0, (output / 'process.log').read_text()
++    control = tmp_path / 'control'
++    c = spawn(runtime, control)
++    assert c.wait(timeout=40) == 0, (control / 'process.log').read_text()
++    states = [torch.load(o / 'segment.pt', map_location='cpu', weights_only=False) for o in (control, output)]
++    assert trainer.checkpoint_state_sha256({k: states[0][k] for k in FIELDS}) == trainer.checkpoint_state_sha256({k: states[1][k] for k in FIELDS})
++    assert records(output / 'loss_eval.jsonl')[0][0]['step'] == 2
++
++
++@pytest.mark.parametrize('loss_seconds,exceeds', [(1., False), (18., True), (100., True)])
++def test_forecast_reports_measured_complete_eval_cost_and_options(tmp_path, loss_seconds, exceeds):
++    from readout import readout
++    from common import spec
++    # Explicit forecast fixtures, not exported scientific or CUDA evidence.
++    m = dict(fixture=False, train_unique=793227, dataset_unique_crops=862423,
++        dataset_retained_rows=862424, dataset_by_split={}, dataset_unique_by_split={},
++        unique_population_table=[], s1_comparison=[], external_seal04_instruments={},
++        duplicate_train_rows=2, after=[])
++    manifest, runtime = tmp_path / 'manifest.json', tmp_path / 'runtime.json'
++    atomic(manifest, m)
++    atomic(runtime, dict(mock=False, train_rows=793227, horizon={}))
++    smoke = tmp_path / 'smoke'
++    smoke.mkdir()
++    atomic(smoke / 'loss.json', dict(elapsed_seconds=loss_seconds))
++    atomic(smoke / 'full.json', dict(elapsed_seconds=150.))
++    atomic(smoke / 'BATCH_TIMING_1.json', dict(seconds=.4, samples=4))
++    atomic(smoke / 'COMPLETE.json', dict(binding=dict(mock=False, smoke=True,
++        runtime=spec(runtime), recipe=spec(PKG / 'recipe.json')),
++        evaluations=[spec(smoke / 'full.json')], loss_evaluations=[spec(smoke / 'loss.json')]))
++    report = readout(manifest, runtime, tmp_path / 'forecast.json', smoke)
++    f = report['forecasts'][0]
++    assert f['loss_evaluations'] == 254
++    assert f['projected_loss_eval_hours'] == 254 * loss_seconds / 3600
++    assert f['projected_total_eval_hours'] == (254 * loss_seconds + 4 * 150) / 3600
++    assert f['exceeds_25_percent'] == exceeds
++    assert len(f['options_if_over_25_percent']) == 3
++    assert f['minimum_12h_segments'] >= 1
+--- 0446ee734d2c867c/verify.py
++++ 385856ea2166d931/verify.py
+@@ -25,70 +25,65 @@
+     return payload
+ 
+ 
+-# BEGIN LAUNCH COMPATIBILITY
++# Width/cadence change: old DATA may bind; old scientific smoke never may.
+ PARENT_SHA = '294c3458c0d1fbbb45c61dcac2e11e8fab92f1ce10558cf9576ecccaabd30aac'
++X2_SHA = '0446ee734d2c867cda056973ce5052f917865f1f53ecc6c2b8301c99d437280f'
++RUNTIME_SHA = '21b92bdf2ca2740ee9f3f431a0f79288dc598f40df64a1a49a08f635d9b8b0a4'
+ 
+ 
+-def launch_compatibility():
+-    """Prove the sole operational change, retaining original data/smoke bytes."""
+-    import hashlib
++def data_compatibility():
++    """Exact width-independent preparation/audit proof; no smoke inheritance."""
+     payload = verify()
+-    parent_path = ROOT / 'launch_parent_payload.json'
+-    if sha(parent_path) != PARENT_SHA:
+-        raise ValueError('unrecognized launch parent payload')
+-    parent = read(parent_path)
+-    edits = {
+-        'job.sbatch': [('SLURM_TIME_FORMAT=standard squeue', 'squeue')],
+-        'run.py': [
+-            ('from verify import verify, package_matches', 'from verify import verify'),
+-            ("not package_matches(runtime.get('package_sha256'))", "runtime.get('package_sha256') != sha(ROOT / 'PAYLOAD.json')")],
+-        'chain.py': [
+-            ('        from verify import package_matches\n', ''),
+-            ("not package_matches(identity.get('package_sha256'))", "identity.get('package_sha256') != sha(ROOT / 'PAYLOAD.json')")],
+-        'reuse_audit.py': [(
+-            "    from verify import PARENT_SHA as launch_parent, launch_compatibility\n"
+-            "    if sha(ROOT / 'PAYLOAD.json') != launch_parent:\n"
+-            "        launch_compatibility()\n"
+-            "        current = read(ROOT / 'launch_parent_payload.json')\n", '')],
+-    }
+-    additions = set(payload['files']) - set(parent['files'])
+-    if additions != {'launch_parent_payload.json', 'tests/test_launch_fix.py'}:
+-        raise ValueError('unexpected launch payload additions')
+-    changed = set()
+-    for name, entry in parent['files'].items():
+-        if name not in payload['files']:
+-            raise ValueError('missing launch parent file: ' + name)
+-        if payload['files'][name] == entry:
+-            continue
+-        changed.add(name)
+-        text = (ROOT / name).read_text()
+-        if name == 'verify.py':
+-            start = text.index('# BEGIN LAUNCH COMPATIBILITY\n')
+-            end = text.index('# END LAUNCH COMPATIBILITY\n', start)
+-            text = text[:start] + text[end + len('# END LAUNCH COMPATIBILITY\n\n\n'):]
+-        elif name in edits:
+-            for new, old in edits[name]:
+-                if text.count(new) != 1:
+-                    raise ValueError('launch edit not exact: ' + name)
+-                text = text.replace(new, old)
+-        else:
+-            raise ValueError('nonoperational launch change: ' + name)
+-        if hashlib.sha256(text.encode()).hexdigest() != entry['sha256']:
+-            raise ValueError('launch change exceeds declared edit: ' + name)
+-    if changed != {'job.sbatch', 'run.py', 'chain.py', 'verify.py', 'reuse_audit.py'}:
+-        raise ValueError('unexpected launch change set')
+-    return dict(parent_sha256=PARENT_SHA, changed=sorted(changed), added=sorted(additions),
+-                policy='scheduler format and exact historical artifact binding only')
++    if sha(ROOT / 'x1_parent_payload.json') != X2_SHA or sha(ROOT / 'launch_parent_payload.json') != PARENT_SHA:
++        raise ValueError('unrecognized data parent payload')
++    parent = read(ROOT / 'x1_parent_payload.json')
++    # All inputs and all data-producing code, including every frozen vendor
++    # module and codec, must be byte-identical. Runtime environment is unchanged.
++    names = {'common.py', 'horizon.py', 'manifest.py', 'prepare.py', 'prepare_job.py',
++             'audit_job.py', 'audit.sbatch', 'prepare.sbatch', 'bind_config.py',
++             'data.template.json', 'registry_v2.jsonl.gz', 'runtime_env.sh', 'job.sbatch'}
++    names |= {n for n in parent['files'] if n.startswith('vendor/')}
++    for name in names:
++        if payload['files'].get(name) != parent['files'][name]:
++            raise ValueError('data compatibility refused: ' + name)
++        # The old runtime was created by the pre-format-fix package. Prove the
++        # data-producing inputs also equal that original preparation package.
++        if name != 'job.sbatch' and parent['files'][name] != read(ROOT / 'launch_parent_payload.json')['files'][name]:
++            raise ValueError('data parent lineage changed: ' + name)
++    old = read(ROOT / 'recipe.json')
++    import copy
++    restored = copy.deepcopy(old)
++    if (restored['parameters']['width_mult'] != 1.0 or restored['loss_evaluation_every_drawn_lines'] != 50000
++            or restored['loss_evaluation_at_end'] is not True or restored['source']['cell'] != 'w1/ref_364871/seed0'):
++        raise ValueError('unexpected x1 recipe')
++    restored['parameters']['width_mult'] = 2.0
++    del restored['loss_evaluation_every_drawn_lines']
++    del restored['loss_evaluation_at_end']
++    del restored['source']['cell']
++    # Compare parsed recipe identity to the exact preserved parent recipe.
++    parent_recipe = read(ROOT / 'x2_recipe.json')
++    if sha(ROOT / 'x2_recipe.json') != parent['files']['recipe.json']['sha256'] or restored != parent_recipe:
++        raise ValueError('data-relevant recipe changed')
++    return dict(parent_sha256=X2_SHA, prepared_package_sha256=PARENT_SHA,
++                unchanged_data_files=sorted(names),
++                recipe_changes=['width_mult 2 -> 1', 'drawn-line loss cadence added', 'S1 reference cell named'],
++                inherited='audit/runtime/pools only; no x2 smoke, review or training state')
+ 
+ 
+-def package_matches(value):
++def data_package_matches(value, runtime_path=None):
+     if value == sha(ROOT / 'PAYLOAD.json'):
+         return True
+     if value != PARENT_SHA:
+         return False
+-    launch_compatibility()
++    data_compatibility()
++    if runtime_path is None or sha(runtime_path) != RUNTIME_SHA:
++        raise ValueError('only the exact prepared005 runtime may be inherited')
+     return True
+-# END LAUNCH COMPATIBILITY
++
++
++def package_matches(value):
++    """Scientific smoke/review must come from THIS package, never the x2 run."""
++    return value == sha(ROOT / 'PAYLOAD.json')
+ 
+ 
+ if __name__ == '__main__':
+--- 0446ee734d2c867c/x1_parent_payload.json
++++ 385856ea2166d931/x1_parent_payload.json
+@@ -0,0 +1,215 @@
++{
++  "files": {
++    "audit.sbatch": {
++      "bytes": 622,
++      "sha256": "6a09522149734e4aba422ed0d495077a8286dc0b719ca48a63143966c62d931f"
++    },
++    "audit_job.py": {
++      "bytes": 2982,
++      "sha256": "b2cd9a73a36a62ddec65148a7862857ab47dfc00ed9140c7de37ac4cd1ceba4d"
++    },
++    "audit_parent_payload.json": {
++      "bytes": 6716,
++      "sha256": "e3a023657d27bae8ec219afe25289ba7a14fdaee2af35b510131a028efa5079b"
++    },
++    "bind_config.py": {
++      "bytes": 2019,
++      "sha256": "24caee9959b478370ee920324a2243d1b03f7d21c3bae6e100fadf98a8f6c6d8"
++    },
++    "chain.py": {
++      "bytes": 5428,
++      "sha256": "395504e608e9306540ec4d814f0f729cd650f9e77dcbfdfb3e6ca9c36c3f6b43"
++    },
++    "common.py": {
++      "bytes": 1926,
++      "sha256": "df67e6b9ceb5a0d5133be1b344cbd4f7d1240860927c9046502481fadbf9f5c0"
++    },
++    "compare.py": {
++      "bytes": 2983,
++      "sha256": "ba2660d808b00a921f57fca23e5c38fcd3d431f3dc15dc63cf232b833fef56a9"
++    },
++    "data.template.json": {
++      "bytes": 3245,
++      "sha256": "f33afc2b5dff6490fb554e330742b7a74280b7553a0f4ffde5b9c066458e9546"
++    },
++    "full_hook.py": {
++      "bytes": 7071,
++      "sha256": "78a101dc8fa65dbd40f4208be4148494faa0f9d0468d1d9128c183340101ca4c"
++    },
++    "horizon.py": {
++      "bytes": 2105,
++      "sha256": "0e10cb033a525a490882802311fd0de3710cf9270ca249c62ed7d98fa5bcf44e"
++    },
++    "job.sbatch": {
++      "bytes": 1625,
++      "sha256": "1cc09c07f88d560a7e45329312e9210f1743b4596ede7fdb9a7a73102df6a8cc"
++    },
++    "launch_parent_payload.json": {
++      "bytes": 7144,
++      "sha256": "294c3458c0d1fbbb45c61dcac2e11e8fab92f1ce10558cf9576ecccaabd30aac"
++    },
++    "manifest.py": {
++      "bytes": 19570,
++      "sha256": "eb5ae4830635da7c36afd13b190aca2dc58ee64d3d4446159539fe9a76654f45"
++    },
++    "prepare.py": {
++      "bytes": 11610,
++      "sha256": "1a91847ffdc6320c9ff4838cad2529dc4644d2f0239ea0c102cc9e734cb8501f"
++    },
++    "prepare.sbatch": {
++      "bytes": 546,
++      "sha256": "c03055417b4b69b7f19b69006b0b3260f2f14ba53b4e0fe41700c49915b7f5f8"
++    },
++    "prepare_job.py": {
++      "bytes": 2525,
++      "sha256": "4d3f5af2c06523d0f641cde3e54b92974ad04fd918c3683d6c97c2b4f269c644"
++    },
++    "readout.py": {
++      "bytes": 3312,
++      "sha256": "41ef7906c0e3ba9fc32133c33d9cd532958fbc60828ab2d5eca383e3ee158c72"
++    },
++    "recipe.json": {
++      "bytes": 1445,
++      "sha256": "bad509acd52309e676f737557337babb1a9469c6ef4ddf9ac8783e2ed6bcc367"
++    },
++    "registry_v2.jsonl.gz": {
++      "bytes": 644591,
++      "sha256": "cbd43afa219970ab52ecd76b8ffa4ecf2a67c0f228f3ebdf3fcf823797f5ccc1"
++    },
++    "reuse_audit.py": {
++      "bytes": 5070,
++      "sha256": "f2cb4ea1b0c41b1e236f11025b77703ccfc17377f7c9c2de750fca654097805e"
++    },
++    "run.py": {
++      "bytes": 8188,
++      "sha256": "ec980fcff10a2bb23381a740f4514ad13ae5a8a154b0c901bb6fc03d2e4befa5"
++    },
++    "runtime_env.sh": {
++      "bytes": 633,
++      "sha256": "b1ec1a895452a9aa9734c4c2d3b225f64072deaf9a4a125e82e3ae721f66b32b"
++    },
++    "segment.py": {
++      "bytes": 2053,
++      "sha256": "e2dba0f994456e09134aee5a6264af2adf9855cbd419dac63a494ce23a3cd53e"
++    },
++    "tests/mock_worker.py": {
++      "bytes": 1169,
++      "sha256": "037fe99ca98c2ca8374432b708942db500206e438f25a5fa0363a55351e087a2"
++    },
++    "tests/test_audit_horizon.py": {
++      "bytes": 6625,
++      "sha256": "aae2b9cf091d2329a87a720132d4189a95ac9cc838a5d69dc31a176ccf846724"
++    },
++    "tests/test_launch_fix.py": {
++      "bytes": 5986,
++      "sha256": "013457a6dec9f9b756cd1fbf69dd70d6ec1c79aa8bb7bc2034d27c967da3afde"
++    },
++    "tests/test_package.py": {
++      "bytes": 9565,
++      "sha256": "5f9035d6266412d1c0405f93a51bda359e938469ed6e8a86a2cb4f0dd0678712"
++    },
++    "tests/test_prepare_fix.py": {
++      "bytes": 8529,
++      "sha256": "2bf7a636fb338c6715e565137122344e5aebe0e3affa4b74e952aeb5fdbaab96"
++    },
++    "tests/test_registry_aliases.py": {
++      "bytes": 4185,
++      "sha256": "e03b3779bced1e5127bdbf056075c9b7c34a4737d7833b2b5da65d6948fb7cc2"
++    },
++    "tests/test_rehearsal.py": {
++      "bytes": 12415,
++      "sha256": "c8a95d29b1e84fca88ef4026ea43fffd0681d87a65ee8057cc6493c62be78177"
++    },
++    "tests/test_union_fix2.py": {
++      "bytes": 5879,
++      "sha256": "ca1c0c8310ec8f2d1a9b8b2ea97491446b8d56d935b837ba23c96865064ebbc4"
++    },
++    "vendor/SCORER_BINDING.json": {
++      "bytes": 369,
++      "sha256": "4d60ae17a20d8a4176f28f7e56a24c6b7e061b2e34c96e0d4c2ba93d0d7e1353"
++    },
++    "vendor/UPSTREAM.json": {
++      "bytes": 1545,
++      "sha256": "09d3110f7be0cef5c8c2f0b5e479b7e6c5d8e67ed44a25d2b873f468bd2d4869"
++    },
++    "vendor/bench/__init__.py": {
++      "bytes": 85,
++      "sha256": "c89d3e4269708b16b1530e466202aa0412c6cc9cf55773714457d27f4fafee1f"
++    },
++    "vendor/bench/benchmark_suite.py": {
++      "bytes": 11500,
++      "sha256": "4abf4f095178a61c4d0c92befe191c5811c235a5ae740d0f414c0e8271297387"
++    },
++    "vendor/bench/common.py": {
++      "bytes": 1801,
++      "sha256": "44d618076b84f236d5123673efbfbdf5631c13a960bcb5737f3ec0e9e39d5de6"
++    },
++    "vendor/bench/o5_runtime.py": {
++      "bytes": 2406,
++      "sha256": "54e345b32e031c199ed17e92b683d0f00f032d842b85c9ba7d9332a6e8f4aa84"
++    },
++    "vendor/bench/score.py": {
++      "bytes": 6991,
++      "sha256": "0c443959331f0a94c40d3922d15e7f9f80a33622f277db1e24b6de2089ac0770"
++    },
++    "vendor/codec/v2.1.json": {
++      "bytes": 30972,
++      "sha256": "eae613e8eb18fd144314f68ae3b6424fb48dd778a2134fef417b06ac2353c4b6"
++    },
++    "vendor/train/cer.py": {
++      "bytes": 10184,
++      "sha256": "4ac0bc16fa7380360eb30995184f00753b4394e436a2b3db3ec8fbbdafd5b331"
++    },
++    "vendor/train/ckpt_io.py": {
++      "bytes": 6006,
++      "sha256": "671514c94c93df347e15815b9d3d5af6e222412b10ec28d2d028da302b039d6b"
++    },
++    "vendor/train/ctc_health.py": {
++      "bytes": 5095,
++      "sha256": "06bfed86a8c98635435176965052f1c3b27bae968285d6e6d787616934427260"
++    },
++    "vendor/train/data.py": {
++      "bytes": 16117,
++      "sha256": "7f145aa9af70727bb54303bda0f9bb92a8b4b613508f1bf4566acc2c27b73ebc"
++    },
++    "vendor/train/eval_cer.py": {
++      "bytes": 8688,
++      "sha256": "3ee768a4501974085f32b8efd901415557ecfaa547b3471607f1193793785f21"
++    },
++    "vendor/train/heads.py": {
++      "bytes": 24218,
++      "sha256": "7d7371bf23624f82dc49700c3fdca6702279b6ffa819d6709ab23ba4179d6e05"
++    },
++    "vendor/train/mix.py": {
++      "bytes": 24541,
++      "sha256": "9d3cf6e3443e9a98398f20a96733d112451fb47cfb1d06d704ce975a2babfcfe"
++    },
++    "vendor/train/mix.schema.json": {
++      "bytes": 4813,
++      "sha256": "2cbe95808e40cf2f87e13e871784224fe9074656d62feee4952c72e9e4359a80"
++    },
++    "vendor/train/model.py": {
++      "bytes": 18698,
++      "sha256": "70acd681921b6ca07f178ccf1a787ca11113b31cd48501c04317b91870f442bc"
++    },
++    "vendor/train/s1_segment.py": {
++      "bytes": 7034,
++      "sha256": "b0d4bfb0cfa40d1c506fdb130b6b00fa363365f25177f2ebdaa51c9406bb6edc"
++    },
++    "vendor/train/s1_timing.py": {
++      "bytes": 1579,
++      "sha256": "09d3f726f1eb89e8447ab20bbe544aef03ae710a9ac9f7f8f17f0eac548ceb14"
++    },
++    "vendor/train/train.py": {
++      "bytes": 71826,
++      "sha256": "538679bf6e419b4dccb876fab22aa27cca0a0fb7459394af1788b108bb35f85b"
++    },
++    "verify.py": {
++      "bytes": 4410,
++      "sha256": "fdcff216ed2e10cee13a96b47301b078e502ee3e51476b34a81a752385fe1d0d"
++    }
++  },
++  "producing_commit": "e1d67490f8765f5426b90ee2024d0d51cf9ac00e",
++  "schema": "TRAIN_FULL-payload-v1",
++  "source_state": "UNCOMMITTED_PREPARE_ONLY"
++}
+--- 0446ee734d2c867c/x2_recipe.json
++++ 385856ea2166d931/x2_recipe.json
+@@ -0,0 +1,57 @@
++{
++  "schema": "TRAIN_FULL-recipe-v1",
++  "parameters": {
++    "transfer_mix": null,
++    "selection_metric": "val_cer",
++    "transfer_final_only": true,
++    "arch": "compact",
++    "head": "nfd",
++    "epochs": 8,
++    "bs": 64,
++    "accum": 1,
++    "lr": 0.0001,
++    "wd": 0.05,
++    "no_decay_norm_bias": true,
++    "no_cycle_momentum": true,
++    "seed": 0,
++    "workers": 6,
++    "pin_memory": true,
++    "device": "cuda",
++    "epoch_rows": null,
++    "pack_bucket_tails": true,
++    "repeat_to_epoch_rows": true,
++    "width_mult": 2.0,
++    "segment": true
++  },
++  "evaluation_every_updates": 50000,
++  "source": {
++    "package": "84351c178fddab61",
++    "deployed_commit": "284df89b6e1c8a2cb9709eeae77b0730dfbbd899",
++    "trainer_commit": "71e72bfb4f7a70c74d90bcd256b2c9efa70f4aff"
++  },
++  "synthetic_fraction": [
++    1,
++    2
++  ],
++  "parliament_real_cap": [
++    1,
++    4
++  ],
++  "epoch_definition": "2 * audited unique real TRAIN rows; one full real pass plus equal synthetic draws",
++  "early_stopping": "disabled to guarantee the requested 8-epoch fixed horizon; validation CER still selects best",
++  "default_horizon": "full",
++  "horizon_change_reason": "owner checkpoint cadence + 2.1\u00d7 pool",
++  "alternatives": {
++    "s1-literal": {
++      "epoch_rows": 428872,
++      "epochs": 8,
++      "updates": 53616,
++      "default": false
++    },
++    "longer": {
++      "epoch_rows": "2 * unique real TRAIN",
++      "epochs": 12,
++      "default": false
++    }
++  }
++}

@@ -1,0 +1,1619 @@
+                                          Small-scale proxies for large-scale Transformer training instabilities
+                                                     Mitchell Wortsman Peter J. Liu Lechao Xiao Katie Everett
+                                              Alex Alemi Ben Adlam John D. Co-Reyes Izzeddin Gur Abhishek Kumar
+                                                 Roman Novak Jeffrey Pennington Jascha Sohl-dickstein Kelvin Xu
+                                                             Jaehoon Lee* Justin Gilmer* Simon Kornblith*
+                                                                                      Google DeepMind
+
+
+
+
+arXiv:2309.14322v2 [cs.LG] 16 Oct 2023
+                                         Abstract
+                                         Teams that have trained large Transformer-based mod-                             4.25          qk-layernorm = True                  N = 2.4e+06
+                                         els have reported training instabilities at large scale                                        qk-layernorm = False                 N = 9.4e+06
+                                                                                                                                                                             N = 1.9e+07
+                                         that did not appear when training with the same                                                                                     N = 4.2e+07
+                                                                                                                          4.00
+                                         hyperparameters at smaller scales. Although the                                                                                     N = 8.5e+07
+                                         causes of such instabilities are of scientific interest,                                                                            N = 1.5e+08
+                                         the amount of resources required to reproduce them                               3.75                                               N = 3.0e+08
+                                                                                                                                                                             N = 1.2e+09
+                                         has made investigation difficult. In this work, we
+
+
+                                                                                                        Final eval loss
+                                         seek ways to reproduce and study training stability                              3.50
+                                         and instability at smaller scales. First, we focus on
+                                         two sources of training instability described in pre-
+                                                                                                                          3.25
+                                         vious work: the growth of logits in attention layers
+                                         (Dehghani et al., 2023) and divergence of the output
+                                         logits from the log probabilities (Chowdhery et al.,                             3.00
+                                         2022). By measuring the relationship between learn-
+                                         ing rate and loss across scales, we show that these                              2.75
+                                         instabilities also appear in small models when training
+                                         at high learning rates, and that mitigations previously
+                                                                                                                          2.50
+                                         employed at large scales are equally effective in this                                  10 4          10 3            10 2   10 1           100
+                                         regime. This prompts us to investigate the extent to                                                         Learning rate
+
+
+                                                                                                    LR sensitivity
+                                         which other known optimizer and model interventions                              100
+                                         influence the sensitivity of the final loss to changes
+                                         in the learning rate. To this end, we study meth-                            10 1
+                                         ods such as warm-up, weight decay, and the µParam
+                                         (Yang et al., 2022), and combine techniques to train                         10 2
+                                                                                                                                  107                          108                 109
+                                         small models that achieve similar losses across orders                                                  Number of parameters
+                                         of magnitude of learning rate variation. Finally, to
+                                         conclude our exploration we study two cases where      Figure 1: Qk-layernorm [11] enables stable training across
+                                         instabilities can be predicted before they emerge by   three orders of magnitude of learning rate (LR) variation.
+                                         examining the scaling behavior of model activation     (Top) For transformers with N parameters, we plot the
+                                                                                                effect of learning rate on final evaluation loss. (Bottom)
+                                         and gradient norms.
+                                                                                                We use LR sensitivity to summarize the top plot. LR sensi-
+                                                                                                tivity measures the expected deviation from optimal when
+                                                                                                varying learning rate across three orders of magnitude.
+                                         1 Introduction                                         Qk-layernorm reduces LR sensitivity, but LR sensitivity
+                                         Scaling up transformers has led to remarkable progress still increases with model scale.
+                                         from chat models to image generation. However, not
+                                           * Equal contribution.
+
+
+
+
+                                                                                                    1
+every training run is successful. When training large           faster rate than scaling width.
+Transformers, researchers have reported instabilities
+                                                            The remainder of our investigation centers on the
+which slow or destabilize learning [6, 11, 53, 35, 8]. As
+                                                            scaling behavior for model characteristics such as acti-
+the resources required for large runs continue to grow,
+                                                            vation and gradient norms. Using the attention logit
+it is important to examine the ways that Transformer
+                                                            growth instability as an example, we show that it is
+training can fail.
+                                                            possible to predict an instability before it emerges.
+In this report we reproduce, study, and predict train- This is in contrast to prior works on scaling which pri-
+ing instability in Transformer models. We find that marily focus on scaling trends related to loss [27, 22].
+measuring the relationship between learning rate and
+                                                            We conclude by using the scaling behavior of model
+loss across scales is a useful tool to identify instability
+                                                            characteristics to search for instabilities that are cur-
+(e.g., Figure 1). Therefore, we introduce learning rate
+                                                            rently not well documented. Our investigation shows
+(LR) sensitivity, which serves as a useful summary
+                                                            that gradient norms decrease with both scale and
+statistic for learning rate vs. loss curves. LR sensitiv-
+                                                            learning rate, such that the default AdamW [33] ep-
+ity measures the deviation from optimal performance
+                                                            silon hyperparameter is too large. This causes updates
+when varying LR across orders of magnitude.
+                                                            that are too small. We connect this phenomenon and
+We show that two sources of instability, which have the attention logit growth instability to parameter
+previously been described at scale, can be reproduced norm growth [34, 29].
+in small Transformers.1 This enables their study
+                                                            Overall, we believe our work presents new scientific
+without access to large resource pools. In partic-
+                                                            opportunities for studying training stability without
+ular, we examine the growth of logits in attention
+                                                            access to large resource pools.
+layers [11, 16, 51] and divergence of the output logits
+from the log probabilities [6]. As evident from the
+learning rate vs. loss curves and by inspecting model 2           Experimental methodology
+characteristics, both instabilities appear at high learn-
+ing rates in small models. Moreover, interventions This section details our experimental set-up (Sec-
+which have previously been employed at scale are tion 2.1) and useful tools employed by our analysis:
+also successful in this regime (e.g., Figure 1). These (i) measuring the relationship between learning rate
+interventions—qk-layernorm [11]2 and z-loss regular- and loss across scales (Section 2.2) and (ii) examining
+ization [6]—reduce LR sensitivity and enable success- scaling trends for model characteristics (Section 2.3).
+ful training across three orders of magnitude of LR
+variation.
+                                                                2.1    Experimental set-up
+These observations raise the question of how other
+                                                                We train small Transformer models [45] with a similar
+known optimizer and model interventions affect the
+                                                                experimental set-up as GPT-2 [38] implemented in
+shape of the learning rate vs. loss curves across scales.
+                                                                Flax [20]: the models are decoder-only [31] and trained
+Therefore, we study the effect of techniques such as
+                                                                with an auto-regressive loss (refer to Section A for
+warm-up, weight decay, and µParam [50] in this con-
+                                                                more infrastructure details). While we experimentally
+text. When employing qk-layernorm and z-loss regu-
+                                                                manipulate many of the following hyperparameters,
+larization, these other techniques usually have little
+                                                                this section provides their default values, which we
+impact on the range of learning rates at which mod-
+                                                                use unless otherwise specified.
+els can be stably trained, but do affect the sensitiv-
+ity to learning rate within this range. In line with             By default, we use AdamW [33] with β1 = 0.9,
+previous work, we find that longer warm-up reduces               β2 = 0.95, ϵ = 1e-8, and gradient clipping at global
+learning rate sensitivity, as does the independent scal-         norm 1. The default warmup is 5e3 steps, and the
+ing of learning rate and weight decay recommended                default number of total steps is 1e5. We use a linear
+by Loshchilov and Hutter [33]. One interesting find-             schedule for warmup and and a cosine-decay [32] sched-
+ing is that scaling depth increases LR sensitivity at a          ule for the remainder, with minimum learning rate
+   1We focus on instabilities which lead to slow divergence, not
+                                                                 1e-5. We use an independent weight decay of 1e-4 and
+loss spikes (see Section 4).
+                                                                 auxiliary z-loss [6] with coefficient 1e-4. Sections 3.2.2
+   2 Based off currently unpublished investigations of Gilmer    and 3.1.2 respectively provide additional information
+et al. [16].                                                     and ablations on decoupled weight decay and z-loss.
+
+
+                                                            2
+We use pre-normalization [38] Transformers with qk-            θ. For a learning rate range [a, b], let ℓ∗ denote
+layernorm [11] (see Section 3.1.1 for information). We         the loss obtained with the best learning rate, i.e.,
+do not use any biases following Chowdhery et al. [6],          ℓ∗ = minη∈[a,b] ℓ (A(η)). Moreover, let ℓ0 denote loss
+and the layernorm [1] ϵ remains at the default value in        at initialization. Then, LR sensitivity is defined as
+Flax [20] of 1e-6. We jointly scale up the embedding           Eη∈[a,b] [min (ℓ (A (η)) , ℓ0 ) − ℓ∗ ].
+size, depth, and number of heads when scaling param-
+eters. We do not use weight tying of the first and last        Unless otherwise mentioned, we use the learning rate
+layer [37], and when reporting the number of parame-           range 3e-4 to 3e-1 with AdamW [33] to measure LR
+ters we exclude the embedding and head (as in Kaplan           sensitivity, where LR refers to the maximum value in a
+et al. [27]). We use rotary positional embeddings [43],        cosine decay schedule with warm-up [32]. We consider
+and for training data we use C4 [39]. Letting d refer          LRs in {3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 3e-1} when
+to the model dimension (i.e., the embedding size), the         computing the minimum and expectation.
+feed-forward component of the Transformer is an MLP
+with hidden dimension of 4d and gelu [21] √ activations.
+                                                               2.3    Scaling trends for model character-
+As in Vaswani et al. [45] we use factor 1/ d scaling
+in the self-attention. The embedding initialization                   istics
+is the default in Flax, which
+                            √ is normally distributed          To study instability, we also find it useful to examine
+with standard deviation 1/ d. The remainder of the             scaling trends for model characteristics such as gradi-
+weights are initialized with a truncated normal distri-        ent or activation norms. This method is helpful for
+bution with inverse root fan-in standard deviation [18].       predicting instabilities and contrasts with previous
+The default batch size is 256, where each batch ele-           work on scaling, which primarily focuses on trends
+ment has a sequence length of 512 tokens. Sequences            relating model scale and loss [27, 22].
+are packed so that no padding is required. Finally,
+we use the vocabulary from Raffel et al. [40] which
+has size 32101 and uses a SentencePiece [28] tokenizer.        3     Results
+We train on TPUs [26] in bfloat16 precision using
+Flax [20] and JAX [4].                                     This section presents our results on training stability
+                                                           for small Transformers. Equipped with LR sensitivity
+2.2 LR vs. loss curves and learning                        (Section  2.2), we study two known instabilities and
+                                                           their corresponding mitigation at small scale (Sec-
+        rate sensitivity                                   tion 3.1). This raises the question of how other model
+To investigate how model instability emerges with and optimizer interventions effect sensitivity of final
+scale, it is useful to plot the relationship between loss to learning rate, which we investigate in Sec-
+learning rate (LR) and loss for models of different sizes. tion 3.2. Finally, we examine whether instabilities can
+For instance, an instability is often characterized by be reliably predicted before they emerge: Section 3.3
+an explosion in the loss at high learning rates. LR predicts when the logit growth instability may cause
+vs. loss curves can reveal how the lowest unstable divergence in a larger model, while Section 3.4 aims
+learning rate changes as a function of model size.         to find other issues that may occur when scaling up
+                                                           with our default hyperparameters.
+To summarize LR vs. loss curves, we use LR sensi-
+tivity. LR sensitivity measures the deviation in final
+validation loss from optimal when sweeping LR across 3.1 Reproducing two known instabili-
+three orders of magnitude. If a model fails to train               ties at small scale
+at high learning rates, then LR sensitivity will be
+high. There are cases where LR vs. loss curves and Here, we examine two instabilities that have previ-
+LR sensitivity are no longer meaningful, for instance ously been described at scale: the growth of logits in
+if an intervention changes the meaning of learning attention layers [11, 16, 51] and divergence of the out-
+rate—see Appendix B for a detailed discussion.             put logits from the log probabilities [6]. By examining
+                                                           LR vs. loss curves, we show that these instabilities
+Let θ = A(η) denote the model weights θ ob- can be reproduced in small models by using high learn-
+tained when training with learning rate η, and let ing rates and that mitigations employed at scale are
+ℓ(θ) denote the validation loss when using weights effective in this regime.
+
+
+                                                           3
+                             Num params = 9.4e6, LR = 0.1                                                               4.4
+       8
+                                                            106
+                                                                                                                                     z-loss coefficient 1e-4                N = 2.4e+06
+                                                                                                                                     No z-loss                              N = 9.4e+06
+
+
+
+                                      Max attention logit
+       7                                                    105                                                         4.2          Weight decay 1e-4                      N = 1.9e+07
+       6                                                    104                                                                      No weight decay                        N = 4.2e+07
+Loss   5                                                    103                                                                                                             N = 8.5e+07
+                                                                                                                        4.0                                                 N = 1.5e+08
+                                                            102
+       4
+                                                            101
+       3                                                                                                                3.8
+
+
+                                                                                                      Final eval loss
+           0   2000 4000 6000 8000 10000                          0   2000 4000 6000 8000 10000
+                      Step                             Step
+       8
+                             Num params = 4.8e9, LR = 0.01
+                                                                                                                        3.6
+                                                            106
+
+
+
+
+                                      Max attention logit
+       7
+                                                            105
+       6                                                    104                                                         3.4
+Loss   5                                                    103
+       4                                                    102                                                         3.2
+                                                            101
+       3
+           0   2000 4000 6000 8000 10000                          0   2000 4000 6000 8000 10000
+                      Step                                                    Step                                      3.0
+                     qk-layernorm = True                              qk-layernorm = False
+                                                                                                                              10 4           10 3          10 2      10 1           100
+                                                                                                                                                     Learning rate
+Figure 2: The attention logit growth instability [11, 51]
+
+
+
+                                                                                                  LR sensitivity
+appears in small models at high learning rates. The mit-                                                            100
+igation of applying qk-layernorm proposed by Dehghani
+et al. [11] is equally effective in the small-scale regime.                                                        10 1
+The max attention logit is reported for layer 0, which we
+typically observe to have the largest logit values.                                                                            107
+                                                                                                                                               Number of parameters
+3.1.1            Attention logit growth            Figure 3: The effect of the output logit divergence instabil-
+                                                   ity [6] and the z-loss mitigation [6] (Section 3.1.2). Models
+Researchers have previously documented that Trans- in this experiment have qk-layernorm [11].
+former training fails when the attention logits be-
+come large [11, 51]. In Dehghani et al. [11], this issue
+emerged when training a ViT model [14] with 22 bil-
+lion parameters.                                         when using qk-layernorm. Without qk-layernorm, the
+In the self-attention layer of a Transformer [45], learning rate at which models diverge becomes smaller
+queries qi and keys ki are combined
+                                  √     to compute the with increasing model size. By contrast, models with
+attention logits zij = ⟨qi , kj ⟩/ dh , where dh is the qk-layernorm exhibit considerably lower LR sensitivity
+head dimension. Next, the attention logits are passed and train to low loss at high learning rates. As a
+through a softmax to produce attention weights, which highlight, qk-layernorm allows training a model with
+are used to combine values vi . Dehghani et al. [11] ob- 1.2B parameters at learning rate 0.3. Both with and
+served that the attention logits z became large, which without qk-layernorm, LR sensitivity increases with
+they refered to as attention logit growth. As a re- scale.
+sult, the attention weights collapse to one-hot vectors,
+which was named attention entropy collapse by Zhai
+                                                         Figure 2 displays the loss and max attention logit
+et al. [51]. To resolve this issue, Dehghani et al. [11]
+                                                         for two model scales that differ by three orders of
+proposed qk-layernorm, which applies LayerNorm [1]
+                                                         magnitude. In both cases, the loss diverges without
+to the queries and keys before computing the attention
+                                                         qk-layernorm. Our results in Appendix Figure E.1
+logits.
+                                                         suggest that attention logit growth is due to growth
+In our experiments, we find that models need not be in the queries and keys, not due to an increase in
+large to exhibit instability related to attention logit their alignment. Instead, we hypothesize this insta-
+growth. As shown in Figure 1, the maximum learning bility could result from the quadratic dependence of
+rate at which small models can be trained increases attention logits on parameter norms.
+
+
+                                                                                                  4
+            4.4                                                  0                                                                      Warmup = 50                           N = 2.4e+06
+
+
+
+
+                                           Output logit mean
+                                                                                                                           4.2          Warmup = 500                          N = 9.4e+06
+                                                                20                                                                      Warmup = 5000                         N = 1.9e+07
+            4.2
+
+Eval loss
+                                                                40                                                                      Warmup = 10000                        N = 4.2e+07
+                                                                                                                           4.0          Warmup = 25000                        N = 8.5e+07
+            4.0
+                                                                60                                                                                                            N = 1.5e+08
+            3.8                                                                                                            3.8                                                N = 3.0e+08
+                                                                80
+
+
+
+                                                                                                         Final eval loss
+            3.6                                                100                                                         3.6
+                  0       50000      100000                          0         50000     100000
+                          Step                                                 Step
+                        z-loss coefficient 1e-4                          Weight decay 1e-4                                 3.4
+                        No z-loss                                        No weight decay
+                                                                                                                           3.2
+ Figure 4: An example of the output logit divergence insta-
+ bility [6] (Section 3.1.2) in a 2.4M parameter Transformer
+ at learning rate 0.1.                                                                                                     3.0
+
+                                                                                                                           2.8
+ 3.1.2                Output logit divergence
+                                                                                                                                 10 4         10 3       10 2          10 1           100
+ Another instability reported by researchers training                                                                                                Learning rate
+
+
+                                                                                                  LR sensitivity
+ large models is divergence in the output logits from                                                               10 1
+ the log probabilities [6]. Just as before, we reproduce                                                           6 × 10 2
+ this instability with small models at large learning                                                              4 × 10 2
+                                                                                                                   3 × 10 2
+ rates, and the proposed mitigation ameliorates the                                                                2 × 10 2
+ issue. Overall, Figure 3 summarizes the effect.                                                                                  107                                108
+                                                                                                                                                Number of parameters
+ Let y denote the model’s output logits, which are
+ used to compute class P  probabilities pi via a softmax                                              Figure 5: The effect of warm-up length for different model
+ pi = eyi /Z where Z = j eyj . This instability occurs                                                sizes. Longer warm-up reduces LR sensitivity and loss,
+ when the logits diverge and become very negative, as                                                 especially for the larger models we test. Models in this
+ illustrated in Figure 4 for a 2.4M parameter model at                                                experiment use qk-layernorm [11].
+ learning rate 0.1. In contrast to the attention logit
+ growth instability, this divergence occurs towards the
+ end of training. The mitigation proposed by Chowdh-                                                  scaling? This section aims to answer this question for
+ ery et al. [6] is to encourage log Z to remain close to                                              common techniques such as warm-up, weight decay,
+ zero. They add an auxiliary loss log2 Z, referred to                                                 and µParam [50].
+ as z-loss, with coefficient 1e-4.
+ As illustrated in Figures 3 and 4, we find that instabil-                                            3.2.1                      Warm-up
+ ity related to output logit divergence occurs in models                                              As illustrated by Figure 5, a longer warm-up period
+ with no weight decay regardless of scale, and z-loss                                                 reduces LR sensitivity. This is most clear for the larger
+ resolves this instability. Weight decay also mitigates                                               models, which are not stable at LR 3e-1 without long
+ this instability for the larger models we test.                                                      warm-up. The number of total steps is fixed to 1e5 in
+                                                                                                      this experiment, and all models use qk-layernorm. The
+ 3.2                  Measuring the effect of other                                                   importance of warm-up for stability has previously
+                      known interventions                                                             been highlighted [17, 42, 30], although these works do
+                                                                                                      not measure scaling behavior.
+ The previous section used the relationship between
+ learning rate and loss as a useful tool for examining
+                                                                                                      3.2.2                      Independent weight decay
+ two known instabilities and their mitigation. This
+ raises the question of how other known model and                                                     Parameterizing weight decay independently of learn-
+ optimizer interventions affect the shape of LR vs. loss                                              ing rate reduces LR sensitivity, as illustrated in Fig-
+ curves across scales. In particular, can LR sensitivity                                              ure 6. While this was recommended by Loshchilov
+ help identify additional issues or resolutions when                                                  and Hutter [33], it is not common practice in the
+
+
+                                                                                                  5
+                                      Independent decay = True               N = 2.4e+06                            4.2
+                                                                                                                                 Scaling width         dim = 256           layers = 3
+                         4.2          Independent decay = False              N = 9.4e+06                                         Scaling depth         dim = 512           layers = 6
+                                                                             N = 1.9e+07                            4.0                                dim = 768           layers = 12
+                                                                             N = 4.2e+07                                                               dim = 1024          layers = 24
+                         4.0                                                 N = 8.5e+07                                                               dim = 2048          layers = 48
+                                                                             N = 1.5e+08                            3.8                                                    layers = 96
+                         3.8                                                 N = 3.0e+08
+
+
+
+
+       Final eval loss
+                                                                                                                    3.6
+
+
+                                                                                                  Final eval loss
+                         3.6
+
+                                                                                                                    3.4
+                         3.4
+
+                         3.2                                                                                        3.2
+
+                         3.0                                                                                        3.0
+
+                         2.8                                                                                        2.8
+
+                               10 4          10 3        10 2         10 1           100                                  10 4             10 3       10 2          10 1          100
+                                                    Learning rate                                                                                 Learning rate
+                  10 1                                                                                       10 1
+
+
+LR sensitivity
+                                                                                                                                 Scaling width
+
+
+                                                                                           LR sensitivity
+                 6 × 10 2                                                                                   6 × 10 2             Scaling depth
+                 4 × 10 2                                                                                   4 × 10 2
+                 3 × 10 2                                                                                   3 × 10 2
+                 2 × 10 2                                                                                   2 × 10 2
+                                107                                 108                                                              107                            108
+                                               Number of parameters                                                                          Number of parameters
+  Figure 6: Independently scaling LR without also scaling                                      Figure 7: Independently scaling depth increases LR sen-
+  weight decay reduces LR sensitivity. While this was recom-                                   sitivity at a faster rate than scaling width, though also
+  mended by Loshchilov and Hutter [33], it is not common                                       produces a model with lower loss at the largest scale we
+  practice in the default AdamW implementations in popu-                                       test. Refer to Appendix Figure E.2 for this experiment
+  lar libraries. Refer to Section 3.2.2 for more information.                                  without qk-layernorm.
+  Models in this experiment use qk-layernorm [11].
+
+                                                                                               we set λ=1e-4, and without independent decay we set
+  default AdamW implementations of PyTorch [36] or                                             λ=0.1. A sweep on weight decay values is conducted
+  Optax [2]. We explain the differences below.                                                 in Figure E.10.
+                                   √
+  For parameters θ, let ∆ = v/ ( u + ϵ) denote the
+                                                                                               3.2.3                      Scaling width vs. depth
+  AdamW update without learning rate or weight decay.
+  For weight decay coefficient λ, max learning rate η,                                         We have so far consistently observed that increasing
+  and schedule st ∈ [0, 1], Loshchilov and Hutter [33]                                         the number of parameters increases LR sensitivity. We
+  recommend the update θ ← θ −st (η∆−λθ), which we                                             now examine which part of scaling is most responsible.
+  refer to as independent decay. On the other hand, the
+  default implementation in PyTorch or Optax applies                                           Our results, illustrated by Figure 7, indicate that scal-
+  the update θ ← θ − st η(∆ − λθ), i.e., η now scales                                          ing depth increases LR sensitivity at a faster rate
+  both terms.                                                                                  than scaling width. However, at the largest scale we
+                                                                                               test, independently scaling depth produces a model
+  When reporting LR sensitivity without independent                                            with lower validation loss. A validation loss compar-
+  decay in Figure 6, we report the minimum LR sensi-                                           ison between width scaling, depth scaling, and joint
+  tivity over ranges [1e-4, 1e-1] and [3e-4, 3e-1] because                                     scaling is in Appendix Figure E.3. The standard prac-
+  the former is sometimes better centered on the min-                                          tice of joint scaling performs best at the largest scale
+  imum. The default setting in this paper is to use                                            and also has a more reliable scaling prediction when
+  independent decay. When using independent decay                                              extrapolating.
+
+
+                                                                                           6
+                                    Standard                        N = 2.4e+06         ever, µParam does not improve loss or reduce LR
+                      4.25          MuParam (simple)                N = 9.4e+06         sensitivity in our experiments. Appendix Figure E.4
+                                                                    N = 1.9e+07         repeats this experiment without qk-layernorm. Our
+                                                                    N = 4.2e+07
+                      4.00                                          N = 8.5e+07         results indicate that µParam does not alleviate the
+                                                                    N = 1.5e+08         need for this intervention at high learning rates. We
+                                                                    N = 3.0e+08         note that from a practical perspective, reducing LR
+                      3.75                                          N = 1.2e+09
+                                                                                        sensitivity is not important if the optimal LR does
+
+
+    Final eval loss
+                                                                                        not change.
+                      3.50
+                                                                                        We refer to the variant of µParam that we use in these
+                      3.25                                                              experiments as µParam (simple) because it maintains
+                                                                                        only the core feature of µParam. We add additional
+                      3.00                                                              features from Yang et al. [50] in Appendix Figure E.5
+                                                                                        without measurable improvement at the largest scale
+                                                                                        we test. For µParam (simple) we make the following
+                      2.75
+                                                                                        changes from our standard baseline: scale the LR for
+                                                                                        linear layers by base-fan-in/fan-in. For µParam (full)
+                      2.50                                                              there are three additional √ changes: (i) initialize the
+                             10 4         10 3         10 2       10 1        100
+                                                  Learning rate                         head with standard
+                                                                                                        √    deviation   base-fan-in/fan-in; (ii)
+                 6 × 10 2           Standard                                            change the 1/ dh scaling factor in attention layers
+
+
+LR sensitivity
+                 4 × 10 2
+                                    MuParam (simple)                                    to 1/dh where dh is the head dimension; and (iii)
+                 3 × 10 2                                                               initialize the query projection weights with zeros. For
+                 2 × 10 2
+                                                                                        base-fan-in we use the fan-in values for the smallest
+                                                                                        model we test, which has width 256.
+                              107                      108                  109
+                                             Number of parameters                       We comment briefly on the aforementioned changes (ii)
+                                                                                        and (iii). First, we ablate on change (ii) in isolation in
+  Figure 8: Measuring the effect of µParam on LR sensi-
+  tivity for models with qk-layernorm [11]. In our setting                              Appendix Figure E.6. While this intervention reduces
+  µParam succeeds in stabilizing the optimal LR, though it                              loss slightly at the smallest scale we test, the reverse
+  does not improve loss or reduce LR sensitivity. For more                              is true for the largest scale we test. Also, removing
+  information refer to Section 3.2.4.                                                   the square root from the scaling factor in attention
+                                                                                        layers does not alleviate the need for qk-layernorm.
+                                                                                        Finally, with regards to change (iii), we note that in
+  When scaling depth, we use d = 512, and when scaling                                  preliminary experiments this change had no noticeable
+  width, we use 6 layers. The number of heads is scaled                                 effect.
+  proportionally with width, so that the head dimension
+  remains the same.                                      3.2.5 Additional interventions
+  Figure E.2 repeats this experiment without qk-
+  layernorm, finding that the attention logit growth This section recreates the previous plots with addi-
+  instability occurs more frequently at scale regardless tional interventions or hyperparameter changes. Cor-
+  of whether width or depth are scaled.                  responding figures are displayed in the appendix.
+                                                            • Changing the number of training steps from 1e5
+  3.2.4 µParam                                                to 5e4 or 2e5 does not meaningfully change LR
+                                                              sensitivity (Appendix Figure E.7).
+  Yang and Hu [49] introduced the µParam method for
+  parameterizing a neural network. As a product, the        • We try applying qk-layernorm across the whole
+  optimal LR remains consistent when scaling model            model dimension instead of individually per-head
+  width [50]. This section tests the effect of µParam         with  shared parameters. As illustrated in Ap-
+  on LR sensitivity, and examines whether µParam              pendix   Figure E.8, the latter performs better.
+  alleviates the need for qk-layernorm [11].                  We   use per-head qk-layernorm as the default in
+                                                              all other experiments.
+  As illustrated by Figure 8, µParam does succeed in
+  stabilizing the optimal LR at the scale we test. How-     • Increasing the batch size from 256 to 512 or 1024
+
+
+                                                                                    7
+                            LR = 0.0001          LR = 0.0003         LR = 0.003             LR = 0.01                         LR = 0.03                  LR = 0.1
+
+
+
+Max attention logit
+                      106                  106                 106                   106                              106                         106
+
+
+
+
+                                           105                 105                   105                              105                         105
+
+
+
+
+                      104                  104                 104                   104                              104                         104
+
+
+
+
+                                           103                 103                   103                              103                         103
+
+
+
+
+                      102                  102                 102                   102                              102                         102
+
+
+
+
+                                           101                 101                   101                              101                         101
+
+
+
+
+                             107 108 109         107 108 109         107 108 109           107 108 109                        107 108 109               107 108 109
+                            Num params           Num params          Num params            Num params                       Num params                  Num params
+                                  qk-layernorm = True          Successful           Quadratic fit                                 Additional experiment to
+                                  qk-layernorm = False         Instability          Extrapolated trend                            validate predicted instability
+
+   Figure 9: Predicting the attention logit growth instability via scaling behavior of model characteristics. We extrapolate
+   to predict that a larger model will become unstable at LR 1e-2, and run an experiment to confirm the prediction.
+   Refer to Section 3.3 for more information.
+
+
+                       does not meaningfully change LR sensitivity (Ap-
+                                                                                                          6.5               Fixed scale
+                       pendix Figure E.9, each batch element contains                                                       Zero layer baseline
+                       512 tokens). When increasing batch size we de-                                     6.0
+                       crease the number of training steps so that the                                    5.5
+
+                                                                                             Final loss
+                       amount of data seen is constant. We believe a
+                       similar effect would be observed if instead we held                                5.0
+                       the number of steps constant because changing                                      4.5
+                       the number of steps has no impact on LR sensi-
+                       tivity at batch size 256 (Appendix Figure E.7).                                    4.0
+                                                                                                          3.5
+               • The effect of changing the weight decay from 1e-4                                              100         101       102      103        104
+                 is illustrated in Figure E.10. Increasing decay                                                            Scaling constant
+                 appears to slightly shift the optimal LR right.
+                                                                                   Figure 10: Enforcing a max attention logit of approxi-
+     • We find that the logit growth instability is not mately κ in a small model to determine which value of κ
+       due to the softmax in the self-attention layer, as it inhibits learning.
+       still occurs with a pointwise variant of attention
+       (Appendix Figure E.11).
+                                                             attention logit at different learning rate values.3 At
+                                                             each learning rate, we fit a quadratic to predict how
+   3.3 Predicting attention logit growth the max attention logit will change with model scale.
+                            instability from scaling behavior of
+                            model characteristics                We first noticed that all points with attention logits
+                                                                                   above 1e4 diverged. Moreover, the quadratic fit pre-
+   A central question when studying instabilities is                               dicted that for LR 1e-2 the next model scale would
+   whether they can be predicted. We now examine                                   also cross that value. Based on this prediction, we
+   whether it is possible to predict the logit growth in-                          trained a new 4.8B parameter model at LR 1e-2. This
+   stability before it occurs. We track the attention                              model diverged as predicted. Not only do we pre-
+   logit maximums across model scales and fit a curve                              dict the divergence, but our fit closely extrapolates to
+   to the data. We use this to predict that a 4.8B pa-                             predict the value of the max attention logit.
+   rameter model will be unstable at LR 1e-2 without
+   qk-layernorm and run an experiment to confirm this                                 3We use block 0, which typically has the largest logits, and
+   prediction.                                                                     consider the value at step 2e3. Much earlier than 2e3 was
+                                                                                   uninformative, and much later the unstable points had long
+   Figure 9 plots the number of parameters vs. max                                 past diverged.
+
+
+                                                                               8
+                 10 4                            10 4
+                                                                                    10 7
+                                                 10 5
+
+      Grad RMS
+                 10 5
+                 10 6                            10 6                               10 8
+                 10 7                            10 7
+                 10 8                            10 8                               10 9
+                        107      108       109          10 3       10 2    10 1            0    5     10   15     20
+                              Num params                            LR                              Block index
+                    0.0003                 0.3      9.4e6                   1.2e9      9.4e6                      1.2e9
+                                 LR                         Num params                     Num params (at LR 3e-1)
+Figure 11: Predicting a potential instability from the scaling behavior of model characteristics. The gradient root
+mean square (RMS) decreases with num params (left) and learning rate (middle). These trends indicate that
+hyperparameter adjustment may be required to successfully scale further, as the RMS is approaching the default
+AdamW ϵ hyperparameter. If the gradient RMS becomes too small without adjusting ϵ or weight decay, a layer may
+collapse. The gradient RMS in the left and middle plot is reported for the first MLP layer of block 0, but we observe
+similar trends for other layers (e.g., Appendix Figure E.12). Gradient RMS across different blocks is also reported
+(right). Gradient and update RMS are averaged over the final 500 steps, refer to Appendix Figure E.13 for the data
+during training.
+
+
+One question unresolved by our analysis so far is                  proaches is cause for concern. At the largest scale
+whether we could have predicted that instability arises            and learning rate we test, grad RMS is around the
+when the max attention logit exceeds 1e4 without ma-               default AdamW ϵ hyperparameter.√Recall that the
+nipulating learning rate and model size. We take ini-              unscaled AdamW update is ∆ = v/ ( u + ϵ), where v
+tial steps towards an answer by transplanting different            and u are the first and second gradient moment EMA,
+values of max attention logit into a small network with            respectively. If the grad RMS is on the same order as
+10M parameters. For different constants
+                                  √     pκ we pass the             ϵ, then ∆ will decrease in magnitude as illustrated by
+queries and keys through g(z) = κ·z/ Ei [zi2 ] before              Figure 13, and parameters will not receive learning
+computing the attention logits. Results are illustrated            signals as intended.
+in Figure 10. Loss deteriorates around κ =1e3, and
+by κ =1e4 the loss exceeds that of a zero-layer bigram             An obvious mitigation for this issue is to simply lower
+model consisting of the Transformer we use without                 the AdamW ϵ hyperparameter from its default of 1e-
+any self-attention or MLP layers.                                  8. We conduct this experiment for a 4.8B parameter
+                                                                   model at LR 0.3 and present the results in Figure 12.
+                                                                   Decreasing ϵ to 1e-15 improves loss and mitigates a
+3.4       Searching for new instabilities via                      collapse in grad RMS. We believe this improvement
+          scaling trends of model character-                       will only increase at scale. On the other hand, in-
+          istics                                                   creasing ϵ to 1e-6 results in an instability (shown in
+                                                                   Figure E.15).
+This section examines whether the scaling behavior
+of model characteristics can be used to predict new Figure 13 expands on this result by illustrating the
+issues with the default model and hyperparameter grad and update RMS throughout training at the
+settings.                                                largest scale and learning rate we test. When the grad
+In Figure 11 we examine scaling ptrends for the gradient RMS reaches ϵ, the update RMS becomes small. Fig-
+root mean square RMS(g) = Ei [gi2 ]. This figure ure E.13 presents data from an analogous experiment
+reports the RMS for the first layer of the MLP, though at many different scales and LRs, demonstrating that
+we observe similar trends for other layers (Appendix this issue is most apparent for the larger models and
+Figure E.12).                                            LRs we test.
+
+As models get larger, the value that grad RMS ap- Although we identified the instability above by empir-
+
+
+                                                               9
+       3.6                                                      The Edge of Stability and fast spikes
+                                       10 8
+       3.4
+                                       10 9                 The conventional understanding of gradient descent
+
+
+                            Grad RMS
+       3.2                             10 10                predicts that loss instability only occurs when the
+Loss                             10 11
+                                                            learning rate exceeds 2/λmax (H), where H is the
+   3.0
+                                                            Hessian. However recent investigations into large
+   2.8                           10 12                      batch neural network training dynamics have re-
+                                 10 13                      vealed a more complicated picture via edge of stability
+   2.6
+       0        50000     100000       0        10       20 (EoS) [7]. When training neural networks with large
+                Step                         Block index    batch SGD, the loss curvature constantly evolves via
+                   Eps = 1e-8        Eps = 1e-15            the interaction of two processes: progressive sharpen-
+                                                            ing and self stabilization. Progressive sharpening is
+Figure 12: Decreasing the AdamW ϵ from its default value the empirical observation that when LR < 2/λmax (H),
+of 1e-8 to 1e-15 improves loss for a 4.8B parameter model the curvature gradually increases until the stability
+at LR 0.3. When increasing ϵ to 1e-6, loss diverged. Grad threshold is violated. When the learning rate becomes
+RMS is averaged over the final 500 steps for the first too large relative to the curvature, fast loss spikes oc-
+layer in the MLP; refer to Figure 13 for data throughout cur and the parameters oscillate into a region with
+training.                                                   smaller λmax (H) where stable training and progressive
+                                                            sharpening resumes. The latter process where insta-
+                                                            bility results in smaller λmax (H) is self-stabilization,
+ically measuring the scaling behavior of the gradients, a theoretical model of which is given in Damian et al.
+a mechanistic explanation exists. For larger networks [9]. Gradually shrinking λmax (H) via self stabilization
+and learning rates, the Transformer output RMS enter- was shown to be a primary mechanism behind the
+ing the final layernorm may grow. Since the layernorm success of learning rate warmup in Gilmer et al. [17],
+gradients are scaled by the inverse of their input RMS, who closely studied the connections between curva-
+the gradient received by the Transformer will shrink. ture, initialization, architecture and max trainable
+Refer to Appendix C for a more detailed discussion. learning rates.
+
+                                                                Cohen et al. [8] further analyze edge of stability of
+4            Related work                                       dynamics with adaptive optimizers, showing that
+                                                                progressive sharpening interacts with both the self-
+This paper mainly focuses on the effect of known in-            stabilization process and the adaptive optimizer state.
+terventions and instabilities, and so related work has          This interaction results in the preconditioned sharp-
+been primarily discussed when relevant. This includes           ness λmax (P −1 H) oscillating around an optimizer spe-
+the attention growth instability observed by Dehghani           cific threshold (38/LR in the case of Adam with
+et al. [11], Zhai et al. [51], and the final logit divergence   β1 =0.9). Adaptive EoS (AEoS) can also result
+issue encountered by Chowdhery et al. [6], Thilak et al.        in periodic loss spikes when progressive sharpening
+[44]. However, we highlight similar experimental meth-          pushes the preconditioned sharpness above the stabil-
+ods in previous work. For instance, Yang et al. [50]            ity threshold, however the optimizer hyperparameters
+also measure the relationship between LR and loss               play a role. In particular, when LR>38/λmax (P −1 H),
+across scales, but their focus is on centering the opti-        two mechanisms are now in play to resolve the step
+mum (see Section 3.2.4). In addition, Zhai et al. [51]          size being too big—either H can shrink or P −1 can
+elicit instability in base models by doubling learning          shrink (or both). Cohen et al. [8] found that when
+rate, and Dettmers et al. [12] measure the presence             β2 is large, H tends to shrink and fast loss spikes
+of outlier features as a function of scale.                     result during the process, resembling the self stabiliza-
+                                                                tion process observed with gradient descent. However
+There are also important instabilities and related top-         when β2 is small, P −1 tends to shrink, no loss spikes
+ics we have not directly discussed so far. For instance,        are observed, and λmax (H) tends to gradually increase
+we have primarily focused on instabilities that lead            throughout training.
+to a slow divergence, and we now summarize research
+on fast loss spikes. This instability is characterized It is noteworthy that the adaptive edge of stability
+by a quick increase in the loss that often eventually process (and the role of β2 ) studied in Cohen et al. [8]
+recovers.                                                offers a more complete understanding for loss spikes
+
+
+                                                            10
+                                    Block = 0                           Block = 6                         Block = 16                         Block = 22
+                       10 6                               10 6                                10 6                               10 6
+                       10 7                               10 7                                10 7                               10 7
+
+Grad RMS
+                       10 8                               10 8                                10 8                               10 8
+                       10 9                               10 9                                10 9                               10 9
+                10 10                                  10 10                              10 10                              10 10
+                10 11                                  10 11                          10 11                          10 11
+                              0 25000 50000 75000100000      0 25000 50000 75000100000      0 25000 50000 75000100000      0 25000 50000 75000100000
+                                       Step                                Step                              Step                               Step
+
+
+
+
+ Unscaled update RMS
+                       10 1                               10 1                                10 1                               10 1
+
+
+                       10 2                               10 2                                10 2                               10 2
+
+
+                       10 3                               10 3                                10 3                               10 3
+
+                              0 25000 50000 75000100000          0 25000 50000 75000100000           0 25000 50000 75000100000          0 25000 50000 75000100000
+                                       Step                                Step                              Step                               Step
+                                                                 Eps = 1e-6 (diverged)        Eps = 1e-8 (default)       Eps = 1e-15
+
+ Figure 13: The top row displays the root mean square (RMS) of the gradient for the first MLP layer at different
+ blocks throughout the network. When the grad RMS drops below the AdamW ϵ hyperparameter, the magnitude of
+ the update decreases, as illustrated by the bottom row. Experiment conducted with a 4.8B parameter model trained
+ with LR 0.3. The experiment with ϵ = 1e-6 was stopped when loss diverged.
+
+
+studied in a body of literature [42, 6, 35, 47, 52, 5].                                      loss [13, 48, 3, 25].
+For example, Shazeer and Stern [42] argue that during
+training of Transformers with adaptive optimizers the
+optimizer update can become too big resulting in a                                           5       Conclusion
+loss spike followed by recovery. This is sometimes
+attributed to the adaptive optimizer state becoming                                          As the compute required to train the largest models
+“stale”, which is consistent with the observation the                                        continues to increase, it becomes increasingly impor-
+reducing β2 resolves the loss spikes [42, 47, 52]. This                                      tant to understand if training will be stable. This
+is perhaps the same observation as Cohen et al. [8]                                          paper has shown that useful insights on stability can
+that reducing β2 allows P −1 to change quicker to                                            be found when studying small Transformers. We hope
+adjust to the process of progressive sharpening. AEoS                                        that this opens new opportunities for impactful re-
+also offers an explanation for the periodic loss spikes                                      search which benefits large runs without access to
+observed when training large transformer models [35].                                        large resource pools.
+
+                                                                                             Acknowledgements
+ Parameter-free methods and more parameter-
+ izations. While our work has studied sensitivity                                         We thank George Dahl for thorough comments and
+ to learning rate, there is also research that aims to                                    suggestions, and Hugo Larochelle and Rif A. Saurous
+ eliminate the need to specify a learning rate [24, 10].                                  for helpful discussion. Also, we thank the members of
+ Based on their analysis, Ivgi et al. [24] set the step                                   the Google DeepMind PAGI team for their support
+ size for iteration t to the maximum distance from the                                    of this effort, Noah Fiedel, Noah Constant, Aaron
+ initialization divided by the root sum of historical                                     Parisi, Alex Rizkowsky, Avi Singh, Azade Nova, Bernd
+ gradient squares. Moreover, while our work investi-                                      Bohnet, Daniel Freeman, Gamaleldin Elsayed, Hanie
+ gated µParam, there are additional parameterizations                                     Sedghi, Isabelle Simpson, James Harrison, Jiri Hron,
+ for which it would be interesting to explore LR vs.                                      Kathleen Kenealy, Kevin Swersky, Kshiteej Mahajan,
+
+
+                                                                                         11
+Laura Culp, Max Bileschi, Merrie Morris, Rosanne                neural networks typically occurs at the edge of sta-
+Liu, Yundi Qian, Sharad Vikram, Tris Warkentin.                 bility. arXiv preprint arXiv:2103.00065, 2021.
+
+                                                             [8] Jeremy M Cohen, Behrooz Ghorbani, Shankar Kr-
+References                                                       ishnan, Naman Agarwal, Sourabh Medapati, Michal
+                                                                 Badura, Daniel Suo, David Cardoze, Zachary Nado,
+[1] Jimmy Lei Ba, Jamie Ryan Kiros, and Geoffrey E               George E Dahl, et al. Adaptive gradient methods at
+    Hinton.    Layer normalization. arXiv preprint               the edge of stability. arXiv preprint arXiv:2207.14484,
+    arXiv:1607.06450, 2016.                                      2022.
+
+[2] Igor Babuschkin, Kate Baumli, Alison Bell, Surya    [9] Alex Damian, Eshaan Nichani, and Jason D Lee. Self-
+    Bhupatiraju, Jake Bruce, Peter Buchlovsky, David        stabilization: The implicit bias of gradient descent at
+    Budden, Trevor Cai, Aidan Clark, Ivo Danihelka,         the edge of stability. arXiv preprint arXiv:2209.15594,
+    Antoine Dedieu, Claudio Fantacci, Jonathan God-         2022.
+    win, Chris Jones, Ross Hemsley, Tom Hennigan,
+    Matteo Hessel, Shaobo Hou, Steven Kapturowski, [10] Aaron Defazio and Konstantin Mishchenko. Learning-
+    Thomas Keck, Iurii Kemaev, Michael King, Markus         rate-free learning by d-adaptation. arXiv preprint
+    Kunesch, Lena Martens, Hamza Merzic, Vladimir           arXiv:2301.07733, 2023.
+    Mikulik, Tamara Norman, George Papamakarios,
+                                                       [11] Mostafa Dehghani, Josip Djolonga, Basil Mustafa,
+    John Quan, Roman Ring, Francisco Ruiz, Alvaro
+                                                            Piotr Padlewski, Jonathan Heek, Justin Gilmer,
+    Sanchez, Laurent Sartran, Rosalia Schneider, Eren
+                                                            Andreas Steiner, Mathilde Caron, Robert Geirhos,
+    Sezener, Stephen Spencer, Srivatsan Srinivasan,
+                                                            Ibrahim Alabdulmohsin, et al. Scaling vision trans-
+    Miloš Stanojević, Wojciech Stokowiec, Luyu Wang,
+                                                            formers to 22 billion parameters. arXiv preprint
+    Guangyao Zhou, and Fabio Viola. The DeepMind
+                                                            arXiv:2302.05442, 2023.
+    JAX Ecosystem, 2020. URL http://github.com/
+    deepmind.                                          [12] Tim Dettmers, Mike Lewis, Younes Belkada, and
+                                                            Luke Zettlemoyer. Llm. int8 (): 8-bit matrix mul-
+[3] Blake Bordelon and Cengiz Pehlevan. Dynamics
+                                                            tiplication for transformers at scale. arXiv preprint
+    of finite width kernel and prediction fluctuations
+                                                            arXiv:2208.07339, 2022.
+    in mean field neural networks. arXiv preprint
+    arXiv:2304.03408, 2023.                            [13] Emily Dinan, Sho Yaida, and Susan Zhang. Effective
+                                                             theory of transformers at initialization. arXiv preprint
+[4] James Bradbury, Roy Frostig, Peter Hawkins,
+                                                             arXiv:2304.02034, 2023.
+    Matthew James Johnson, Chris Leary, Dougal
+    Maclaurin, George Necula, Adam Paszke, Jake Van- [14] Alexey Dosovitskiy, Lucas Beyer, Alexander
+    derPlas, Skye Wanderman-Milne, and Qiao Zhang.           Kolesnikov, Dirk Weissenborn, Xiaohua Zhai,
+    JAX: composable transformations of Python+NumPy          Thomas Unterthiner, Mostafa Dehghani, Matthias
+    programs, 2018. URL http://github.com/google/            Minderer, Georg Heigold, Sylvain Gelly, Jakob Uszko-
+    jax.                                                     reit, and Neil Houlsby. An image is worth 16x16
+                                                             words: Transformers for image recognition at scale.
+[5] X. Chen, S. Xie, and K. He.           An empirical       In International Conference on Learning Representa-
+    study of training self-supervised vision transform-      tions (ICLR), 2021. https://arxiv.org/abs/2010.
+    ers. In 2021 IEEE/CVF International Confer-              11929.
+    ence on Computer Vision (ICCV), pages 9620–
+    9629, Los Alamitos, CA, USA, oct 2021. IEEE [15] Colin Gaffney, Dinghua Li, Ruoxin Sang, Ayush Jain,
+    Computer Society. doi: 10.1109/ICCV48922.2021.           and Haitang Hu. Orbax, 2023. URL http://github.
+    00950. URL https://doi.ieeecomputersociety.              com/google/orbax.
+    org/10.1109/ICCV48922.2021.00950.
+                                                        [16] Justin Gilmer, Andrea Schioppa, and Jeremy Co-
+[6] Aakanksha Chowdhery, Sharan Narang, Jacob De-            hen. Intriguing properties of transformer training
+    vlin, Maarten Bosma, Gaurav Mishra, Adam Roberts,        instabilities. To appear.
+    Paul Barham, Hyung Won Chung, Charles Sut-
+    ton, Sebastian Gehrmann, et al. Palm: Scaling [17] Justin Gilmer, Behrooz Ghorbani, Ankush Garg,
+    language modeling with pathways. arXiv preprint          Sneha Kudugunta, Behnam Neyshabur, David Car-
+    arXiv:2204.02311, 2022.                                  doze, George Dahl, Zachary Nado, and Orhan Firat.
+                                                             A loss curvature perspective on training instability
+[7] Jeremy M Cohen, Simran Kaur, Yuanzhi Li, J Zico          in deep learning. arXiv preprint arXiv:2110.04369,
+    Kolter, and Ameet Talwalkar. Gradient descent on         2021.
+
+
+                                                        12
+[18] Xavier Glorot and Yoshua Bengio. Understanding the [29] Jaehoon Lee. A random walk model of transformer
+     difficulty of training deep feedforward neural networks.      parameter growth, 2023.
+     In Proceedings of the thirteenth international confer-
+     ence on artificial intelligence and statistics, pages [30] Liyuan Liu, Haoming Jiang, Pengcheng He, Weizhu
+     249–256. JMLR Workshop and Conference Proceed-                Chen, Xiaodong Liu, Jianfeng Gao, and Jiawei Han.
+     ings, 2010.                                                   On the variance of the adaptive learning rate and
+                                                                   beyond. arXiv preprint arXiv:1908.03265, 2019.
+[19] Google. Grain - feeding jax models, 2023. URL
+     http://github.com/google/grain.                          [31] Peter J. Liu*, Mohammad Saleh*, Etienne Pot, Ben
+                                                                   Goodrich, Ryan Sepassi, Lukasz Kaiser, and Noam
+[20] Jonathan Heek, Anselm Levskaya, Avital Oliver, Mar-           Shazeer. Generating wikipedia by summarizing long
+     vin Ritter, Bertrand Rondepierre, Andreas Steiner,            sequences. In International Conference on Learning
+     and Marc van Zee. Flax: A neural network li-                  Representations, 2018. URL https://openreview.
+     brary and ecosystem for JAX, 2023. URL http:                  net/forum?id=Hyg0vbWC-.
+     //github.com/google/flax.
+                                                              [32] Ilya Loshchilov and Frank Hutter. Sgdr: Stochas-
+[21] Dan Hendrycks and Kevin Gimpel. Gaussian error
+                                                                   tic gradient descent with warm restarts. In In-
+     linear units (gelus). arXiv preprint arXiv:1606.08415,
+                                                                   ternational Conference on Learning Representations
+     2016.
+                                                                   (ICLR), 2016. https://arxiv.org/abs/1608.03983.
+[22] Jordan Hoffmann, Sebastian Borgeaud, Arthur Men-
+     sch, Elena Buchatskaya, Trevor Cai, Eliza Ruther- [33] Ilya Loshchilov and Frank Hutter. Decoupled weight
+     ford, Diego de Las Casas, Lisa Anne Hendricks, Jo-            decay regularization. In International Conference
+     hannes Welbl, Aidan Clark, et al. Training compute-           on Learning Representations (ICLR), 2019. https:
+     optimal large language models. arXiv preprint                 //openreview.net/forum?id=Bkg6RiCqY7.
+    arXiv:2203.15556, 2022.
+                                                             [34] William Merrill, Vivek Ramanujan, Yoav Goldberg,
+[23] Weizhe Hua, Zihang Dai, Hanxiao Liu, and Quoc Le.            Roy Schwartz, and Noah Smith. Effects of param-
+     Transformer quality in linear time. In International         eter norm growth during transformer training: In-
+     Conference on Machine Learning, pages 9099–9117.             ductive bias from gradient descent. arXiv preprint
+     PMLR, 2022.                                                  arXiv:2010.09697, 2020.
+
+[24] Maor Ivgi, Oliver Hinder, and Yair Carmon. Dog is   [35] Igor Molybog, Peter Albert, Moya Chen, Zachary
+     sgd’s best friend: A parameter-free dynamic step size    DeVito, David Esiobu, Naman Goyal, Punit Singh
+     schedule. arXiv preprint arXiv:2302.12022, 2023.         Koura, Sharan Narang, Andrew Poulton, Ruan Silva,
+                                                              et al. A theory on adam instability in large-scale
+[25] Arthur Jacot, Franck Gabriel, and Clément Hon-
+                                                              machine learning. arXiv preprint arXiv:2304.09871,
+     gler. Neural tangent kernel: Convergence and gen-
+                                                              2023.
+     eralization in neural networks. In Advances in Neu-
+     ral Information Processing Systems (NeurIPS), 2018. [36] Adam Paszke, Sam Gross, Francisco Massa, Adam
+     https://arxiv.org/abs/1806.07572.                        Lerer, James Bradbury, Gregory Chanan, Trevor
+[26] Norman P Jouppi, Cliff Young, Nishant Patil, David          Killeen, Zeming Lin, Natalia Gimelshein, Luca
+     Patterson, Gaurav Agrawal, Raminder Bajwa, Sarah            Antiga,  et al. Pytorch: An imperative style, high-
+     Bates, Suresh Bhatia, Nan Boden, Al Borchers, et al.        performance    deep learning library. In Advances in
+     In-datacenter performance analysis of a tensor pro-         Neural  Information   Processing Systems (NeurIPS),
+     cessing unit. In Proceedings of the 44th annual inter-      2019. https://arxiv.org/abs/1912.01703.
+     national symposium on computer architecture, pages
+                                                            [37] Ofir Press and Lior Wolf. Using the output embed-
+     1–12, 2017.
+                                                                 ding to improve language models. In Proceedings
+[27] Jared Kaplan, Sam McCandlish, Tom Henighan,                 of the 15th Conference of the European Chapter of
+     Tom B Brown, Benjamin Chess, Rewon Child, Scott             the Association for Computational Linguistics: Vol-
+     Gray, Alec Radford, Jeffrey Wu, and Dario Amodei.           ume 2, Short Papers, pages 157–163, Valencia, Spain,
+     Scaling laws for neural language models. arXiv              April 2017. Association for Computational Linguistics.
+     preprint arXiv:2001.08361, 2020.                            URL https://aclanthology.org/E17-2025.
+
+[28] Taku Kudo and John Richardson. Sentencepiece: A         [38] Alec Radford, Jeffrey Wu, Rewon Child, David Luan,
+     simple and language independent subword tokenizer            Dario Amodei, and Ilya Sutskever. Language Models
+     and detokenizer for neural text processing. arXiv            are Unsupervised Multitask Learners, 2019. https:
+     preprint arXiv:1808.06226, 2018.                             //openai.com/blog/better-language-models/.
+
+
+                                                          13
+[39] Colin Raffel, Noam Shazeer, Adam Roberts, Kather- [49] Greg Yang and Edward J Hu. Tensor programs iv:
+     ine Lee, Sharan Narang, Michael Matena, Yanqi Zhou,           Feature learning in infinite-width neural networks. In
+     Wei Li, and Peter J. Liu. Exploring the limits of             International Conference on Machine Learning, pages
+     transfer learning with a unified text-to-text trans-          11727–11737. PMLR, 2021.
+     former. Journal of Machine Learning Research, 2020.
+     http://jmlr.org/papers/v21/20-074.html.                  [50] Greg Yang, Edward J Hu, Igor Babuschkin, Szymon
+                                                                   Sidor, Xiaodong Liu, David Farhi, Nick Ryder, Jakub
+[40] Colin Raffel, Noam Shazeer, Adam Roberts, Kather-             Pachocki, Weizhu Chen, and Jianfeng Gao. Ten-
+     ine Lee, Sharan Narang, Michael Matena, Yanqi Zhou,           sor programs v: Tuning large neural networks via
+     Wei Li, and Peter J. Liu. Exploring the limits of trans-      zero-shot hyperparameter transfer. arXiv preprint
+     fer learning with a unified text-to-text transformer.         arXiv:2203.03466, 2022.
+     Journal of Machine Learning Research, 21(140):1–67,
+                                                              [51] Shuangfei Zhai, Tatiana Likhomanenko, Etai Littwin,
+     2020. URL http://jmlr.org/papers/v21/20-074.
+                                                                   Dan Busbridge, Jason Ramapuram, Yizhe Zhang,
+     html.
+                                                                   Jiatao Gu, and Josh Susskind. Stabilizing trans-
+                                                                   former training by preventing attention entropy col-
+[41] Jie Ren, Samyam Rajbhandari, Reza Yazdani Am-
+                                                                   lapse. arXiv preprint arXiv:2303.06296, 2023.
+     inabadi, Olatunji Ruwase, Shuangyan Yang, Min-
+     jia Zhang, Dong Li, and Yuxiong He. {ZeRO- [52] Xiaohua Zhai, Basil Mustafa, Alexander Kolesnikov,
+     Offload}: Democratizing {Billion-Scale} model train-          and Lucas Beyer. Sigmoid loss for language image
+     ing. In 2021 USENIX Annual Technical Conference               pre-training. arXiv preprint arXiv:2303.15343, 2023.
+     (USENIX ATC 21), pages 551–564, 2021.
+                                                              [53] Susan Zhang, Stephen Roller, Naman Goyal, Mikel
+[42] Noam Shazeer and Mitchell Stern. Adafactor: Adap-             Artetxe, Moya Chen, Shuohui Chen, Christopher
+     tive learning rates with sublinear memory cost. In            Dewan, Mona Diab, Xian Li, Xi Victoria Lin, et al.
+     International Conference on Machine Learning, pages           Opt: Open pre-trained transformer language models.
+     4596–4604. PMLR, 2018.                                        arXiv preprint arXiv:2205.01068, 2022.
+
+[43] Jianlin Su, Yu Lu, Shengfeng Pan, Ahmed Murtadha,
+     Bo Wen, and Yunfeng Liu. Roformer: Enhanced
+     transformer with rotary position embedding. arXiv
+     preprint arXiv:2104.09864, 2021.
+
+[44] Vimal Thilak, Etai Littwin, Shuangfei Zhai, Omid
+     Saremi, Roni Paiss, and Joshua Susskind. The sling-
+     shot mechanism: An empirical study of adaptive opti-
+     mizers and the grokking phenomenon. arXiv preprint
+     arXiv:2206.04817, 2022.
+
+[45] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob
+     Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz
+     Kaiser, and Illia Polosukhin. Attention is all you
+     need. Advances in neural information processing sys-
+     tems, 30, 2017.
+
+[46] Mitchell Wortsman, Jaehoon Lee, Justin Gilmer, and
+     Simon Kornblith. Replacing softmax with relu in
+     vision transformers.
+
+[47] Mitchell Wortsman, Tim Dettmers, Luke Zettlemoyer,
+     Ari Morcos, Ali Farhadi, and Ludwig Schmidt. Sta-
+     ble and low-precision training for large-scale vision-
+     language models. arXiv preprint arXiv:2304.13013,
+     2023.
+
+[48] Sho Yaida. Meta-principled family of hyperparameter
+     scaling strategies. arXiv preprint arXiv:2210.04909,
+     2022.
+
+
+                                                          14
+A     Additional infrastructure de- learning rate by the root mean square of the parame-
+                                    ters (Figure E.14). Therefore, we do not measure LR
+      tails                         sensitivity in that case.
+This Section provides more details on the training in-     Shifting of the optimal LR
+frastructure, which is built on Flax [20], Jax [4], and
+TPUs [26], and we call NanoDO. To enable larger            The definition of LR sensitivity in Section 2.2 does not
+model training, we shard the model and optimizer           account for the optimal LR shifting when specifying
+states as in FSDP [41], then specify these shadings        the LR range [a, b]. In practice we recommend shifting
+when compiling with JIT. We use Orbax [15] for check-      the three order of magnitude range [a, b] to correspond
+pointing, and Grain [19] for deterministic data loading.   with this shift. For instance, we shift the range in
+When loading data, sequences are packed so that no         Section 3.2.2, as discussed in more detail in the section.
+padding is required—if a sequence is less tokens than      However, our main experiments (e.g., Figure 1) do not
+the context length hyperparameter, then an end of          test at a large enough scale to necessitate this shift.
+sequence token is appended, followed by the beginning
+                                                           LR sensitivity is invariant to loss
+of a new sequence.
+                                                      Another limitation of the LR sensitivity metric is
+                                                      that it is invariant to the scale of the loss. If the
+B When is learning rate sensi- network consistently achieves random performance
+                                                      across learning rates, then LR sensitivity will be zero.
+       tivity a useful metric                         We do not offer a solution to this, and instead recom-
+There are cases where LR sensitivity (defined in Sec- mend that LR sensitivity should always be examined
+tion 2.2) is no longer a useful metric. This section in combination with the LR vs. loss curves as we do
+details these scenarios and justifies the use of LR in this paper. It is meant as a useful summary of the
+sensitivity for the interventions in this paper.      LR vs. loss curves, not as a metric to optimize in
+                                                      isolation.
+Interventions which change the meaning of
+learning rate
+                                                           C      Output norm growth
+When an intervention changes the meaning of learning
+rate then comparing LR sensitivity is not useful. A       This section discusses the growth of the output norms
+clear example of this would be taking the square root     during Transformer training as previously studied
+of the LR before passing it to the optimizer, but there   by Merrill et al. [34], Lee [29], and relates this phe-
+are more subtle cases to be cautious of when using        nomenon to the attention logit growth and AdamW
+LR sensitivity.                                           epsilon instabilities (Sections 3.1.1 and 3.4, respec-
+In general, we avoid manipulations where the mean- tively). As empirical evidence, Figure C.1 shows that
+ing of LR meaningfully changes. In some cases, we the RMS of the Transformer block output is mainly
+have good empirical evidence that the meaning of determined by learning rate.
+the learning rate has not changed when intervening. We have two hypothesis which relate parameter norm
+For instance, the LR vs. loss curves are indistin- growth [34] and subsequent output norm growth to
+guishable up to some critical learning rate when using instability. First, we believe that the attention out-
+qk-layernorm (Figure 1), adding z-loss (Figure 3), or put logits are the first to become large because they
+changing warm-up.                                         are the only feature in the network we test whose
+In other cases, such as when testing µParam (Sec- magnitude depends quadratically on parameter RMS.
+tion 3.2.4), we believe that LR sensitivity is useful For inputs X with unit RMS, a typical matrix multi-
+despite a per-layer modification of LR. This is be- ply XW with parameters W will result in features Y
+cause the per-layer LR is manipulated linearly, and where RMS(Y ) is a linear function of RMS(W ). On
+this modification does not change for different points the other hand, the attention logit entries are com-
+on the LR vs loss curve.                                  puted via ⟨XW1 , XW2 ⟩ so depend quadratically on
+                                                          RMS(W ). Next, this helps to explain the decreasing
+The one experiment in this paper where we believe LR trend in gradient scale observed in Section 3.4 (Fig-
+sensitivity is likely not a useful metric is when scaling ure 11). In a pre-normalization [38] Transformer [45]
+
+
+                                                       15
+there is an output layernorm layer [1] after the last      active participants in weekly brainstorming meetings
+Transformer block and before the final linear layer.       which motivated, influenced, and elucidated technical
+The gradient from this output layernorm layer is scaled    concepts pertaining to this work.
+by the reciprocal of the input RMS. This RMS is grow-
+                                                            Jaehoon Lee and Justin Gilmer were senior authors
+ing with depth because of the residual connections
+                                                            advising on the project, contributed substantially to
+(Figure C.1). As the RMS leaving the last Transformer
+                                                            the framing and direction, provided key insight and
+block grows, the gradient received shrinks.
+                                                            advice on multiple technical areas, and contributed
+For completeness we now compute the layernorm gra- to the writing. Jaehoon led the connection with out-
+dient to input x. We assume the input as mean zero put norm growth. Justin proposed to plot loss as
+and the layernorm has no bias for simplicity. Let           a function of learning rate for different model sizes,
+                                   x                 x      and performed initial experiments demonstrating that
+  z = LayerNorm(x) = α · p                   =  α ·         attention logit growth could be reproduced at high
+                               Ei [x2i ] + ϵ        m1/2
+                                                            learning rates in small models.
+                                                        (1)
+                                                          Simon Kornblith was the lead advisor on the project,
+where m = Ei x2i + ϵ.                                       contributing substantially to the framing, direction,
+Then                                                        infrastructure, and writing. Simon initially brain-
+  ∂ℓ     X    ∂ℓ ∂zk                                        stormed the project with Mitchell, and was Mitchell’s
+      =                                                 (2) host for the summer internship during which this re-
+ ∂xj          ∂zk ∂xj
+           k                                                search was conducted, providing substantial technical
+     ∂ℓ      αj      X ∂ℓ  1  αk xk 2                     support.
+  =      ·        +         · −        · 3/2 · · xj (3)
+     ∂zj m1/2           ∂zk      2       m       n
+                     k
+
+                                                            E Additional figures
+                                               !
+       1         ∂ℓ      xj X ∂ℓ
+  = 1/2 αj           −    1/2
+                                         αk xk          (4)
+     m          ∂zj    nm          ∂zk
+                               k                            This Section contains the additional Figures referenced
+                                          
+       1         ∂ℓ      xj                                 in the main text.
+  = 1/2 αj           −    1/2
+                              ⟨∇z , α · x⟩              (5)
+     m          ∂z j   nm
+Equivalently,
+                                          
+          1                 ⟨∇z , α ⊙ x⟩
+     ∇x = 1/2      α ⊙ ∇z −              ⊙x .        (6)
+         m                    nm1/2
+
+
+D      Author contributions
+Mitchell Wortsman led the project, ran the experi-
+ments and produced the figures, contributed substan-
+tially to the infrastructure for experimentation, the
+framing and direction, and the writing.
+Peter J. Liu led the infrastructure and creation of
+NanoDO for experimentation, provided key insights
+and advice on multiple technical areas, and con-
+tributed to the writing.
+Lechao Xiao and Katie Everett contributed to the
+infrastructure used for experimentation, provided key
+insight related to parameterization, and contributed
+to the writing.
+Alex Alemi, Ben Adlam, John D. Co-Reyes, Izzeddin
+Gur, Abhishek Kumar, Roman Novak, Jeffrey Pen-
+nington, Jascha Sohl-dickstein, and Kelvin Xu were
+
+
+                                                        16
+                        106                                                           106                                                          108
+
+
+
+
+Block output RMS
+                        104                                                           104
+                                                                                                                                                   107
+                        102                                                           102
+
+                        100                                                           100                                                          106
+
+                                  107        108        109                                      10 3    10 2       10 1                                          5    10    15     20      25
+                                        Num params                                                           LR                                                       Block index
+                              0.0003                    0.3                                 9.4e6                    1.2e9                                9.4e6                     1.2e9
+                                             LR                                                     Num params                                                Num params (at LR 3e-1)
+   Figure C.1: The root mean square (RMS) of the Transformer block outputs are roughly consistent with scale (left)
+   but increase with learning rate (center). RMS increases deeper in the transformer because of the residual connections,
+   which is shown for very high learning rates (right). The
+                                                        p first two plots are for block index two, and RMS is averaged
+   over the final 500 training steps. Recall RMS(X) = Ei [Xi2 ].
+
+
+
+
+                         8
+                                                                  Num params = 9.4e6, LR = 0.1, block 0
+                                                                                    108                                                            104
+
+
+
+
+                                                              Max attention logit                                          Mean query norm
+                         7
+                         6                                                          106                                                            103
+        Loss             5                                                          104
+                                                                                                                                                   102
+                         4                                                          102
+                                                                                                                                                   101
+                         3
+                              0     2000 4000 6000 8000 10000                               0   2000 4000 6000 8000 10000                                     0   2000 4000 6000 8000 10000
+                                           Step                                                         Step                                                             Step
+                        1.0                                                           1.0                                                               1.0
+
+
+
+
+Query-key cossim mean                                          Query-key cossim max                                          Avg. max attention prob.
+                        0.8                                                           0.8                                                               0.8
+                        0.6                                                           0.6                                                               0.6
+                        0.4                                                           0.4                                                               0.4
+                        0.2                                                           0.2
+                                                                                                                                                        0.2
+                        0.0                                                           0.0
+                                                                                                                                                        0.0
+                              0     2000 4000 6000 8000 10000                               0   2000 4000 6000 8000 10000                                     0   2000 4000 6000 8000 10000
+                                           Step                                                         Step                                                             Step
+                                                         qk-layernorm = True                                      qk-layernorm = False
+   Figure E.1: The logit growth instability [11, 51] occurs when the norm of the query and keys increases, not due to an
+   increase in their cosine similarity.
+
+
+
+                                                                                                        17
+                  4.2
+                               Scaling width         dim = 256           layers = 3
+                               Scaling depth         dim = 512           layers = 6
+                  4.0                                dim = 768           layers = 12
+                                                     dim = 1024          layers = 24
+                                                     dim = 2048          layers = 48
+                  3.8                                                    layers = 96
+
+                  3.6
+
+
+Final eval loss
+                  3.4                                                                                                   Standard                        N = 2.4e+06
+                                                                                                          4.25          MuParam (simple)                N = 9.4e+06
+                                                                                                                                                        N = 1.9e+07
+                  3.2                                                                                                                                   N = 4.2e+07
+                                                                                                          4.00                                          N = 8.5e+07
+                                                                                                                                                        N = 1.5e+08
+                  3.0                                                                                                                                   N = 3.0e+08
+                                                                                                          3.75                                          N = 1.2e+09
+
+
+
+                                                                                        Final eval loss
+                  2.8
+                                                                                                          3.50
+                        10 4          10 3           10 2         10 1          100
+                                                Learning rate                                             3.25
+
+  Figure E.2: The effect of scaling width vs. scaling depth
+                                                                                                          3.00
+  without qk-layernorm [11].
+
+                                                                                                          2.75
+
+                                                                                                          2.50
+                                                                                                                 10 4         10 3         10 2       10 1        100
+                                                                                                                                      Learning rate
+                                                                  Joint scaling                                         Standard
+
+
+                                                                                          LR sensitivity
+                  3.6 × 100                                       Scaling depth                            100          MuParam (simple)
+                                                                  Scaling width
+                  3.4 × 100
+
+
+
+
+Final eval loss
+                  3.2 × 100                                                                                       107                      108                  109
+                                                                                                                                 Number of parameters
+                    3 × 100
+                                                                                          Figure E.4: The effect of µParam on LR sensitivity for
+                                                                                          models without qk-layernorm [11]. µParam succeeds in
+                  2.8 × 100                                                               stabilizing the optimal LR, but does not alleviate the
+                                                                                          need for qk-layernorm. For more information refer to
+                                                                                          Section 3.2.4.
+                                               107                  108
+                                                 Num params
+  Figure E.3: Jointly scaling width and depth leads to lower
+  loss than independently scaling depth or width at the
+  largest scale we test. It also leads to a more reliable
+  scaling prediction when extrapolating from models with
+  less than 1e8 parameters. Best loss is reported in a sweep
+  over learning rates.
+
+
+
+
+                                                                                       18
+                      4.4                 qk-layernorm = True                                         4.4                 qk-layernorm = False
+                                   Standard                       N = 2.4e+06                                      Standard                       N = 2.4e+06
+                                   MuParam (simple)               N = 9.4e+06                                      MuParam (simple)               N = 9.4e+06
+                      4.2          MuParam (intermediate)         N = 1.9e+07                         4.2          MuParam (intermediate)         N = 1.9e+07
+                                   MuParam (full)                 N = 4.2e+07                                      MuParam (full)                 N = 4.2e+07
+                      4.0                                         N = 8.5e+07                         4.0                                         N = 8.5e+07
+                                                                  N = 1.5e+08                                                                     N = 1.5e+08
+                                                                  N = 3.0e+08                                                                     N = 3.0e+08
+                      3.8                                                                             3.8
+
+
+
+    Final eval loss                                                                 Final eval loss
+                      3.6                                                                             3.6
+
+                      3.4                                                                             3.4
+
+                      3.2                                                                             3.2
+
+                      3.0                                                                             3.0
+
+                      2.8                                                                             2.8
+
+                            10 4        10 3        10 2       10 1       100                               10 4        10 3        10 2       10 1       100
+                                               Learning rate                                                                   Learning rate
+
+
+LR sensitivity                                                                  LR sensitivity
+                  100                                                                             100
+
+                 10 1                                                                            10 1
+
+                 10 2                                                                            10 2
+                             107                            108                                              107                            108
+                                         Number of parameters                                                            Number of parameters
+ Figure E.5: Comparing µParam (full), which implements µParam as described in Yang et al. [50] with and without
+ qk-layernorm, with µParam (simple) and µParam (intermediate). There are four changes in µParam     √    (full), (i) Scale
+ the LR for linear √layers by base-fan-in/fan-in, (ii) initialize the head with standard deviation base-fan-in/fan-in.
+ (iii) change the 1/ dh scaling factor in attention layers to 1/dh where dh is the head dimension, and (iv) initialize the
+ query projection weights with zeros. µParam (intermediate) consists of (i) and (ii), while µParam (simple) is only (i).
+ With µParam (full) and qk-layernorm, the model trains without diverging at LR 1. However at the best LR there is
+ no measurable improvement over µParam (simple) at the largest scale we test.
+
+
+
+
+                                                                                19
+                  4.4                  qk-layernorm = True                                     4.4                  qk-layernorm = False
+                               1/sqrt(head dim) scaling       N = 2.4e+06                                   1/sqrt(head dim) scaling       N = 2.4e+06
+                               1/(head dim) scaling           N = 9.4e+06                                   1/(head dim) scaling           N = 9.4e+06
+                  4.2                                         N = 1.9e+07                      4.2                                         N = 1.9e+07
+                                                              N = 4.2e+07                                                                  N = 4.2e+07
+                  4.0                                         N = 8.5e+07                      4.0                                         N = 8.5e+07
+                                                              N = 1.5e+08                                                                  N = 1.5e+08
+                                                              N = 3.0e+08                                                                  N = 3.0e+08
+                  3.8                                                                          3.8
+
+
+
+Final eval loss                                                              Final eval loss
+                  3.6                                                                          3.6
+
+                  3.4                                                                          3.4
+
+                  3.2                                                                          3.2
+
+                  3.0                                                                          3.0
+
+                  2.8                                                                          2.8
+
+                        10 4         10 3        10 2       10 1      100                            10 4         10 3        10 2       10 1      100
+                                            Learning rate                                                                Learning rate
+                                                        √
+  Figure E.6: Measuring the √ effect of changing the 1/ dh term in attention to 1/dh , where dh is head dimension.
+  Vaswani et al. [45] use 1/ dh while Yang et al. [50] use 1/dh .
+
+
+
+
+                                                                            20
+                                    Steps = 50000                         N = 2.4e+06
+                      4.25          Steps = 100000                        N = 9.4e+06
+                                    Steps = 200000                        N = 1.9e+07                                   Head-dim qk-layernorm                N = 2.4e+06
+                                                                          N = 4.2e+07                      4.2          Model-dim qk-layernorm               N = 9.4e+06
+                      4.00                                                N = 8.5e+07                                                                        N = 1.9e+07
+                                                                          N = 1.5e+08                                                                        N = 4.2e+07
+                                                                          N = 3.0e+08                      4.0
+                      3.75
+                                                                                                                                                             N = 8.5e+07
+                                                                                                                                                             N = 1.5e+08
+
+
+    Final eval loss
+                                                                                                           3.8                                               N = 3.0e+08
+                      3.50
+
+
+
+                                                                                         Final eval loss
+                                                                                                           3.6
+                      3.25
+                                                                                                           3.4
+                      3.00
+                                                                                                           3.2
+                      2.75
+                                                                                                           3.0
+                             10 4         10 3       10 2          10 1           100
+                                                 Learning rate                                             2.8
+
+
+
+LR sensitivity
+                 4 × 10 2                                                                                        10 4         10 3         10 2       10 1           100
+                 3 × 10 2
+                                                                                                                                      Learning rate
+                 2 × 10 2                                                                  Figure E.8: We achieve slightly better performance when
+                              107                                108                       applying qk-layernorm individually per-head instead of
+                                            Number of parameters                           across the model dimension. The per-head variant has
+                                                                                           only head-dim learnable parameters instead of model-dim
+  Figure E.7: Changing the number of total training steps                                  parameters. We use the per-head variant as the default in
+  from 1e5 to 5e4 or 2e5 does not have a large effect of the                               this paper, and we never use biases.
+  shape of the learning rate vs. loss curves at the scales we
+  test.
+
+
+
+
+                                                                                        21
+                                        qk-layernorm = True                                                              qk-layernorm = False
+                                Batch size = 256                    N = 2.4e+06                                   Batch size = 256                    N = 2.4e+06
+                  4.25          Batch size = 512                    N = 9.4e+06                     4.25          Batch size = 512                    N = 9.4e+06
+                                Batch size = 1024                   N = 1.9e+07                                   Batch size = 1024                   N = 1.9e+07
+                                                                    N = 4.2e+07                                                                       N = 4.2e+07
+                  4.00                                              N = 8.5e+07                     4.00                                              N = 8.5e+07
+                                                                    N = 1.5e+08                                                                       N = 1.5e+08
+                                                                    N = 3.0e+08                                                                       N = 3.0e+08
+                  3.75                                                                              3.75
+
+
+
+Final eval loss                                                                   Final eval loss
+                  3.50                                                                              3.50
+
+                  3.25                                                                              3.25
+
+                  3.00                                                                              3.00
+
+                  2.75                                                                              2.75
+
+                         10 4        10 3           10 2     10 1         100                              10 4        10 3           10 2     10 1         100
+                                            Learning rate                                                                     Learning rate
+                  100                                                                               100
+
+
+LR sensitivity                                                                    LR sensitivity
+                 10 1                                                                              10 1
+
+                 10 2                                                                              10 2
+                          107                              108                                              107                              108
+                                      Number of parameters                                                              Number of parameters
+  Figure E.9: Increasing the batch size from 256 to 512 or 1024 does not have a large effect on the shape of the learning
+  rate vs. loss curves at the scales we test. Each batch element contains 512 tokens, and we use 256 as the default.
+
+
+
+
+                                                                                22
+                                       qk-layernorm = True                                                              qk-layernorm = False
+                                Weight decay = 3e-04               N = 2.4e+06                                   Weight decay = 3e-04               N = 2.4e+06
+                  4.25          Weight decay = 1e-04               N = 9.4e+06                     4.25          Weight decay = 1e-04               N = 9.4e+06
+                                Weight decay = 3e-05               N = 1.9e+07                                   Weight decay = 3e-05               N = 1.9e+07
+                                Weight decay = 0                   N = 4.2e+07                                   Weight decay = 0                   N = 4.2e+07
+                  4.00                                             N = 8.5e+07                     4.00                                             N = 8.5e+07
+                                                                   N = 1.5e+08                                                                      N = 1.5e+08
+                                                                   N = 3.0e+08                                                                      N = 3.0e+08
+                  3.75                                                                             3.75
+
+
+
+Final eval loss                                                                  Final eval loss
+                  3.50                                                                             3.50
+
+                  3.25                                                                             3.25
+
+                  3.00                                                                             3.00
+
+                  2.75                                                                             2.75
+
+                         10 4        10 3       10 2        10 1         100                              10 4        10 3       10 2        10 1         100
+                                            Learning rate                                                                    Learning rate
+                  100                                                                              100
+
+
+LR sensitivity                                                                   LR sensitivity
+                 10 1                                                                             10 1
+
+                 10 2                                                                             10 2
+                          107                           108                                                107                           108
+                                      Number of parameters                                                             Number of parameters
+  Figure E.10: The effect of weight decay on LR sensitivity. We use independent weight decay as described in Section 3.2.2
+  and recommended by [33].
+
+
+
+
+                                                                               23
+                                           qk-layernorm = True                                                          qk-layernorm = False
+                                 Softmax attention                N = 2.4e+06                                   Softmax attention                      N = 2.4e+06
+                  4.2            Pointwise attention              N = 9.4e+06                     4.2           Pointwise attention                    N = 9.4e+06
+                                                                  N = 1.9e+07                                                                          N = 1.9e+07
+                                                                  N = 4.2e+07                                                                          N = 4.2e+07
+                  4.0                                             N = 8.5e+07                     4.0                                                  N = 8.5e+07
+                                                                  N = 1.5e+08                                                                          N = 1.5e+08
+                  3.8                                             N = 3.0e+08                     3.8                                                  N = 3.0e+08
+
+
+
+
+Final eval loss                                                                 Final eval loss
+                  3.6                                                                             3.6
+
+                  3.4                                                                             3.4
+
+                  3.2                                                                             3.2
+
+                  3.0                                                                             3.0
+
+                  2.8                                                                             2.8
+
+                        10 4                10 3         10 2           10 1                            10 4              10 3                 10 2            10 1
+                                              Learning rate                                                                    Learning rate
+  Figure E.11: The logit growth instability occurs even without softmax. For the pointwise variant of attention here,
+  we replace softmax with squared-relu as described by [23]. As recommended in [46] we add a scaling factor which
+  depends on sequence length. In this case, we use inverse square root.
+
+
+
+
+                              10 4                               10 4                                                  10 7
+
+
+                   Grad RMS
+                              10 5
+                                                                 10 6                                                  10 8
+                              10 6
+                                                                                                                       10 9
+                              10 7
+                                                                 10 8                                                  10 10
+                              10 8
+                                     107           108    109           10 3            10 2               10 1                0    5     10      15   20
+                                           Num params                                     LR                                            Block index
+                                 0.0003                   0.3       9.4e6                                      1.2e9       9.4e6                       1.2e9
+                                                   LR                       Num params                                         Num params (at LR 3e-1)
+                                Figure E.12: Recreating Figure 11 with the kernel projection instead of the first MLP layer.
+
+
+
+
+                                                                                24
+                  5 × 100
+                                  LR = 0.0003          5 × 100
+                                                                       LR = 0.001         5 × 100
+                                                                                                           LR = 0.01         5 × 100
+                                                                                                                                              LR = 0.3
+
+                  4 × 100                              4 × 100                            4 × 100                            4 × 100
+
+Loss
+                  3 × 100                              3 × 100                            3 × 100                            3 × 100
+
+
+
+                             0   25000 50000 75000100000         0   25000 50000 75000100000        0   25000 50000 75000100000        0   25000 50000 75000100000
+                                       Step                                Step                               Step                               Step
+                      10 4                             10 4                               10 4                               10 4
+                      10 5                             10 5                               10 5                               10 5
+
+Grad RMS              10 6                             10 6                               10 6                               10 6
+                      10 7                             10 7                               10 7                               10 7
+                      10 8                             10 8                                10 8                               10 8
+                             0   25000 50000 75000100000    0        25000 50000 75000100000    0       25000 50000 75000100000    0       25000 50000 75000100000
+                                       Step                                Step                               Step                               Step
+
+
+
+
+Unscaled update RMS
+                      10 1                             10 1                               10 1                               10 1
+
+
+
+
+                             0   25000 50000 75000100000         0   25000 50000 75000100000        0   25000 50000 75000100000        0   25000 50000 75000100000
+                                       Step                                Step                               Step                               Step
+                         N = 9.4e+06          N = 1.9e+07            N = 4.2e+07       N = 8.5e+07           N = 1.5e+08          N = 3.0e+08           N = 1.2e+09
+
+ Figure E.13: For various learning rates and model sizes we display the gradient root mean square (RMS), and the
+ unscaled update RMS. The unscaled udpate is the update returned by the optimizer before scaling by learning rate.
+ The gradient and update are shown here for the first MLP layer of the Transformer. The update RMS falls when the
+ grad RMS approaches the AdamW ϵ of 1e-8.
+
+
+
+
+                                                                                        25
+                      4.4
+                                    Standard                              N = 2.4e+06
+                                    Scale LR by RMS                       N = 9.4e+06
+                      4.2                                                 N = 1.9e+07
+                                                                          N = 4.2e+07
+                      4.0                                                 N = 8.5e+07
+                                                                          N = 1.5e+08
+                                                                          N = 3.0e+08
+                      3.8
+
+
+
+    Final eval loss
+                      3.6
+
+                      3.4
+
+                      3.2
+
+                      3.0
+
+                      2.8
+
+                            10 4            10 3                 10 2   10 1        100
+                                                      Learning rate
+                  100               Standard
+
+
+LR sensitivity
+  Figure E.14:Scale
+                 TheLReffect
+                       by RMSof scaling the learning rate for
+  parameters p by max (RMS(p), 1e-3) as in AdaFactor [42].
+  As 10
+        1
+     discussed by Appendix B, it is not meaningful to com-
+  pare LR sensitivity in this case as this intervention modifies
+           107 of learning rate. Just as in 108
+  the meaning                                µParam [50], RMS
+                        Numberthe
+  scaling appears to stabilize    of optimal
+                                     parametersLR in the range
+  we test.
+
+
+
+
+                 8
+
+                 7                                               10 4
+
+
+                                                      Grad RMS
+                                                                 10 5
+                 6
+Loss
+                                                                 10 6
+                 5
+                                                                 10 7
+                 4
+                      0            2000        4000                     2000     4000
+                                     Step                                 Step
+                                                          Eps = 1e-6
+
+  Figure E.15: Increasing the AdamW ϵ from its default
+  value of 1e-8 to 1e-6 causes a loss divergence for a 4.8B
+  parameter model at LR 0.3. Grad RMS is for the first
+  layer in the MLP.
+
+
+
+
+                                                                                          26
+

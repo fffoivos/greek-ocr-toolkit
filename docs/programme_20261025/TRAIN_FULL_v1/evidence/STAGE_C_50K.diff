@@ -1,0 +1,388 @@
+--- 515b7d86f5f5758b/forecast.py
++++ c826ff52b1764246/forecast.py
+@@ -37,13 +37,19 @@
+             new=next(r for r in measured['costs'] if r['width_mult']==w)
+             training=new['projected_train_hours']*3600
+             loss=new['loss_seconds_mean']; full=new['cer_seconds_mean'];ck=new['checkpoint_seconds']
++            archive_seconds=new['loss_checkpoint_seconds_mean']
++            archive_bytes=new['loss_checkpoint_bytes_max']
+         else:
+             training=stage_a_train
+             loss=v['loss_eval_seconds_mean']*scale
+             full=v['final_dev_cer_seconds']*scale
+             ck=.15  # unmeasured assumption, replaced by CUDA smoke
++            archive_seconds=1.  # scratch serialize+fsync+SHA+reload; unmeasured sensitivity
++            # FP32 state tensor payload rounded up + codec/config/ZIP allowance.
++            archive_bytes={1.:20_000_000,1.5:41_000_000,2.:70_000_000}[w]
+         eval_s=254*loss+4*full
+-        checkpoint_s=math.ceil(updates/20)*ck
++        durable_saves_upper=math.ceil(updates/20)+254+4+8
++        checkpoint_s=durable_saves_upper*ck+254*archive_seconds
+         base=(training+eval_s+checkpoint_s)/3600
+         # Expected lost work: half checkpoint interval plus half current eval;
+         # higher bound: full interval + full eval. Startup is a sensitivity
+@@ -66,6 +72,10 @@
+         costs.append(dict(width_mult=w,batch=batch,updates=updates,training_GPU_h=training/3600,
+             loss_eval_seconds=loss,loss_eval_GPU_h=254*loss/3600,CER_GPU_h=4*full/3600,
+             checkpoint_GPU_h=checkpoint_s/3600,eval_over_training=eval_s/training,
++            retained_loss_checkpoints=254,loss_checkpoint_bytes_estimate=archive_bytes,
++            loss_checkpoint_total_bytes_estimate=254*archive_bytes,
++            loss_checkpoint_seconds=archive_seconds,loss_checkpoint_GPU_h=254*archive_seconds/3600,
++            durable_saves_upper_bound=durable_saves_upper,
+             eval_share_active=(eval_s/(training+eval_s)),exceeds_25_percent=eval_s/training>.25,
+             scenarios=cases))
+     result=dict(schema='TRAIN_FULL-stage-C-forecast-v1',status='MEASURED_SMOKE_PLUS_MODEL' if measured else 'PROVISIONAL_EXTRAPOLATION',
+@@ -81,6 +91,7 @@
+             'row-count scaling does not measure test width/length/CPU-CTC cost; refresh mandatory',
+             'expected hazard=observed PREEMPTED+NODE_FAIL / parent allocation node-hours; high=2x; low=no interruption',
+             'startup 30/120/600 seconds and checkpoint .15 seconds are sensitivity assumptions until C smoke',
++            '254 retained model archives: provisional 1 second each; bytes rounded estimates; refresh from new-seal smoke',
+             'same node hazard applied to non-exclusive single-GPU jobs is unqualified; queue delay excluded',
+             'full 23h allocation warning yields after all work is durable; additional starts beyond time limit not budget-free'],
+         options_if_over_25_percent=['keep full cadence and approve measured cost',
+--- 515b7d86f5f5758b/full_hook.py
++++ c826ff52b1764246/full_hook.py
+@@ -83,6 +83,11 @@
+                         prior = read(log)
+                         if prior['runtime_sha256'] != runtime['_sha256']:
+                             raise ValueError('loss log belongs to another runtime')
++                        if getattr(args, 'stage_c', False):
++                            from loss_checkpoint import validate
++                            validate(prior['checkpoint'], self.t, step=step,
++                                drawn_lines=prior['drawn_lines'], runtime_sha=runtime['_sha256'],
++                                model_sha=prior['model_sha256'], binding=self.binding)
+                         append_point(self.path.parent / 'loss_eval.jsonl', log)
+                     elif step < self.saved['global_step']:
+                         raise ValueError('missing historical loss evaluation')
+@@ -185,12 +190,25 @@
+             from train.cer import load_codec
+             log = self.path.parent / 'loss_eval' / ('step-%09d.json' % step)
+             model_sha = self.t.checkpoint_state_sha256(self.model.state_dict())
++            retained = {}
+             if log.exists():
+                 prior = read(log)
+                 if (prior['runtime_sha256'] != runtime['_sha256'] or prior['step'] != step
+                         or prior['drawn_lines'] != self.draws or prior['model_sha256'] != model_sha):
+                     raise ValueError('existing loss evaluation binding changed')
++                if getattr(self.args, 'stage_c', False):
++                    from loss_checkpoint import validate
++                    validate(prior['checkpoint'], self.t, step=step, drawn_lines=self.draws,
++                        runtime_sha=runtime['_sha256'], model_sha=model_sha, binding=self.binding)
+             else:
++                if getattr(self.args, 'stage_c', False):
++                    from loss_checkpoint import retain
++                    checkpoint, cost = retain(self, step, runtime['_sha256'], model_sha)
++                    retained = dict(checkpoint=checkpoint, checkpoint_save=cost)
++                    if runtime.get('mock') and os.environ.get('TRAIN_FULL_TEST_PAUSE_ARCHIVE_STEP') == str(step):
++                        atomic(self.path.parent / 'TEST_PAUSED.json', dict(step=step, archive=True))
++                        import signal
++                        signal.pause()
+                 rng, mode = self.rng(), self.model.training
+                 started = time.monotonic()
+                 try:
+@@ -207,12 +225,17 @@
+                         drawn_lines=self.draws, thresholds=self.loss_points[step]['thresholds'],
+                         train_loss_at_step=self.last_training_loss,
+                         model_sha256=model_sha, runtime_sha256=runtime['_sha256'], instruments=results,
++                        **retained,
+                         elapsed_seconds=time.monotonic() - started,
+                         test_policy='report_only; never selection/stopping/parameter adjustment'))
+                 finally:
+                     self.restore_rng(rng)
+                     self.model.train(mode)
+             append_point(self.path.parent / 'loss_eval.jsonl', log)
++            if getattr(self.args, 'stage_c', False):
++                from loss_checkpoint import sync_dir
++                sync_dir(log.parent)
++                sync_dir(self.path.parent)
+             if runtime.get('mock') and os.environ.get('TRAIN_FULL_TEST_PAUSE_LOSS_STEP') == str(step):
+                 atomic(self.path.parent / 'TEST_PAUSED.json', dict(step=step, loss_only=True))
+                 import signal
+--- 515b7d86f5f5758b/loss_checkpoint.py
++++ c826ff52b1764246/loss_checkpoint.py
+@@ -0,0 +1,75 @@
++"""Immutable, weights-only-loadable model archives at Stage C loss points.
++
++The segment is durable first; archive -> point JSON -> append-only index follows.
++One lane owns RUN.lock. Recovery validates existing bytes, never replaces them.
++Optimizer/scheduler/RNG/cursor remain in segment.pt and the full CER archives.
++"""
++import os
++from pathlib import Path
++import time
++from common import bound, sha, spec
++
++SCHEMA = 'TRAIN_FULL-loss-checkpoint-v1'
++
++
++def sync_dir(path):
++    fd = os.open(path, os.O_RDONLY)
++    try:
++        os.fsync(fd)
++    finally:
++        os.close(fd)
++
++
++def validate(entry, trainer, *, step, drawn_lines, runtime_sha, model_sha=None, binding=None):
++    path = bound(entry)
++    ck = trainer.torch.load(path, map_location='cpu', weights_only=True)
++    if (ck['schema'] != SCHEMA or ck['global_step'] != step or ck['drawn_lines'] != drawn_lines
++            or ck['package_sha256'] != sha(Path(__file__).parent/'PAYLOAD.json')
++            or ck['runtime_sha256'] != runtime_sha
++            or ck['model_sha256'] != trainer.checkpoint_state_sha256(ck['model'])
++            or (model_sha is not None and ck['model_sha256'] != model_sha)
++            or (binding is not None and ck['config'] != binding)):
++        raise ValueError('loss checkpoint state/config binding changed')
++    import hashlib
++    if hashlib.sha256(ck['codec_json'].encode()).hexdigest() != ck['codec_sha256']:
++        raise ValueError('loss checkpoint codec binding changed')
++    return ck
++
++
++def retain(segment, step, runtime_sha, model_sha):
++    """Return a SHA-bound archive and measured call cost; preserve RNG and mode."""
++    started = time.monotonic()
++    path = segment.path.parent / 'loss_checkpoints' / ('step-%09d.pt' % step)
++    path.parent.mkdir(parents=True, exist_ok=True)
++    created = not path.exists()
++    if created:
++        codec = Path(segment.args.codec).read_bytes()
++        import hashlib
++        # CPU copies cannot alias live training weights. Only primitives/tensors
++        # are serialized, allowing torch.load(..., weights_only=True).
++        ck = dict(schema=SCHEMA, global_step=step, drawn_lines=segment.draws,
++            package_sha256=sha(Path(__file__).parent/'PAYLOAD.json'),
++            runtime_sha256=runtime_sha, model_sha256=model_sha,
++            model={k:v.detach().cpu().clone() for k,v in segment.model.state_dict().items()},
++            config=segment.binding, codec_json=codec.decode(),
++            codec_sha256=hashlib.sha256(codec).hexdigest(),
++            arch=segment.args.arch, width_mult=segment.args.width_mult,
++            head=segment.args.head, seed=segment.args.seed,
++            resume_policy='model archive only; exact continuation uses segment.pt/full CER state')
++        # Use the actual codec, independent of architecture/state-dict ordering.
++        from train.cer import load_codec
++        loaded_codec = load_codec(segment.args.codec)
++        ck.update(n_classes=loaded_codec.n_classes, codec_version=loaded_codec.version)
++        tmp = path.with_suffix('.pt.tmp')
++        with tmp.open('wb') as stream:
++            segment.t.torch.save(ck, stream)
++            stream.flush()
++            os.fsync(stream.fileno())
++        tmp.replace(path)
++        sync_dir(path.parent)
++        sync_dir(path.parent.parent)
++    entry = spec(path)
++    validate(entry, segment.t, step=step, drawn_lines=segment.draws,
++             runtime_sha=runtime_sha, model_sha=model_sha, binding=segment.binding)
++    return entry, dict(seconds=time.monotonic()-started, created=created,
++                       includes='CPU copy, serialize, fsync, rename, directory fsync, SHA and reload validation')
+--- 515b7d86f5f5758b/loss_journal.py
++++ c826ff52b1764246/loss_journal.py
+@@ -40,6 +40,8 @@
+                  instruments=value['instruments'], record=spec(point))
+     if 'train_loss_at_step' in value:
+         entry['train_loss_at_step'] = value['train_loss_at_step']
++    if 'checkpoint' in value:
++        entry['checkpoint'] = value['checkpoint']
+     matches = [v for v in prior if v['step'] == entry['step']]
+     if matches and matches != [entry]:
+         raise ValueError('duplicate/changed loss-journal point')
+--- 515b7d86f5f5758b/stage_c.py
++++ c826ff52b1764246/stage_c.py
+@@ -42,6 +42,7 @@
+         runtime=spec(runtime), adopted=spec(ROOT/'adopted'/(winner+'.json')),
+         parameters=par, total_updates=total, target_drawn_lines=par['epoch_rows']*par['epochs'],
+         cer_steps=cer, loss_every_drawn_lines=par['bs']*2 if (smoke or fixture) else 50000,
++        loss_checkpoint_policy='every loss point including final; immutable model+codec+config; SHA in loss record',
+         durable_every=2 if (smoke or fixture) else 20, smoke=smoke, fixture=fixture,
+         instruments=list(PANELS), seed_reruns='SKIPPED by owner 2026-10-26; variance unmeasured',
+         test_policy='report-only; no selection, stopping or parameter changes')
+@@ -169,6 +170,14 @@
+         if (r['drawn_lines'] != point['drawn_lines'] or set(r['instruments']) != set(PANELS)
+                 or any(r['instruments'][n]['rows'] != rt['pools'][n]['rows'] for n in PANELS)):
+             raise ValueError('loss coverage/draw mismatch')
++        from loss_checkpoint import validate
++        validate(r['checkpoint'],trainer,step=point['step'],drawn_lines=point['drawn_lines'],
++            runtime_sha=rt['_sha256'],model_sha=r['model_sha256'])
++        if event.get('checkpoint') != r['checkpoint']:
++            raise ValueError('loss journal checkpoint binding changed')
++    retained = [read(bound(e['record']))['checkpoint'] for e in events]
++    if {Path(s['path']).name for s in retained} != {f.name for f in (output/'loss_checkpoints').glob('*.pt')}:
++        raise ValueError('missing/extra retained loss checkpoints')
+     evaluations = [spec(output/'eval'/('step-%09d.json'%s)) for s in args.cer_steps]
+     for item in evaluations:
+         r = read(bound(item))
+@@ -176,6 +185,7 @@
+             raise ValueError('CER panel coverage changed')
+     atomic(output/'COMPLETE.json',dict(binding=binding,checkpoint=spec(output/'segment.pt'),
+         evaluations=evaluations,loss_evaluations=[e['record'] for e in events],
++        loss_checkpoints=retained,
+         loss_journal=spec(output/'loss_eval.jsonl'),state_sha256=ck['state_sha256'],mock=fixture))
+     return 0
+ 
+@@ -184,8 +194,18 @@
+     c = read(Path(output)/'COMPLETE.json')
+     if c['binding']['config'] != config:
+         raise ValueError('completed binding changed')
+-    for s in [c['checkpoint'],c['loss_journal'],*c['evaluations'],*c['loss_evaluations']]:
++    for s in [c['checkpoint'],c['loss_journal'],*c['evaluations'],*c['loss_evaluations'],*c['loss_checkpoints']]:
+         bound(s)
++    from loss_journal import records
++    events,torn = records(bound(c['loss_journal']))
++    if torn is not None or [e['record'] for e in events] != c['loss_evaluations']:
++        raise ValueError('completed loss journal changed')
++    if [e.get('checkpoint') for e in events] != c['loss_checkpoints']:
++        raise ValueError('completed checkpoint list changed')
++    for event in events:
++        r=read(bound(event['record']))
++        if r['checkpoint'] != event['checkpoint']:
++            raise ValueError('completed loss checkpoint binding changed')
+     return c
+ 
+ 
+@@ -390,6 +410,10 @@
+             values=[read(Path(e['output'])/'loss_eval'/('step-%09d.json'%step)) for e in pair]
+             if any(values[0][k]!=values[1][k] for k in ('step','drawn_lines','thresholds','model_sha256','instruments')):
+                 raise ValueError('loss differs after real TERM')
++            from loss_checkpoint import validate
++            for value in values:
++                validate(value['checkpoint'],trainer,step=step,drawn_lines=value['drawn_lines'],
++                    runtime_sha=value['runtime_sha256'],model_sha=value['model_sha256'])
+         for a,b in zip(completions[0]['evaluations'],completions[1]['evaluations']):
+             if read(bound(a))['instruments']!=read(bound(b))['instruments']:
+                 raise ValueError('CER differs after real TERM')
+@@ -403,12 +427,20 @@
+         train=8*math.ceil(1586454/batch)*mean
+         eval_seconds=254*statistics.mean(loss)+4*statistics.mean(full)
+         checkpoint=read(Path(pair[0]['output'])/'CHECKPOINT_COST.json')
++        loss_records=[read(bound(s)) for s in completions[0]['loss_evaluations']]
++        saves=[r['checkpoint_save']['seconds'] for r in loss_records if r['checkpoint_save']['created']]
++        if len(saves)!=len(loss_records):
++            raise ValueError('uninterrupted control must measure every archive creation')
++        archive_bytes=max(r['checkpoint']['bytes'] for r in loss_records)
+         # Startup includes Python/data/model construction until first update.
+         starts=[read(f)['seconds'] for f in resumed.glob('STARTUP_*.json') if read(f)['first_step']>1]
+         if not starts:
+             raise ValueError('measured resume startup missing')
+         costs.append(dict(width_mult=width,loss_seconds_mean=statistics.mean(loss),loss_seconds_max=max(loss),
+             cer_seconds_mean=statistics.mean(full),update_seconds=mean,checkpoint_seconds=checkpoint['seconds'],
++            loss_checkpoint_seconds_mean=statistics.mean(saves),loss_checkpoint_seconds_max=max(saves),
++            loss_checkpoint_bytes_max=archive_bytes,projected_loss_checkpoint_GPU_h=254*statistics.mean(saves)/3600,
++            projected_loss_checkpoint_bytes=254*archive_bytes,
+             projected_train_hours=train/3600,projected_eval_hours=eval_seconds/3600,
+             eval_over_training=eval_seconds/train,exceeds_25_percent=eval_seconds/train>.25,
+             restart_startup_seconds_mean=statistics.mean(starts),restart_startup_seconds_max=max(starts)))
+--- 515b7d86f5f5758b/tests/test_loss_checkpoints.py
++++ c826ff52b1764246/tests/test_loss_checkpoints.py
+@@ -0,0 +1,111 @@
++"""Real trainer, stochastic tiny model: retention crash windows and custody."""
++import os
++from pathlib import Path
++import signal
++import sys
++import time
++import pytest
++
++PKG=Path(__file__).resolve().parents[1]
++sys.path.insert(0,str(PKG))
++from common import atomic,bound,read,sha,spec
++from test_package import mock_runtime
++from test_stage_c import spawn
++from test_stage_b import digest_state
++import stage_c as c
++
++
++@pytest.mark.parametrize('winner',c.WINNERS)
++@pytest.mark.parametrize('window',('ARCHIVE','LOSS'))
++def test_kill_after_archive_or_loss_never_replaces_or_skips_checkpoint(tmp_path,winner,window):
++    runtime=mock_runtime(tmp_path)
++    config=tmp_path/'config.json'
++    atomic(config,c.make_run(runtime,winner,smoke=True,fixture=True))
++    control,resumed=tmp_path/'control',tmp_path/'resumed'
++    proc=spawn(config,control)
++    assert proc.wait(timeout=50)==0,(control/'process.log').read_text()
++    proc=spawn(config,resumed,{f'TRAIN_FULL_TEST_PAUSE_{window}_STEP':'2'})
++    deadline=time.monotonic()+40
++    while not (resumed/'TEST_PAUSED.json').exists() and proc.poll() is None and time.monotonic()<deadline:
++        time.sleep(.02)
++    if not (resumed/'TEST_PAUSED.json').exists():
++        proc.kill();proc.wait()
++        pytest.fail((resumed/'process.log').read_text())
++    target=resumed/'loss_checkpoints/step-000000002.pt'
++    before=(sha(target),target.stat().st_mtime_ns,target.stat().st_ino)
++    proc.kill();assert proc.wait(timeout=10)==-signal.SIGKILL
++    proc=spawn(config,resumed,{'SLURM_RESTART_COUNT':'1'})
++    assert proc.wait(timeout=50)==0,(resumed/'process.log').read_text()
++    assert (sha(target),target.stat().st_mtime_ns,target.stat().st_ino)==before
++    assert digest_state(control)[0]==digest_state(resumed)[0]
++    from loss_journal import records
++    from loss_checkpoint import validate
++    from train import train as trainer
++    trainer._runtime()
++    for out in (control,resumed):
++        done=c.complete(out,read(config))
++        events,torn=records(out/'loss_eval.jsonl')
++        assert torn is None and [r['step'] for r in events]==[2,4,6,8]
++        assert len(list((out/'loss_checkpoints').glob('*.pt')))==4
++        assert len(done['loss_checkpoints'])==4
++        for event in events:
++            r=read(bound(event['record']))
++            assert event['checkpoint']==r['checkpoint']
++            ck=validate(r['checkpoint'],trainer,step=r['step'],drawn_lines=r['drawn_lines'],
++                runtime_sha=r['runtime_sha256'],model_sha=r['model_sha256'])
++            assert all(k not in ck for k in ('opt','sched','rng'))
++            assert ck['codec_json'] and ck['config']['width_mult']==read(config)['parameters']['width_mult']
++            # Same weights-only wrapper is accepted by the frozen loader.
++            from train.ckpt_io import load_model_weights
++            state,meta=load_model_weights(str(bound(r['checkpoint'])))
++            assert trainer.checkpoint_state_sha256(state)==r['model_sha256']
++            assert meta['width_mult']==ck['width_mult']
++        for s in done['binding']['evaluation_steps']:
++            assert (out/'checkpoints'/('step-%09d.pt'%s)).exists()
++        assert (out/'last.pt').exists()
++    # Every archive has the same model as its uninterrupted twin.
++    for a,b in zip(read(control/'COMPLETE.json')['loss_evaluations'],read(resumed/'COMPLETE.json')['loss_evaluations']):
++        assert read(bound(a))['model_sha256']==read(bound(b))['model_sha256']
++    target.write_bytes(b'corrupt retained checkpoint')
++    with pytest.raises(ValueError,match='SHA'): c.complete(resumed,read(config))
++
++
++def test_atomic_archive_interrupted_before_rename_is_not_published(tmp_path,monkeypatch):
++    import torch
++    from types import SimpleNamespace
++    from train import train as trainer
++    from loss_checkpoint import retain
++    trainer._runtime()
++    model=torch.nn.Linear(2,3)
++    segment=SimpleNamespace(path=tmp_path/'segment.pt',t=trainer,model=model,draws=128,
++        binding=dict(width_mult=1.),args=SimpleNamespace(codec=str(PKG/'vendor/codec/v2.1.json'),
++            arch='compact',width_mult=1.,head='nfd',seed=0))
++    model_sha=trainer.checkpoint_state_sha256(model.state_dict())
++    original=torch.save
++    def interrupted(value,stream):
++        stream.write(b'torn archive')
++        raise RuntimeError('interrupted write')
++    monkeypatch.setattr(torch,'save',interrupted)
++    with pytest.raises(RuntimeError,match='interrupted'):retain(segment,2,'runtime',model_sha)
++    target=tmp_path/'loss_checkpoints/step-000000002.pt'
++    assert not target.exists()
++    monkeypatch.setattr(torch,'save',original)
++    entry,cost=retain(segment,2,'runtime',model_sha)
++    assert bound(entry)==target and cost['created']
++    before=(sha(target),target.stat().st_mtime_ns)
++    entry,cost=retain(segment,2,'runtime',model_sha)
++    assert not cost['created'] and (sha(target),target.stat().st_mtime_ns)==before
++    segment.draws=129
++    with pytest.raises(ValueError,match='binding'): retain(segment,2,'runtime',model_sha)
++
++
++def test_forecast_includes_retention_and_durable_save_upper_bound(tmp_path):
++    from forecast import forecast
++    evidence=PKG.parent/'evidence'
++    report=forecast(evidence,tmp_path/'forecast.json')
++    for row in report['costs']:
++        assert row['retained_loss_checkpoints']==254
++        assert row['loss_checkpoint_total_bytes_estimate']==254*row['loss_checkpoint_bytes_estimate']
++        assert row['loss_checkpoint_GPU_h']==254/3600
++        assert row['checkpoint_GPU_h']>row['loss_checkpoint_GPU_h']
++        assert row['durable_saves_upper_bound']>=row['updates']//20+254

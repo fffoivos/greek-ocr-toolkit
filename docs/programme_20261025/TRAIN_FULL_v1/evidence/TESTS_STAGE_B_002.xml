@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="10" time="16.793" timestamp="2026-10-26T00:53:18.034825+02:00" hostname="192.168.1.13"><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_frozen_points_reproduce_exact_skill_output_and_unscaled_control" time="0.045" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_horizon_is_same_draws_per_width_exact_half_and_26_points" time="0.219" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_plan_has_51_independent_claims_13_groups_and_refuses_stage_a_changes" time="0.036" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_pooled_cer_is_reference_units_weighted_not_average_of_rates" time="0.001" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_beta1_default_and_validation" time="0.009" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_offline_four_lane_node_requeue_dev_only_and_collection" time="4.051"><failure message="TypeError: expected str, bytes or os.PathLike object, not dict">tmp_path = PosixPath('/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/out/TRAIN_FULL_v1/pytest_stage_b_002/test_offline_four_lane_node_re0')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x10a7cb210&gt;
+
+    def test_offline_four_lane_node_requeue_dev_only_and_collection(tmp_path, monkeypatch):
+        runtime = mock_runtime(tmp_path)
+        r = read(runtime)
+        # Poison ALL non-study eval files: loading even one fails the rehearsal.
+        for name in ('validation', 'seal04_test', 'harvest_test'):
+            for f in r['pools'][name]['files']:
+                f['path'] = str(tmp_path / 'FORBIDDEN_TEST_POOL')
+        atomic(runtime, r)
+        a = stage_a_fixture(runtime, tmp_path / 'STAGE_A.json')
+        folder = tmp_path / 'smoke'
+        p = b.build(runtime, a, folder, smoke=True, fixture=True)
+        monkeypatch.setattr(b, 'checked_plan', lambda path: read(path))
+        calls = []
+        restart = [0]
+        logs = []
+        def popen(cmd):
+            calls.append(cmd)
+            trial = cmd[cmd.index('--trial')+1]
+            out = Path(cmd[cmd.index('--out')+1])
+            log = (out / ('mock-%d.log' % restart[0])).open('a')
+            logs.append(log)
+            return subprocess.Popen([sys.executable, '-B', str(PKG / 'tests/stage_b_mock_worker.py'),
+                '--trial', trial, '--out', str(out)], env=env(restart[0]), stdout=log, stderr=log)
+        assert b.node(folder / 'PLAN.json', 0, popen=popen) == 75
+        for log in logs:
+            log.close()
+        completed = folder / 'runs/control/COMPLETE.json'
+        before = completed.read_bytes()
+        restart[0] = 1
+        assert b.node(folder / 'PLAN.json', 0, popen=popen) == 0
+        for log in logs:
+            log.close()
+        assert completed.read_bytes() == before
+        assert len(calls) == 8
+        assert all('--exclusive' in c and '--exact' in c and '--gpu-bind=single:1' in c
+                   and '--cpus-per-task=24' in c and '--cpu-bind=cores' in c for c in calls)
+        left, x = digest_state(folder / 'runs/control')
+        right, y = digest_state(folder / 'runs/requeue')
+        assert left == right
+        assert x['opt']['param_groups'][0]['betas'] == (.9, .999)
+        from loss_journal import records
+        for name in ('control', 'requeue', 'w1.5', 'w2'):
+            run = folder / 'runs' / name
+            entries, torn = records(run / 'loss_eval.jsonl')
+            assert torn is None and [e['step'] for e in entries] == [2, 4, 6, 8]
+            assert all(set(e['instruments']) == {'seal04_dev', 'harvest_dev'} for e in entries)
+&gt;       result = b.collect(folder / 'PLAN.json', fixture=True)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+docs/programme_20261025/TRAIN_FULL_v1/package/tests/test_stage_b.py:159: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+docs/programme_20261025/TRAIN_FULL_v1/package/stage_b.py:218: in collect
+    trial=spec(t['config']))
+          ^^^^^^^^^^^^^^^^^
+docs/programme_20261025/TRAIN_FULL_v1/package/common.py:61: in spec
+    path = Path(path).resolve()
+           ^^^^^^^^^^
+/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/pathlib.py:871: in __new__
+    self = cls._from_parts(args)
+           ^^^^^^^^^^^^^^^^^^^^^
+/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/pathlib.py:509: in _from_parts
+    drv, root, parts = self._parse_args(args)
+                       ^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+cls = &lt;class 'pathlib.PosixPath'&gt;
+args = ({'bytes': 916, 'path': '/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/out/TRAIN_FULL_v1/pyt...ne_node_re0/smoke/trials/control.json', 'sha256': 'f8bc59b5b34801d3459cad60831278bfde5b1891d895796fb148f2977e31b90c'},)
+
+    @classmethod
+    def _parse_args(cls, args):
+        # This is useful when you don't want to create an instance, just
+        # canonicalize some constructor arguments.
+        parts = []
+        for a in args:
+            if isinstance(a, PurePath):
+                parts += a._parts
+            else:
+&gt;               a = os.fspath(a)
+                    ^^^^^^^^^^^^
+E               TypeError: expected str, bytes or os.PathLike object, not dict
+
+/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/pathlib.py:493: TypeError</failure></testcase><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_hard_kill_resume_with_nondefault_optimizer_and_no_test_access[1.0]" time="4.247" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_hard_kill_resume_with_nondefault_optimizer_and_no_test_access[1.5]" time="4.320" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_hard_kill_resume_with_nondefault_optimizer_and_no_test_access[2.0]" time="3.808" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_submit_requires_current_smoke_and_focused_review" time="0.003" /></testsuite></testsuites>

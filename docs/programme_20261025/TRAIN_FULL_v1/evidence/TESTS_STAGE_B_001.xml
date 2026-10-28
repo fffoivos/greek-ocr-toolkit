@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="10" time="4.634" timestamp="2026-10-26T00:52:52.136325+02:00" hostname="192.168.1.13"><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_frozen_points_reproduce_exact_skill_output_and_unscaled_control" time="0.044" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_horizon_is_same_draws_per_width_exact_half_and_26_points" time="0.531" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_plan_has_51_independent_claims_13_groups_and_refuses_stage_a_changes" time="0.035" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_pooled_cer_is_reference_units_weighted_not_average_of_rates" time="0.001" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_beta1_default_and_validation" time="0.009" /><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_offline_four_lane_node_requeue_dev_only_and_collection" time="1.457"><failure message="RuntimeError: trial failure; inspect retained per-trial log/FAILURE: [1, 1, 1, 1]">tmp_path = PosixPath('/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/out/TRAIN_FULL_v1/pytest_stage_b_001/test_offline_four_lane_node_re0')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x108beb650&gt;
+
+    def test_offline_four_lane_node_requeue_dev_only_and_collection(tmp_path, monkeypatch):
+        runtime = mock_runtime(tmp_path)
+        r = read(runtime)
+        # Poison ALL non-study eval files: loading even one fails the rehearsal.
+        for name in ('validation', 'seal04_test', 'harvest_test'):
+            for f in r['pools'][name]['files']:
+                f['path'] = str(tmp_path / 'FORBIDDEN_TEST_POOL')
+        atomic(runtime, r)
+        a = stage_a_fixture(runtime, tmp_path / 'STAGE_A.json')
+        folder = tmp_path / 'smoke'
+        p = b.build(runtime, a, folder, smoke=True, fixture=True)
+        monkeypatch.setattr(b, 'checked_plan', lambda path: read(path))
+        calls = []
+        restart = [0]
+        logs = []
+        def popen(cmd):
+            calls.append(cmd)
+            trial = cmd[cmd.index('--trial')+1]
+            out = Path(cmd[cmd.index('--out')+1])
+            log = (out / ('mock-%d.log' % restart[0])).open('a')
+            logs.append(log)
+            return subprocess.Popen([sys.executable, '-B', str(PKG / 'tests/stage_b_mock_worker.py'),
+                '--trial', trial, '--out', str(out)], env=env(restart[0]), stdout=log, stderr=log)
+&gt;       assert b.node(folder / 'PLAN.json', 0, popen=popen) == 75
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+docs/programme_20261025/TRAIN_FULL_v1/package/tests/test_stage_b.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+plan_path = PosixPath('/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/out/TRAIN_FULL_v1/pytest_stage_b_001/test_offline_four_lane_node_re0/smoke/PLAN.json')
+group = 0
+popen = &lt;function test_offline_four_lane_node_requeue_dev_only_and_collection.&lt;locals&gt;.popen at 0x108b6c400&gt;
+
+    def node(plan_path, group, *, popen=subprocess.Popen):
+        p = checked_plan(plan_path)
+        g = p['groups'][group]
+        controls = Path(plan_path).parent / 'node-controls'
+        controls.mkdir(exist_ok=True)
+        with (controls / ('group-%03d.lock' % group)).open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            processes = []
+            def warning(*_):
+                # srun forwards TERM to the Python process; Segment commits at an
+                # optimizer boundary. Keep waiting for durable writes/eval finishes.
+                for proc in processes:
+                    if proc.poll() is None:
+                        proc.send_signal(signal.SIGTERM)
+            old = signal.signal(signal.SIGTERM, warning)
+            try:
+                for t in g:
+                    Path(t['output']).mkdir(parents=True, exist_ok=True)
+                    cmd = ['srun', '--exclusive', '--exact', '--nodes=1', '--ntasks=1',
+                        '--gpus-per-node=1', '--gpus-per-task=1', '--cpus-per-task=24',
+                        '--cpu-bind=cores', '--gpu-bind=single:1', '--open-mode=append',
+                        '--output=' + str(Path(t['output']) / 'srun-%j.log'),
+                        sys.executable, '-B', str(ROOT / 'stage_b_trial.py'),
+                        '--trial', str(bound(t['config'])), '--out', t['output']]
+                    processes.append(popen(cmd))
+                codes = [x.wait() for x in processes]
+            finally:
+                signal.signal(signal.SIGTERM, old)
+                for proc in processes:
+                    if proc.poll() is None:
+                        proc.terminate()
+                        proc.wait()
+            if any(c not in (0, 75) for c in codes):
+&gt;               raise RuntimeError('trial failure; inspect retained per-trial log/FAILURE: ' + str(codes))
+E               RuntimeError: trial failure; inspect retained per-trial log/FAILURE: [1, 1, 1, 1]
+
+docs/programme_20261025/TRAIN_FULL_v1/package/stage_b.py:154: RuntimeError</failure></testcase><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_hard_kill_resume_with_nondefault_optimizer_and_no_test_access[1.0]" time="0.791"><failure message="AssertionError: Traceback (most recent call last):&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/tests/stage_b_mock_worker.py&quot;, line 15, in &lt;module&gt;&#10;      raise SystemExit(lane(a.trial, a.out, fixture=True))&#10;                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/stage_b_trial.py&quot;, line 148, in lane&#10;      status = execute(trial, output, fixture=fixture, installer=installer)&#10;               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/stage_b_trial.py&quot;, line 84, in execute&#10;      status = trainer.train(args)&#10;               ^^^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/train.py&quot;, line 821, in train&#10;      train_ds, val_ds = dataset('train', start_epoch), dataset('val', 0)&#10;                                                        ^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/train.py&quot;, line 819, in dataset&#10;      return ManifestDataset(rows, codec.version, codec.n_classes - 1, role)&#10;             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/data.py&quot;, line 333, in __init__&#10;      raise ValueError(f'assembled row {i}: split/codec mismatch')&#10;  ValueError: assembled row 0: split/codec mismatch&#10;  &#10;assert 1 == 0&#10; +  where 1 = wait(timeout=50)&#10; +    where wait = &lt;Popen: returncode: 1 args: ['/Users/foivoskarounos-zamparloukos/Projects/gr...&gt;.wait">tmp_path = PosixPath('/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/out/TRAIN_FULL_v1/pytest_stage_b_001/test_hard_kill_resume_with_non0')
+width = 1.0
+
+    @pytest.mark.parametrize('width', [1., 1.5, 2.])
+    def test_hard_kill_resume_with_nondefault_optimizer_and_no_test_access(tmp_path, width):
+        runtime = mock_runtime(tmp_path)
+        trial = b.make_trial(runtime, width, b.points()[3], smoke=True, fixture=True)
+        trial['loss_every_drawn_lines'] = trial['parameters']['bs'] * 2
+        file = tmp_path / 'trial.json'
+        atomic(file, trial)
+        control, split = tmp_path / 'control', tmp_path / 'split'
+        c = spawn(file, control)
+&gt;       assert c.wait(timeout=50) == 0, (control / 'process.log').read_text()
+E       AssertionError: Traceback (most recent call last):
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/tests/stage_b_mock_worker.py", line 15, in &lt;module&gt;
+E             raise SystemExit(lane(a.trial, a.out, fixture=True))
+E                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/stage_b_trial.py", line 148, in lane
+E             status = execute(trial, output, fixture=fixture, installer=installer)
+E                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/stage_b_trial.py", line 84, in execute
+E             status = trainer.train(args)
+E                      ^^^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/train.py", line 821, in train
+E             train_ds, val_ds = dataset('train', start_epoch), dataset('val', 0)
+E                                                               ^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/train.py", line 819, in dataset
+E             return ManifestDataset(rows, codec.version, codec.n_classes - 1, role)
+E                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/data.py", line 333, in __init__
+E             raise ValueError(f'assembled row {i}: split/codec mismatch')
+E         ValueError: assembled row 0: split/codec mismatch
+E         
+E       assert 1 == 0
+E        +  where 1 = wait(timeout=50)
+E        +    where wait = &lt;Popen: returncode: 1 args: ['/Users/foivoskarounos-zamparloukos/Projects/gr...&gt;.wait
+
+docs/programme_20261025/TRAIN_FULL_v1/package/tests/test_stage_b.py:180: AssertionError</failure></testcase><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_hard_kill_resume_with_nondefault_optimizer_and_no_test_access[1.5]" time="0.846"><failure message="AssertionError: Traceback (most recent call last):&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/tests/stage_b_mock_worker.py&quot;, line 15, in &lt;module&gt;&#10;      raise SystemExit(lane(a.trial, a.out, fixture=True))&#10;                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/stage_b_trial.py&quot;, line 148, in lane&#10;      status = execute(trial, output, fixture=fixture, installer=installer)&#10;               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/stage_b_trial.py&quot;, line 84, in execute&#10;      status = trainer.train(args)&#10;               ^^^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/train.py&quot;, line 821, in train&#10;      train_ds, val_ds = dataset('train', start_epoch), dataset('val', 0)&#10;                                                        ^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/train.py&quot;, line 819, in dataset&#10;      return ManifestDataset(rows, codec.version, codec.n_classes - 1, role)&#10;             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/data.py&quot;, line 333, in __init__&#10;      raise ValueError(f'assembled row {i}: split/codec mismatch')&#10;  ValueError: assembled row 0: split/codec mismatch&#10;  &#10;assert 1 == 0&#10; +  where 1 = wait(timeout=50)&#10; +    where wait = &lt;Popen: returncode: 1 args: ['/Users/foivoskarounos-zamparloukos/Projects/gr...&gt;.wait">tmp_path = PosixPath('/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/out/TRAIN_FULL_v1/pytest_stage_b_001/test_hard_kill_resume_with_non1')
+width = 1.5
+
+    @pytest.mark.parametrize('width', [1., 1.5, 2.])
+    def test_hard_kill_resume_with_nondefault_optimizer_and_no_test_access(tmp_path, width):
+        runtime = mock_runtime(tmp_path)
+        trial = b.make_trial(runtime, width, b.points()[3], smoke=True, fixture=True)
+        trial['loss_every_drawn_lines'] = trial['parameters']['bs'] * 2
+        file = tmp_path / 'trial.json'
+        atomic(file, trial)
+        control, split = tmp_path / 'control', tmp_path / 'split'
+        c = spawn(file, control)
+&gt;       assert c.wait(timeout=50) == 0, (control / 'process.log').read_text()
+E       AssertionError: Traceback (most recent call last):
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/tests/stage_b_mock_worker.py", line 15, in &lt;module&gt;
+E             raise SystemExit(lane(a.trial, a.out, fixture=True))
+E                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/stage_b_trial.py", line 148, in lane
+E             status = execute(trial, output, fixture=fixture, installer=installer)
+E                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/stage_b_trial.py", line 84, in execute
+E             status = trainer.train(args)
+E                      ^^^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/train.py", line 821, in train
+E             train_ds, val_ds = dataset('train', start_epoch), dataset('val', 0)
+E                                                               ^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/train.py", line 819, in dataset
+E             return ManifestDataset(rows, codec.version, codec.n_classes - 1, role)
+E                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/data.py", line 333, in __init__
+E             raise ValueError(f'assembled row {i}: split/codec mismatch')
+E         ValueError: assembled row 0: split/codec mismatch
+E         
+E       assert 1 == 0
+E        +  where 1 = wait(timeout=50)
+E        +    where wait = &lt;Popen: returncode: 1 args: ['/Users/foivoskarounos-zamparloukos/Projects/gr...&gt;.wait
+
+docs/programme_20261025/TRAIN_FULL_v1/package/tests/test_stage_b.py:180: AssertionError</failure></testcase><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_hard_kill_resume_with_nondefault_optimizer_and_no_test_access[2.0]" time="0.840"><failure message="AssertionError: Traceback (most recent call last):&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/tests/stage_b_mock_worker.py&quot;, line 15, in &lt;module&gt;&#10;      raise SystemExit(lane(a.trial, a.out, fixture=True))&#10;                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/stage_b_trial.py&quot;, line 148, in lane&#10;      status = execute(trial, output, fixture=fixture, installer=installer)&#10;               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/stage_b_trial.py&quot;, line 84, in execute&#10;      status = trainer.train(args)&#10;               ^^^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/train.py&quot;, line 821, in train&#10;      train_ds, val_ds = dataset('train', start_epoch), dataset('val', 0)&#10;                                                        ^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/train.py&quot;, line 819, in dataset&#10;      return ManifestDataset(rows, codec.version, codec.n_classes - 1, role)&#10;             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^&#10;    File &quot;/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/data.py&quot;, line 333, in __init__&#10;      raise ValueError(f'assembled row {i}: split/codec mismatch')&#10;  ValueError: assembled row 0: split/codec mismatch&#10;  &#10;assert 1 == 0&#10; +  where 1 = wait(timeout=50)&#10; +    where wait = &lt;Popen: returncode: 1 args: ['/Users/foivoskarounos-zamparloukos/Projects/gr...&gt;.wait">tmp_path = PosixPath('/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/out/TRAIN_FULL_v1/pytest_stage_b_001/test_hard_kill_resume_with_non2')
+width = 2.0
+
+    @pytest.mark.parametrize('width', [1., 1.5, 2.])
+    def test_hard_kill_resume_with_nondefault_optimizer_and_no_test_access(tmp_path, width):
+        runtime = mock_runtime(tmp_path)
+        trial = b.make_trial(runtime, width, b.points()[3], smoke=True, fixture=True)
+        trial['loss_every_drawn_lines'] = trial['parameters']['bs'] * 2
+        file = tmp_path / 'trial.json'
+        atomic(file, trial)
+        control, split = tmp_path / 'control', tmp_path / 'split'
+        c = spawn(file, control)
+&gt;       assert c.wait(timeout=50) == 0, (control / 'process.log').read_text()
+E       AssertionError: Traceback (most recent call last):
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/tests/stage_b_mock_worker.py", line 15, in &lt;module&gt;
+E             raise SystemExit(lane(a.trial, a.out, fixture=True))
+E                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/stage_b_trial.py", line 148, in lane
+E             status = execute(trial, output, fixture=fixture, installer=installer)
+E                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/stage_b_trial.py", line 84, in execute
+E             status = trainer.train(args)
+E                      ^^^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/train.py", line 821, in train
+E             train_ds, val_ds = dataset('train', start_epoch), dataset('val', 0)
+E                                                               ^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/train.py", line 819, in dataset
+E             return ManifestDataset(rows, codec.version, codec.n_classes - 1, role)
+E                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/Users/foivoskarounos-zamparloukos/Projects/greek-ocr-toolkit-main-next/docs/programme_20261025/TRAIN_FULL_v1/package/vendor/train/data.py", line 333, in __init__
+E             raise ValueError(f'assembled row {i}: split/codec mismatch')
+E         ValueError: assembled row 0: split/codec mismatch
+E         
+E       assert 1 == 0
+E        +  where 1 = wait(timeout=50)
+E        +    where wait = &lt;Popen: returncode: 1 args: ['/Users/foivoskarounos-zamparloukos/Projects/gr...&gt;.wait
+
+docs/programme_20261025/TRAIN_FULL_v1/package/tests/test_stage_b.py:180: AssertionError</failure></testcase><testcase classname="docs.programme_20261025.TRAIN_FULL_v1.package.tests.test_stage_b" name="test_submit_requires_current_smoke_and_focused_review" time="0.003" /></testsuite></testsuites>

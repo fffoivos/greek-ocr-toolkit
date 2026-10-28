@@ -1,0 +1,1297 @@
+                                        Published as a conference paper at ICLR 2018
+
+
+
+
+                                        U NDERSTANDING S HORT-H ORIZON B IAS
+                                        IN S TOCHASTIC M ETA -O PTIMIZATION
+
+                                         Yuhuai Wu∗ , Mengye Ren∗ , Renjie Liao & Roger B. Grosse
+                                         University of Toronto and Vector Institute
+                                         {ywu, mren, rjliao, rgrosse}@cs.toronto.edu
+
+
+
+                                                                                      A BSTRACT
+
+
+
+
+arXiv:1803.02021v1 [cs.LG] 6 Mar 2018
+                                                    Careful tuning of the learning rate, or even schedules thereof, can be crucial to
+                                                    effective neural net training. There has been much recent interest in gradient-based
+                                                    meta-optimization, where one tunes hyperparameters, or even learns an optimizer,
+                                                    in order to minimize the expected loss when the training procedure is unrolled.
+                                                    But because the training procedure must be unrolled thousands of times, the meta-
+                                                    objective must be defined with an orders-of-magnitude shorter time horizon than
+                                                    is typical for neural net training. We show that such short-horizon meta-objectives
+                                                    cause a serious bias towards small step sizes, an effect we term short-horizon bias.
+                                                    We introduce a toy problem, a noisy quadratic cost function, on which we analyze
+                                                    short-horizon bias by deriving and comparing the optimal schedules for short and
+                                                    long time horizons. We then run meta-optimization experiments (both offline and
+                                                    online) on standard benchmark datasets, showing that meta-optimization chooses
+                                                    too small a learning rate by multiple orders of magnitude, even when run with a
+                                                    moderately long time horizon (100 steps) typical of work in the area. We believe
+                                                    short-horizon bias is a fundamental problem that needs to be addressed if meta-
+                                                    optimization is to scale to practical neural net training regimes.
+
+
+                                        1       I NTRODUCTION
+                                        The learning rate is one of the most important and frustrating hyperparameters to tune in deep
+                                        learning. Too small a value causes slow progress, while too large a value causes fluctuations or even
+                                        divergence. While a fixed learning rate often works well for simpler problems, good performance
+                                        on the ImageNet (Russakovsky et al., 2015) benchmark requires a carefully tuned schedule. A
+                                        variety of decay schedules have been proposed for different architectures, including polynomial,
+                                        exponential, staircase, etc. Learning rate decay is also required to achieve convergence guarantee for
+                                        stochastic gradient methods under certain conditions (Bottou, 1998). Clever learning rate heuristics
+                                        have resulted in large improvements in training efficiency (Goyal et al., 2017; Smith, 2017). A
+                                        related hyperparameter is momentum; typically fixed to a reasonable value such as 0.9, careful
+                                        tuning can also give significant performance gains (Sutskever et al., 2013). While optimizers such
+                                        as Adam (Kingma & Ba, 2015) are often described as adapting coordinate-specific learning rates, in
+                                        fact they also have global learning rate and momentum hyperparameters analogously to SGD, and
+                                        tuning at least the learning rate can be important to good performance.
+                                        In light of this, it is not surprising that there have been many attempts to adapt learning rates,
+                                        either online during optimization (Schraudolph, 1999; Schaul et al., 2013), or offline by fitting a
+                                        learning rate schedule (Maclaurin et al., 2015). More ambitiously, others have attempted to learn
+                                        an optimizer (Andrychowicz et al., 2016; Li & Malik, 2017; Finn et al., 2017; Lv et al., 2017;
+                                        Wichrowska et al., 2017; Metz et al., 2017). All of these approaches are forms of meta-optimization,
+                                        where one defines a meta-objective (typically the expected loss after some number of optimization
+                                        steps) and tunes the hyperparameters to minimize this meta-objective. But because gradient-based
+                                        meta-optimization can require thousands of updates, each of which unrolls the entire base-level
+                                        optimization procedure, the meta-optimization is thousands of times more expensive than the base-
+                                        level optimization. Therefore, the meta-objective must be defined with a much smaller time horizon
+                                            ∗
+                                                Equal contribution.
+                                                Code available at https://github.com/renmengye/meta-optim-public
+
+
+                                                                                             1
+Published as a conference paper at ICLR 2018
+
+
+
+
+(e.g. hundreds of updates) than we are ordinarily interested in for large-scale optimization. The hope
+is that the learned hyperparameters or optimizer will generalize well to much longer time horizons.
+Unfortunately, we show that this is not achieved in this paper. This is because of a strong tradeoff
+between short-term and long-term performance, which we refer to as short-horizon bias.
+                                                                                                 L(x, y) = 12 (x2 + 100y 2) + σ 2
+In this work, we investigate the short-horizon bias
+both mathematically and empirically. First, we an-              0.2
+
+alyze a quadratic cost function with noisy gradients                                                                               2.20
+                                                                                                                                       0
+
+based on Schaul et al. (2013). We consider this a               0.1
+
+
+good proxy for neural net training because second-         y    0.0
+order optimization algorithms have been shown to                                                               1.10
+                                                                                                                   0
+                                                                                                                           1.30
+                                                                                                                               0
+
+train neural networks in orders-of-magnitude fewer             −0.1                                        1.700
+
+
+iterations (Martens, 2010), suggesting that much of            −0.2                                                3.000
+                                                                                                                                           4.000
+the difficulty of SGD training can be explained by
+quadratic approximations to the cost. In our noisy                    −2                              −1               0
+                                                                                                                       x
+                                                                                                                                           1             2
+
+
+quadratic problem, the dynamics of SGD with mo-
+mentum can be analyzed exactly, allowing us to derive       Figure 1: Aggressive learning rate (red) fol-
+                                                            lowed by a decay schedule (yellow) wins over
+the greedy-optimal (i.e. 1-step horizon) learning rate      conservative learning rate (blue) by making
+and momentum in closed form, as well as to (locally)        more progress along the low curvature direction
+minimize the long-horizon loss using gradient descent.      (x direction).
+We analyze the differences between the short-horizon
+and long-horizon schedules.
+Interestingly, when the noisy quadratic problem is either deterministic or spherical, greedy schedules
+are optimal. However, when the problem is both stochastic and badly conditioned (as is most
+neural net training), the greedy schedules decay the learning rate far too quickly, leading to
+slow convergence towards the optimum. This is because reducing the learning rate dampens the
+fluctuations along high curvature directions, giving it a large immediate reduction in loss. But this
+comes at the expense of long-run performance, because the optimizer fails to make progress along
+low curvature directions. This phenomenon is illustrated in Figure 1, a noisy quadratic problem in
+2 dimensions, in which two learning rate schedule are compared: a small fixed learning rate (blue),
+versus a larger fixed learning rate (red) followed by exponential decay (yellow). The latter schedule
+initially has higher loss, but it makes more progress towards the optimum, such that it achieves an
+even smaller loss once the learning rate is decayed.
+Figure 2 shows this effect quantitatively for a noisy quadratic problem in 1000 dimensions (defined
+in Section 2.3). The solid lines show the loss after various numbers of steps of lookahead with a
+fixed learning rate; if this is used as the meta-objective, it favors small learning rates. The dashed
+curves show the loss if the same trajectories are followed by 50 steps with an exponentially decayed
+learning rate; these curves favor higher learning rates, and bear little obvious relationship to the solid
+ones. This illustrates the difficulty of selecting learning rates based on short-horizon information.
+The second part of our paper empirically investigates gradient-                                 104
+                                                                                                                                                   Steps= 10
+based meta-optimization for neural net training. We consider                                                                                       Steps= 30
+two idealized meta-optimization algorithms: an offline algo-                                                                                       Steps= 100
+
+
+
+
+                                                                           Meta-training loss
+rithm which fits a learning rate decay schedule by running                                      103
+
+optimization many times from scratch, and an online algorithm
+which adapts the learning rate during training. Since our
+interest is in studying the effect of the meta-objective itself                                 102
+
+rather than failures of meta-optimization, we give the meta-
+optimizers sufficient time to optimize their meta-objectives well.
+We show that short-horizon meta-optimizers, both online and                                     101
+                                                                                                      4 × 10−2 6 × 10−2        10−1                 2 × 10−1
+offline, dramatically underperform a hand-tuned fixed learning             Figure 2: Short-horizon meta-
+                                                                                                                            LR α
+rate, and sometimes cause the base-level optimization progress             objectives for the noisy quadratic
+to slow to a crawl, even with moderately long time horizons                problem. Solid: loss after k updates
+(e.g. 100 or 1000 steps) similar to those used in prior work on            with fixed learning rate. Dashed:
+gradient-based meta-optimization.                                          loss after k updates with fixed learn-
+                                                                           ing rate, followed by exponential
+In short, we expect that any meta-objective which does not cor-            decay.
+rect for short-horizon bias will probably fail when run for a much
+longer time horizon than it was trained on. There are applications
+
+
+                                                    2
+Published as a conference paper at ICLR 2018
+
+
+
+
+where short-horizon meta-optimization is directly useful, such as few-shot learning (Santoro et al.,
+2016; Ravi & Larochelle, 2017). In those settings, short-horizon bias is by definition not an issue.
+But much of the appeal of meta-optimization comes from the possibility of using it to speed up or
+simplify the training of large neural networks. In such settings, short-horizon bias is a fundamental
+obstacle that must be addressed for meta-optimization to be practically useful.
+
+2     N OISY QUADRATIC PROBLEM
+In this section, we consider a toy problem which demonstrates the short-horizon bias and can be
+analyzed analytically. In particular, we borrow the noisy quadratic model of Schaul et al. (2013);
+the true function being optimized is a quadratic, but in each iteration we observe a noisy version
+with the correct curvature but a perturbed minimum. This can be equivalently viewed as noisy
+observations of the gradient, which are intended to capture the stochasticity of a mini-batch-based
+optimizer. We analyze the dynamics of SGD with momentum on this example, and compare the
+long-horizon-optimized and greedy-optimal learning rate schedules.
+
+2.1     BACKGROUND
+
+Approximating the cost surface of a neural network with a quadratic function has led to powerful
+insights and algorithms. Second-order optimization methods such as Newton-Raphson and natural
+gradient (Amari, 1998) iteratively minimize a quadratic approximation to the cost function. Hessian-
+free (H-F) optimization (Martens, 2010) is an approximate natural gradient method which tries to
+minimize a quadratic approximation using conjugate gradient. It can often fit deep neural networks
+in orders-of-magnitude fewer updates than SGD, suggesting that much of the difficulty of neural net
+optimization is captured by quadratic models. In the setting of Bayesian neural networks, quadratic
+approximations to the log-likelihood motivated the Laplace approximation (MacKay, 1992) and
+variational inference (Graves, 2011; Zhang et al., 2017). Koh & Liang (2017) used quadratic
+approximations to analyze the sensitivity of a neural network’s predictions to particular training
+labels, thereby yielding insight into adversarial examples.
+Such quadratic approximations to the cost function have also provided insights into learning rate
+and momentum adaptation. In a deterministic setting, under certain conditions, second-order
+optimization algorithms can be run with a learning rate of 1; for this reason, H-F was able to
+eliminate the need to tune learning rate or momentum hyperparameters. Martens & Grosse (2015)
+observed that for a deterministic quadratic cost function, greedily choosing the learning rate and
+momentum to minimize the error on the next step is equivalent to conjugate gradient (CG). Since CG
+achieves the minimum possible loss of any gradient-based optimizer on each iteration, the greedily
+chosen learning rates and momenta are optimal, in the sense that the greedy sequence achieves the
+minimum possible loss value of any sequence of learning rates and momenta. This property fails to
+hold in the stochastic setting, however, and as we show in this section, the greedy choice of learning
+rate and momentum can do considerably worse than optimal.
+Our primary interest in this work is to adapt scalar learning rate and momentum hyperparameters
+shared across all dimensions. Some optimizers based on diagonal curvature approximations
+(Kingma & Ba, 2015) have been motivated in terms of adapting dimension-specific learning rates,
+but in practice, one still needs to tune scalar learning rate and momentum hyperparameters. Even
+K-FAC (Martens & Grosse, 2015), which is based on more powerful curvature approximations, has
+scalar learning rate and momentum hyperparameters. Our analysis applies to all of these methods
+since they can be viewed as performing SGD in a preconditioned space.
+
+2.2     A NALYSIS
+
+2.2.1    N OTATIONS
+We will primarily focus on the SGD with momentum algorithm in this paper. The update is written
+as follows:
+                                  v(t+1) = µ(t) v(t) − α(t) ∇θ(t) L,                               (1)
+                                      (t+1)        (t)        (t+1)
+                                  θ           =θ         +v           ,                            (2)
+
+
+                                                         3
+Published as a conference paper at ICLR 2018
+
+
+
+
+where L is the loss function, t is the training step, and α(t) is the learning rate. We call the gradient
+trace v(t) “velocity”, and its decay constant µ(t) “momentum”. We denote the ith coordinate of a
+vector v as vi . When we focus on a single dimension, we sometimes drop the dimension subscripts.
+We also denote A(·) = E[·]2 + V[·], where E and V denote expectation and variance respectively.
+
+2.2.2    P ROBLEM FORMULATION
+We now define the noisy quadratic model, where in each iteration, the optimizer is given the gradient
+for a noisy version of a quadratic cost function, where the curvature is correct but the minimum is
+sampled stochastically from a Gaussian distribution. We assume WLOG that the Hessian is diagonal
+because SGD is a rotation invariant algorithm, and therefore the dynamics can be analyzed in a
+coordinate system corresponding to the eigenvectors of the Hessian. We make the further (nontrivial)
+assumption that the noise covariance is also diagonal.1 Mathematically, the stochastic cost function
+is written as:
+                                             1X
+                                    L̂(θ) =        hi (θi − ci )2 ,                               (3)
+                                             2 i
+where c is the stochastic minimum, and each ci follows a Gaussian distribution with mean θi∗ and
+variance σi2 . The expected loss is given by:
+                                     h     i 1X                         
+                          L(θ) = E L̂(θ) =         hi (θi − θi∗ )2 + σi2 .                    (4)
+                                              2 i
+
+The optimum of L is given by θ ∗ = E[c]; we assume WLOG that θ ∗ = 0. The stochastic gradient
+              ∂ L̂
+is given by ∂θ   i
+                   = hi (θi − ci ). Since the deterministic gradient is given by ∂θ
+                                                                                 ∂L
+                                                                                    i
+                                                                                      = hi θi , the stochastic
+gradient can be viewed as a noisy Gaussian observation of the deterministic gradient with variance
+h2i σi2 . This interpretation motivates the use of this noisy quadratic problem as a model of SGD
+dynamics.
+We treat the iterate θ (t) as a random variable (where the randomness comes from the sampled c’s);
+the expected loss in each iteration is given by
+                                          "                        #
+                           h        i       1 X  (t)            
+                        E L(θ (t) ) = E          hi (θi )2 + σi2                              (5)
+                                            2 i
+                                                  h i          h i      
+                                        1X            (t)
+                                                          2
+                                                                  (t)
+                                      =       hi E θi       + V θi + σi2 .                    (6)
+                                        2 i
+
+2.2.3    O PTIMIZED AND G REEDY-O PTIMAL S CHEDULES
+We are interested in adapting a global learning rate α(t) and a global momentum decay parameter
+µ(t) for each time step t. We first derive a recursive formula for the mean and variance of the iterates
+at each step, and then analyze the greedy-optimal schedule for α(t) and µ(t) .
+Several observations allow us to compactly model the dynamics of SGD with momentum on the
+noisy quadratic model. First, E[L(θ (t) )] can be expressed in terms of E[θi ] and V[θi ] using Eqn. 5.
+Second, due to the diagonality of the Hessian and the noise covariance matrix, each coordinate
+                                                                                             (t)
+evolves independently of the others. Third, the means and variances of the parameters θi and the
+          (t)
+velocity vi are functions of those statistics at the previous step.
+Because each dimension evolves independently, we now drop the dimension subscripts. Combining
+these observations, we model the dynamics of SGD with momentum as a deterministic recurrence
+                                                                                   (t)
+relation with sufficient statistics E[θ(t) ], E[v (t) ], V[θ(t) ], V[v (t) ], and Σθ,v = Cov(θ(t) , v (t) ). The
+dynamics are as follows:
+    1
+      This amounts to assuming that the Hessian and the noise covariance are codiagonalizable. One heuristic
+justification for this assumption in the context of neural net optimization is that under certain assumptions,
+the covariance of the gradients is proportional to the Fisher information matrix, which is close to the Hessian
+(Martens, 2014).
+
+
+                                                       4
+Published as a conference paper at ICLR 2018
+
+
+
+
+Theorem 1 (Mean and variance dynamics). The expectations of the parameter θ and the velocity v
+are updated as,
+        h       i       h i               h i
+      E v (t+1) = µ(t) E v (t) − (α(t) h)E θ(t) ,
+        h       i   h i        h       i
+      E θ(t+1) = E θ(t) + E v (t+1) .
+
+The variances of the parameter θ and the velocity v are updated as
+        h       i       2 h i               2 h i                       2
+                                                                       (t)
+      V v (t+1) = µ(t) V v (t) + α(t) h V θ(t) − 2µ(t) α(t) hΣθ,v + α(t) hσ ,
+        h       i               h i           h       i
+                                                                   (t)
+      V θ(t+1) = 1 − 2α(t) h V θ(t) + V v (t+1) + 2µ(t) Σθ,v ,
+                                       h i         h      i
+            (t+1)         (t)
+          Σθ,v = µ(t) Σθ,v − α(t) hV θ(t) + V v (t+1) .
+
+By applying Theorem 1 recursively, we can obtain E[θ (t) ] and V[θ (t) ], and hence E[L(θ (t) )], for
+every t. Therefore, using gradient-based optimization, we can fit a locally optimal learning rate and
+momentum schedule, i.e. a sequence of values {(α(t) , µ(t) )}Tt=1 which locally minimizes E[L(θ (t) )]
+at some particular time T . We refer to this as the optimized schedule.
+Furthermore, there is a closed-form solution for one-step lookahead, i.e., we can solve for the
+optimal learning rate α(t)∗ and momentum µ(t)∗ that minimizes E[L(θ (t+1) )] given the statistics
+at time t. We call this as the greedy-optimal schedule.
+Theorem 2 (Greedy-optimal learning rate and momentum). The greedy-optimal learning rate and
+momentum schedule is given by
+                 P 2  (t)  hP                     i P
+                                                      (t)
+                                                                       h
+                                                                          (t) (t)
+                                                                                  i      h
+                                                                                              (t) (t)
+                                                                                                      i
+                     i hi A θi            j h j A vj        −   j hj E θj vj         h2i E θi vi
+    α(t)∗ = P        h                i hP            i P               h         i        h         i,
+                           (t)                            (t)                  (t) (t)             (t) (t)
+                                                                     j hj E θj vj         h2i E θi vi
+                   3             + σi2                        −         2
+               i hi A θi                        j hj A vj
+              P                       h (t) (t) i
+                 i hi 1 − α(t)∗ hi E θi vi
+    µ(t)∗ = −            P                            .
+                                      (t)
+                            i hi A  v i
+
+
+
+
+Note that Schaul et al. (2013) derived the greedy optimal learning rate for SGD, and Theorem 2
+extends it to the greedy optimal learning rate and momentum for SGD with momentum.
+
+2.2.4   U NIVARIATE AND S PHERICAL C ASES
+As noted in Section 2.1, Martens & Grosse (2015) found the greedy choice of α and µ to be optimal
+for gradient descent on deterministic quadratic objectives. We now show that the greedy schedule is
+also optimal for SGD without momentum in the case of univariate noisy quadratics, and hence also
+for multivariate ones with spherical Hessians and gradient covariances. In particular, the following
+holds for SGD without momentum on a univariate noisy quadratic:
+Theorem 3 (Optimal learning rate, univariate). For all T ∈ N, the sequence of learning rates
+          −1
+{α(t)∗ }Tt=1 that minimizes L(θ(T ) ) is given by
+                                                          
+                                                  A θ(t)
+                                     α(t)∗ =                 .                                 (7)
+                                               h A θ(t) + σ 2
+Moreover, this agrees with the greedy-optimal learning rate schedule as derived by Schaul et al.
+(2013).
+
+If the Hessian and the gradient covariance are both spherical, then each dimension evolves
+identically and independently according to the univariate dynamics. Of course, one is unlikely to
+encounter an optimization problem where both are exactly spherical. But some approximate second-
+order optimizers, such as K-FAC, can be viewed as preconditioned SGD, i.e. SGD in a transformed
+
+
+                                                     5
+Published as a conference paper at ICLR 2018
+
+
+
+
+                                           Noisy Quadratic                                             Deterministic Quadratic
+                            104                            High curvature               103                                Optimized Schedule
+                                                           Low curvature                                                   Greedy Schedule
+                      103                                  Total loss                  10 3                                Fixed Schedule
+                      102                                                              10 9
+  Loss                101
+                                                                                      10 15
+                      100
+                     10 1                                                             10 21
+                     10 2                                                             10 27
+                                  0   50    100      150       200      250                   0   50        100       150          200      250
+                            0.2
+
+
+
+
+   Momentum Learning rate
+                                                                                        0.3
+                            0.1
+                                                                                        0.2
+                            0.0
+                                  0   50    100      150       200          250               0   50        100           150      200          250
+                            1.0                                                         1.0
+                            0.5                                                         0.5
+                            0.0                                                         0.0
+                                  0   50    100      150       200          250               0   50        100           150      200          250
+                                               Steps                                                              Steps
+                              (a)                                                 (b)
+Figure 3: Comparisons of the optimized learning rates and momenta trained by gradient descent (red), greedy
+learning rates and momenta (blue), and the optimized fixed learning rate and momentum (green) in both noisy
+(a) and deterministic (b) quadratic settings. In the deterministic case, our optimized schedule matched the
+greedy one, just as the theory predicts.
+
+space where the Hessian and the gradient covariance are better conditioned (Martens & Grosse,
+2015). In principle, with a good enough preconditioner, the Hessian and the gradient covariance
+would be close enough to spherical that a greedy choice of α and µ would perform well. It will be
+interesting to investigate whether any practical optimization algorithms demonstrate this behavior.
+
+2.3                  E XPERIMENTS
+
+In this section, we compare the optimized and greedy-optimal schedules on a noisy quadratic
+problem. We chose a 1000 dimensional quadratic cost function with the curvature distribution from
+Li (2005), on which CG achieves its worst-case convergence rate. We assume that hi = V[ ∂θ    ∂L
+                                                                                                i
+                                                                                                  ],
+and hence σi = hi ; this choice is motivated by the observations that under certain assumptions,
+             2     1
+
+the Fisher information matrix is a good approximation to the Hessian matrix, but also reflects
+the covariance structure of the gradient noise (Martens, 2014). We computed the greedy-optimal
+schedules using Theorem 3. For the optimized schedules, we minimized the expected loss at
+time T = 250 using Adam using Adam (Kingma & Ba, 2015), with a learning rate 0.003 and
+500 steps. We set an upper bound for the learning rate which prevented the loss component for
+any dimension from becoming larger than its initial value; this was needed because otherwise the
+optimized schedule allowed the loss to temporarily grow very large, a pathological solution which
+would be unstable on realistic problems. We also considered fixed learning rate and momentum,
+with the two hyperparameters fit using Adam. The training curves and the corresponding learning
+rates and momenta are shown in Figure 3(a). The optimized schedule achieved a much lower
+final expected loss value (4.25) than was obtained by the greedy-optimal schedule (63.86) or fixed
+schedule (42.19).
+We also show the sums of the losses along the 50 highest curvature directions and 50 lowest
+curvature directions. We find that under the optimized schedule, the losses along the high curvature
+directions hardly decrease initially. However, because it maintains a high learning rate, the losses
+along the low curvature directions decrease significantly. After 50 iterations, it begins decaying the
+learning rate, at which point it achieves a large drop in both the high-curvature and total losses. On
+the other hand, under the greedy-optimal schedule, the learning rates and momenta become small
+very early on, which immediately reduces the losses on the high curvature directions, and hence also
+the total loss. However, in the long term, since the learning rates are too small to make substantial
+progress along the low curvature directions, the total loss converged to a much higher value in the
+
+
+                                                                                  6
+Published as a conference paper at ICLR 2018
+
+
+
+
+end. This gives valuable insight into the nature of the short-horizon bias in meta-optimization: short-
+horizon objectives will often encourage the learning rate and momentum to decay quickly, so as to
+achieve the largest gain in the short term, but at the expense of long-run performance.
+It is interesting to compare this behavior with the deterministic case. We repeated the above
+experiment for a deterministic quadratic cost function (i.e. σi2 = 0) with the same Hessian;
+results are shown in Figure 3(b). The greedy schedule matches the optimized one, as predicted
+by the analysis of Martens & Grosse (2015). This result illustrates that stochasticity is necessary
+for short-horizon bias to manifest. Interestingly, the learning rate and momentum schedules in
+the deterministic case are nearly flat, while the optimized schedules for the stochastic case are
+much more complex, suggesting that stochastic optimization raises a different set of issues for
+hyperparameter adaptation.
+
+3     G RADIENT-BASED M ETA -O PTIMIZATION
+We now turn our attention to gradient-based hyperparameter optimization. A variety of approaches
+have been proposed which tune hyperparameters by doing gradient descent on a meta-objective
+(Schraudolph, 1999; Maclaurin et al., 2015; Andrychowicz et al., 2016). We empirically analyze
+an idealized version of a gradient-based meta-optimization algorithm called stochastic meta-descent
+(SMD) (Schraudolph, 1999). Our version of SMD is idealized in two ways: first, we drop the
+algorithmic tricks used in prior work, and instead allow the meta-optimizer more memory and
+computation than would be economical in practice. Second, we limit the representational power of
+our meta-model: whereas Andrychowicz et al. (2016) aimed to learn a full optimization algorithm,
+we focus on the much simpler problem of adapting learning rate and momentum hyperparameters,
+or schedules thereof. The aim of these two simplifications is that we would like to do a good enough
+job of optimizing the meta-objective that any base-level optimization failures can be attributed to
+deficiencies in the meta-objective itself (such as short-horizon bias) rather than incomplete meta-
+optimization.
+Despite these simplifications, we believe our experiments are relevant to practical meta-optimization
+algorithms which optimize the meta-objective less thoroughly. Since the goal of the meta-
+optimizer is to adapt two hyperparameters, it’s possible that poor meta-optimization could cause
+the hyperparameters to get stuck in regions that happen to perform well; indeed, we observed
+this phenomenon in some of our early explorations. But it would be dangerous to rely on poor
+meta-optimization, since improved meta-optimization methods would then lead to worse base-level
+performance, and tuning the meta-optimizer could become a roundabout way of tuning learning
+rates and momenta.
+We also believe our experiments are relevant to meta-optimization methods which aim to learn entire
+algorithms. Even if the learned algorithms don’t have explicit learning rate parameters, it’s possible
+for a learning rate schedule to be encoded into an algorithm itself; for instance, Adagrad (Duchi
+et al., 2011) implicitly uses a polynomial decay schedule because it sums rather than averages the
+squared derivatives in the denominator. Hence, one would need to worry about whether the meta-
+optimizer is implicitly fitting a learning rate schedule that’s optimized for short-term performance.
+
+3.1   BACKGROUND : S TOCHASTIC M ETA -D ESCENT
+
+The high-level idea of stochastic meta-descent (SMD) (Schraudolph, 1999) is to perform gradient
+descent on the learning rate, or any other differentiable hyperparameters. This is feasible since any
+gradient based optimization algorithm can be unrolled as a computation graph (see Figure 4), and
+automatic differentiation is readily available in most deep learning libraries.
+There are two basic types of automatic differentiation (autodiff) methods: forward mode and
+reverse mode. In forward mode autodiff, directional derivatives are computed alongside the forward
+computation. In contrast, reverse mode autodiff (a.k.a. backpropagation) computes the gradients
+moving backwards through the computation graph. Meta-optimization using reverse mode can be
+computationally demanding due to memory constraints, since the parameters need to be stored at
+every step. Maclaurin et al. (2015) got around this by cleverly exploiting approximate reversibility
+to minimize the memory cost of activations. Since we are optimizing only two hyperparameters,
+however, forward mode autodiff can be done cheaply. Here, we provide the forward differentiation
+
+
+                                                  7
+Published as a conference paper at ICLR 2018
+
+
+
+
+                       Forward   L    Backward           Forward     L    Backward
+
+
+                                 t         g                        t+1        g
+
+                                           +                                   +
+                         w                 +                w                  +
+
+                                      -1                                  -1
+                   ⍺
+
+
+Figure 4: Regular SGD in the form of a computation graph. The learning rate parameter α is part of the
+differentiable computations.
+
+
+equations for obtaining the gradient of vanilla SGD learning rate. Let dθ             dLt
+                                                                       dα be ut , and dα be α , and
+                                                                         t                   0
+
+the Hessian at step t to be Ht . By chain rule, we get,
+                                     α0 = gt · ut−1 ,                                               (8)
+                                     ut = ut−1 − gt − αHt ut−1 .                                    (9)
+While the Hessian is infeasible to construct explicitly, the Hessian-vector product in Equation 9 can
+be computed efficiently using reverse-on-reverse (Werbos, 1988) or forward-on-reverse automatic
+differentiation (Pearlmutter, 1994), in time linear in the cost of the forward pass. See Schraudolph
+(2002) for more details.
+Using the gradients with respect to hyper-
+parameters, as given in Eq. 9, we can ap-
+ply gradient based meta-optimization, just         Algorithm 1: Stochastic Meta-Descent
+like optimizing regular parameters. It is              Input: α0 , η, θ, T, M
+worth noting that, although SMD was orig-              Output: α
+inally proposed for optimizing vanilla SGD,            θ0 ← θ;
+                                                       α ← α0 ;
+in practice it can be applied to other optimiza-
+                                                       for m ← 1 ... M do
+tion algorithms such as SGD with momentum                  u ← 0;
+or Adam (Kingma & Ba, 2015). Moreover,                     for t ← 1 ... T do
+gradient-based optimizers other than SGD                        X, y ← GetMiniBatch();
+can be used for the meta-optimization as well.                  g ← BGrad(L(X, y, θ), θ, 1);
+                                                                θnew ← Step(θ, g, α);
+The basic SMD algorithm is given as Al-
+                                                                α0 ← g · u;
+gorithm 1. Here, α is a set of hyperpa-                         u ← FGrad(θnew , [α, θ], [1, u]);
+rameters (e.g. learning rate), and α0 are                       θ ← θnew ;
+inital hyperparameter values; θ is a set of
+optimization intermediate variables, such as           α ← MetaStep(α, α0 , η);
+                                                       θ ← θ0
+weights and velocities; η is a set of meta-
+                                                   return α
+optimizer hyperparameters (e.g. meta learn-
+ing rate). BGrad(y, x, dy) is the backward
+gradient function that computes the gradients
+of the loss function wrt. θ, and FGrad(y, x, dx) is the forward gradient function that accumulates
+the gradients of θ with respect to α. Step and MetaStep optimize regular parameters and
+hyperparameters, respectively, for one step using gradient-based methods. Additionally, T is the
+lookahead window size, and M is the number of meta updates.
+
+Simplifications from the original SMD algorithm. The original SMD algorithm (Schraudolph,
+1999) fit coordinate-wise adaptive learning rates with intermediate gradients (ut ) accumulated
+throughout the process of training. Since computing separate directional derivatives for each coor-
+dinate using forward mode autodiff is computationally prohibitive, the algorithm used approximate
+updates. Both features introduced bias into the meta-gradients. We make several changes to the
+original algorithm. First, we tune only a global learning rate parameter. Second, we use exact
+forward mode accumulation because this is feasible for a single learning rate. Third, rather than
+accumulate directional derivatives during training, we compute the meta-updates on separate SGD
+
+
+                                                   8
+Published as a conference paper at ICLR 2018
+
+
+
+
+                                                           100 steps
+                                                                   -1.050
+                                                                                                                                           1000 steps                                                                5000 steps                                                               20000 steps
+                                                                                                                        -0.200                                                                                  -0.400                                                                                                         -0.800
+                                                                   -1.1
+                                                                -1.2                                                                                                                      0.000
+                               -1.000                            -1.150                                                                                                                                                               -1.400
+                                                                                                                                  -0.400
+                                                                 500000 0                                                                                                                    -0.200        -0.600
+                                                            -1.3                                                                                                                                                                                                                        0.000
+                                        -1.100                -1.3
+                               -1.050                                                                                                     -0.5                                                               -0.800
+                                                                                                                                                                                                                                           -1.800
+                                                                                                                                 -0.300
+                                                                                                                                                                                                           -1.000
+                                                                                                                                                                                                                                                                                      -0.800
+                                                                                                                                                                                                                                                                                        -0.400
+                                                                                      -1.5                                                -0.600          -1.1                                                                                                                       -1.200
+                                                               -1.250
+                                  -1.400
+                                                                                                                                         -0.700
+                                                                                                                                       -0.800                                                                                                                                    -1.600
+                                                                                                                                                                                                         -1.200 -0.200                        -2.000
+                                                                                                        -1.000-0.900
+                                                                                                                                                                                                                                                                                                    -4.000
+                                                                                        00                                                                 00
+                                                                                                                                                                                                      -1.400                                                                     -2.800
+                                                                                                                                                                                                                                                                                     -2.000
+                        10 1                     -1.450
+
+
+
+
+Initial Learning Rate
+                                                                                             0
+                                                                                        -1.45                                                                                                                                                                    00
+                                                                                                                                                                                                                                                            -0.6
+                                                                                                                                                                                                                                                                                                               -1.600
+                                                                                                                                                                                                                                                 -1.20
+                                                                                                                                                               00                                                                              -1.00 0
+                                                                                                                                                          -0.8                                                                                       0
+                                                                            -1.400   -1.350                                                                                                                              -1.600                                         -3.600
+                                                                                        -1.300                                                                   -0.600                                                                                                          -3.200
+                                                                                                                                                                                                                                                                                                -2.400
+                                                                                          -1.250
+                        10 2
+                                                                                                                       -0.700
+                                                                                             -1.200
+                                                                                                                                                                      -0.400                                                                              -0.400
+                                                                                                                                                                                                                00                                                                                                             -0.400
+                                                                                                                                                                                                           -0.8
+                                                                                                                                                                                                                                                                                          0
+                                                                                                                                                                                                                                                                                    -1.20
+                                                                                             -1.150
+                        10 10
+                           3
+                              2                  10 1              100       101        102           10 2
+                                                                                                                           -0.500
+                                                                                                                                 10 1              100   101              102      10 2            10 1                       100                 101       102       10 2            10 1               100            101      102
+                                                          Decay Exponent                                                               Decay Exponent                                                               Decay Exponent                                                            Decay Exponent
+
+Figure 5: Meta-objective surfaces and SMD trajectories (red) optimizing initial effective learning rate and
+decay exponent with horizons of {100, 1k, 5k, 20k} steps2 . 2.5k random samples with Gaussian interpolation
+are used to illustrate the meta-objective surface.
+
+
+trajectories simulated using fixed network parameters. Finally, we compute multiple meta-updates in
+order to ensure that the meta-objective is optimized sufficiently well. Together, these changes ensure
+unbiased meta-gradients, as well as careful optimization of the meta-objective, at the cost of high
+computational overhead. We do not recommend this approach as a practical SMD implementation,
+but rather as a way of understanding the biases in the meta-objective itself.
+
+3.2                            O FFLINE META - OPTIMIZATION
+
+To understand the sensitivity of the optimized hyperparameters to the horizon, we first carried
+out an offline experiment on a multi-layered perceptron (MLP) on MNIST (LeCun et al., 1998).
+Specifically, we fit learning rate decay schedules offline by repeatedly training the network, and a
+single meta-gradient was obtained from each training run.
+
+Learnable decay schedule. We used a parametric
+learning rate decay schedule known as inverse time                                                                                                                                                       10 1
+
+                                                                                                                                                                                           Train Loss
+decay (Welling & Teh, 2011): αt = (1+α0t )β , where                                                                                                                                                      10 2
+                                           K                                                                                                                                                                                       100 Steps
+α0 is the initial learning rate, t is the number of                                                                                                                                                      10 3                      1000 Steps
+                                                                                                                                                                                                                                   5000 Steps
+training steps, β is the learning rate decay exponent,                                                                                                                                                   10 4                      20000 Steps
+and K is the time constant. We jointly optimized α0                                                                                                                                                                               0         5000                        10000                        15000                    20000
+                                                                                                                                                                                                                                                                         Step
+and β. We fixed µ = 0.9, K = 5000 for simplicity.                                                                                                                                                                   15                                                                                                        Train
+                                                                                                                                                                                                                                                                                                                              Test
+Experimental details. The network had two lay-
+                                                                                                                                                                                                                    10
+                                                                                                                                                                                                  Error (%)
+ers of 100 hidden units, with ReLU activations.
+Weights were initialized with a zero-mean Gaussian                                                                                                                                                                   5
+with standard deviation 0.1. We used a warm start                                                                                                                                                                    0
+from a network trained for 50 SGD with momentum                                                                                                                                                                                   0                      5000           10000                        15000                    20000
+                                                                                                                                                                                                                                                                         Step
+steps, using α = 0.1, µ = 0.9. (We used a warm                                                                                                                                                                100
+start because the dynamics are generally different at
+
+                                                                                                                                                                                           Learning Rate
+the very start of training.) For SMD optimization,                                                                                                                                                       10 1
+we trained all hyperparameters in log space using
+                                                                                                                                                                                                         10 2
+Adam optimizer, with 5k meta steps.
+Figure 5 shows SMD optimization trajectories on          10 0        5000   10000     15000    20000
+                                                                                                                                                                                                                     3
+                                                                             Step
+the meta-objective surfaces, initialized with multiple
+random hyperparameter settings. The SMD trajecto- Figure 6: Training curves with best learning
+ries appear to have converged to the global optimum. rate schedules from meta-objective surfaces with
+Importantly, the meta-objectives with longer hori- {100, 1k, 5k, 20k} step horizons.
+zons favored a much smaller learning rate decay exponent β, leading to a more gradual decay
+schedule. The meta-objective surfaces were very different depending on the time horizon, and the
+final β value differed by over two orders of magnitude between 100 and 20k step horizons.
+We picked the best learning rate schedules from meta-objective surfaces (in Figure 5), and obtained
+the training curves of a network shown in Figure 6. The resulting training loss at 20k steps with
+   2
+     We encountered some optimization difficulties for SMD with horizon of 20k steps. Since those are not the
+focus of this paper, we left out the trajectories of 20k steps to avoid confusions.
+
+
+                                                                                                                                                                               9
+Published as a conference paper at ICLR 2018
+
+
+
+
+                                            MNIST                                                              CIFAR-10
+                                                                                           100
+                  10 2
+                                                                                       10 1
+       Loss                                                                 Loss
+                  10 4                                                                 10 2          SGD-MOM Best
+                             SGD-MOM Best
+                             SMD                                                                     SMD
+                                                                                       10 3
+
+
+
+
+       Effective LR                                                         Effective LR
+                  10 1                                                                 10 1
+                                                                                       10 2
+                  10 3                                                                 10 3
+                                                                                       10 4
+                         0       1          2           3   4      5                             0       1          2           3   4      5
+                                                Steps           ×104
+                                                                                                                        Steps           ×104
+
+
+
+
+Figure 7: Training curves and learning rates from online SMD with lookahead of 5 steps (blue), and hand-tuned
+fixed learning rate (red). Each blue curve corresponds to a different initial learning rate.
+
+the 100 step horizon was over three orders of magnitude larger than with the 20k step horizon. In
+general, short horizons gave better performance initially, but were surpassed by longer horizons. The
+differences in error were less drastic, but we see that the 100 step network was severely undertrained,
+and the 1k step network achieved noticeably worse test error than the longer-horizon ones.
+
+3.3   O NLINE M ETA -O PTIMIZATION
+
+In this section, we study whether online adaptation also suffers from short-horizon bias. Specifically,
+we used Algorithm 1) to adapt the learning rate and momentum hyperparameters online while
+a network is trained. We experimented with an MLP on MNIST and a CNN on CIFAR-
+10 (Krizhevsky, 2009).
+
+Experimental details. For the MNIST experiments, we used an MLP network with two hidden
+layers of 100 units, with ReLU activations. Weights were initialized with a zero-mean Gaussian
+with standard deviation 0.1. For CIFAR-10 experiments, we used a CNN network adapted from
+Caffe (Jia et al., 2014), with 3 convolutional layers of filter size 3 × 3 and depth [32, 32, 64], and
+2 × 2 max pooling with stride 2 after every convolution layer, and follwed by a fully connected
+hidden layer of 100 units. Meta-optimization was done with 100 steps of Adam for every 10 steps of
+regular training. We adapted the learning rate α and momentum µ. After 25k steps, adaptation was
+stopped, and we trained for another 25k steps with an exponentially decaying learning rate such that
+it reached 1e-4 on the last time step. We re-parameterized the learning rate with the effective learning
+rate αeff = 1−µ
+              α
+                 , and the momentum with 1 − µ, so that they can be optimized more smoothly in the
+log space.
+Figure 7 shows training curves both with online SMD and with hand-tuned fixed learning rate
+and momentum hyperparameters. We show several SMD runs initialized from widely varying
+hyperparameters; all the SMD runs behaved similarly, suggesting it optimized the meta-objective
+efficiently enough. Under SMD, learning rates were quickly decreased to very small values,
+leading to slow progress in the long term, consistent with the noisy quadratic and offline adaptation
+experiments.
+As online SMD can be too conservative in the choice of learning rate, it is natural to ask whether
+removing the stochasticity in the lookahead sequence can fix the problem. We therefore considered
+online SMD where the entire lookahead trajectory used a single mini-batch, hence removing the
+stochasticity. As shown in Figure 8, this deterministic lookahead scheme led to the opposite
+problem: the adapted learning rates were very large, leading to instability. We conclude that the
+stochasticity of mini-batch training cannot be simply ignored in meta-optimization.
+
+4     C ONCLUSION
+In this paper, we analyzed the problem of short-horizon bias in meta-optimization. We presented
+a noisy quadratic toy problem which we analyzed mathematically, and observed that the optimal
+
+
+                                                                       10
+Published as a conference paper at ICLR 2018
+
+
+
+
+                                              MNIST                                                                  CIFAR-10
+                     100                                                                     2 × 100
+
+
+      Loss       10 2                                                           Loss
+                 10 4          SGD-MOM Best                                                                SGD-MOM Best
+                               SMD                                                                         SMD
+                                                                                             100
+                     101                                                                     101
+
+
+      Effective LR                                                            Effective LR
+                 10 1                                                                    10 1
+
+                 10 3                                                                    10 3
+                           0       1          2           3   4      5                                 0       1          2           3   4      5
+                                                  Steps           ×104
+                                                                                                                              Steps           ×104
+
+
+
+
+Figure 8: Online SMD with deterministic lookahead of 5 steps (blue), compared with a manually tuned fixed
+learning rate (red). Other settings are the same as Figure 7.
+
+learning rate schedule differs greatly from a greedy schedule that minimizes training loss one step
+ahead. While the greedy schedule tends to decay the learning rate drastically to reduce the loss
+on high curvature directions, the optimal schedule keeps a high learning rate in order to make
+steady progress on low curvature directions, and eventually achieves far lower loss. We showed
+that this bias stems from the combination of stochasticity and ill-conditioning: when the problem
+is either deterministic or spherical, the greedy learning rate schedule is globally optimal; however,
+when the problem is both stochastic and ill-conditioned (as is most neural net training), the greedy
+schedule performs poorly. We empirially verified the short-horizon bias in the context of neural
+net training by applying gradient based meta-optimization, both offline and online. We found the
+same pathological behaviors as in the noisy quadratic problem — a fast learning rate decay and poor
+long-run performance.
+While our results suggest that meta-optimization should not be applied blindly, our noisy quadratic
+analysis also provides grounds for optimism: by removing ill-conditioning (by using a good
+preconditioner) and/or stochasticity (with large batch sizes or variance reduction techniques), it may
+be possible to enter the regime where short-horizon meta-optimization works well. It remains to be
+seen whether this is achievable with existing optimization algorithms.
+
+Acknowledgement YW is supported by a Google PhD Fellowship. RL is supported by Connaught
+International Scholarships.
+
+
+R EFERENCES
+Shun Ichi Amari. Natural gradient works efficiently in learning. Neural Computation, 10(2):251–
+  276, 1998. ISSN 0899-7667.
+
+Marcin Andrychowicz, Misha Denil, Sergio Gomez Colmenarejo, Matthew W. Hoffman, David
+ Pfau, Tom Schaul, and Nando de Freitas. Learning to learn by gradient descent by gradient
+ descent. In Advances in Neural Information Processing Systems 29: Annual Conference on
+ Neural Information Processing Systems 2016, December 5-10, 2016, Barcelona, Spain, pp. 3981–
+ 3989, 2016.
+
+Léon Bottou. On-line learning in neural networks. chapter On-line Learning and Stochastic
+  Approximations, pp. 9–42. Cambridge University Press, New York, NY, USA, 1998. ISBN 0-
+  521-65263-4.
+
+John C. Duchi, Elad Hazan, and Yoram Singer. Adaptive subgradient methods for online learning
+  and stochastic optimization. Journal of Machine Learning Research, 12:2121–2159, 2011.
+
+Chelsea Finn, Pieter Abbeel, and Sergey Levine. Model-agnostic meta-learning for fast adaptation
+  of deep networks. In ICML, 2017.
+
+
+                                                                         11
+Published as a conference paper at ICLR 2018
+
+
+
+
+Priya Goyal, Piotr Dollar, Ross Girshick, Pieter Noordhuis, Lukasz Wesolowski, Aapo Kyrola,
+  Andrew Tulloch, Yangqing Jia, and Kaiming He. Accurate, large minibatch SGD: Training
+  ImageNet in 1 hour. Technical report, FAIR, 2017.
+Alex Graves. Practical variational inference for neural networks. In Advances in Neural Information
+  Processing Systems 24: 25th Annual Conference on Neural Information Processing Systems 2011.
+  Proceedings of a meeting held 12-14 December 2011, Granada, Spain., pp. 2348–2356, 2011.
+Yangqing Jia, Evan Shelhamer, Jeff Donahue, Sergey Karayev, Jonathan Long, Ross Girshick,
+  Sergio Guadarrama, and Trevor Darrell. Caffe: Convolutional architecture for fast feature
+  embedding. In Proceedings of the 22Nd ACM International Conference on Multimedia, MM
+  ’14, pp. 675–678, 2014. ISBN 978-1-4503-3063-3.
+Diederik P. Kingma and Jimmy Ba. Adam: A method for stochastic optimization.                In 3th
+  International Conference on Learning Representations, 2015.
+P. W. Koh and P. Liang. Understanding black-box predictions via influence functions.              In
+   International Conference on Machine Learning (ICML), 2017.
+Alex Krizhevsky. Learning multiple layers of features from tiny images. Technical report, 2009.
+Yann LeCun, Leon Bottou, Yoshua Bengio, and Patrick Haffner. Gradient-based learning applied to
+  document recognition. Proceedings of the IEEE, 86(11):2278–2324, Nov 1998. ISSN 0018-9219.
+  doi: 10.1109/5.726791.
+Ke Li and Jitendra Malik. Learning to optimize. In 5th International Conference on Learning
+  Representations, 2017.
+Ren-cang Li. Sharpness in rates of convergence for CG and symmetric lanczos methods. Technical
+  report, 2005.
+Kaifeng Lv, Shunhua Jiang, and Jian Li. Learning gradient descent: Better generalization and longer
+  horizons. In Proceedings of the 34th International Conference on Machine Learning, ICML 2017,
+  pp. 2247–2255, 2017.
+David J. C. MacKay. A practical bayesian framework for backpropagation networks. Neural
+  Comput., 4(3):448–472, May 1992. ISSN 0899-7667.
+Dougal Maclaurin, David Duvenaud, and Ryan P. Adams. Gradient-based hyperparameter
+  optimization through reversible learning. In Proceedings of the 32nd International Conference on
+  Machine Learning, July 2015.
+James Martens. Deep learning via Hessian-free optimization. In ICML-10, 2010.
+James Martens. New insights and perspectives on the natural gradient method. arXiv:1412.1193,
+  2014.
+James Martens and Roger Grosse. Optimizing neural networks with kronecker-factored approximate
+  curvature. In ICML, 2015.
+Luke Metz, Ben Poole, David Pfau, and Jascha Sohl-Dickstein. Unrolled generative adversarial
+  networks. In 5th International Conference on Learning Representations, 2017.
+Barak A. Pearlmutter. Fast exact multiplication by the hessian. Neural Computation, 6(1):147–160,
+  January 1994. ISSN 0899-7667. doi: 10.1162/neco.1994.6.1.147.
+Sachin Ravi and Hugo Larochelle. Optimization as a model for few-shot learning.             In 5th
+  International Conference on Learning Representations, 2017.
+Olga Russakovsky, Jia Deng, Hao Su, Jonathan Krause, Sanjeev Satheesh, Sean Ma, Zhiheng
+  Huang, Andrej Karpathy, Aditya Khosla, Michael S. Bernstein, Alexander C. Berg, and Fei-Fei
+  Li. ImageNet large scale visual recognition challenge. International Journal of Computer Vision,
+  115(3):211–252, 2015.
+
+
+                                                12
+Published as a conference paper at ICLR 2018
+
+
+
+
+Adam Santoro, Sergey Bartunov, Matthew Botvinick, Daan Wierstra, and Timothy P. Lillicrap.
+  Meta-learning with memory-augmented neural networks. In Proceedings of the 33nd Interna-
+  tional Conference on Machine Learning, ICML 2016, New York City, NY, USA, June 19-24, 2016,
+  pp. 1842–1850, 2016.
+Tom Schaul, Sixin Zhang, and Yann LeCun. No more pesky learning rates. In Proceedings of the
+  30th International Conference on Machine Learning, ICML 2013, Atlanta, GA, USA, 16-21 June
+  2013, pp. 343–351, 2013.
+Nicol N. Schraudolph. Local gain adaptation in stochastic gradient descent. In 1999 Ninth
+  International Conference on Artificial Neural Networks ICANN 99. (Conf. Publ. No. 470),
+  volume 2, pp. 569–574 vol.2, 1999. doi: 10.1049/cp:19991170.
+Nicol N. Schraudolph. Fast curvature matrix-vector products for second-order gradient de-
+  scent. Neural Computation, 14(7):1723–1738, July 2002. ISSN 0899-7667. doi: 10.1162/
+  08997660260028683.
+L. N. Smith. Cyclical learning rates for training neural networks. In 2017 IEEE Winter Conference
+   on Applications of Computer Vision (WACV), pp. 464–472, March 2017. doi: 10.1109/WACV.
+   2017.58.
+Ilya Sutskever, James Martens, George Dahl, and Geoffrey Hinton. On the importance of
+   initialization and momentum in deep learning. In Proceedings of the 30th International
+   Conference on International Conference on Machine Learning - Volume 28, ICML’13, 2013.
+Max Welling and Yee Whye Teh. Bayesian learning via stochastic gradient langevin dynamics. In
+ Proceedings of the 28th International Conference on Machine Learning, ICML 2011, Bellevue,
+ Washington, USA, June 28 - July 2, 2011, pp. 681–688, 2011.
+P. J. Werbos. Backpropagation: past and future. IEEE 1988 International Conference on Neural
+   Networks, pp. 343–353 vol.1, 1988.
+Olga Wichrowska, Niru Maheswaranathan, Matthew W. Hoffman, Sergio Gomez Colmenarejo,
+  Misha Denil, Nando de Freitas, and Jascha Sohl-Dickstein. Learned optimizers that scale and
+  generalize. In Proceedings of the 34th International Conference on Machine Learning, ICML
+  2017, pp. 3751–3760, 2017.
+Guodong Zhang, Shengyang Sun, David K. Duvenaud, and Roger B. Grosse. Noisy natural gradient
+  as variational inference. CoRR, abs/1712.02390, 2017.
+
+
+A     P ROOFS OF T HEOREMS
+The proofs are organized as follows; we provide a proof to Theorem 1 in A.1, a proof to Theorem 2
+in A.2 and a proof to Theorem 3 in A.3.
+
+A.1     M ODEL DYNAMICS
+
+Recall the stochastic gradient descent with momentum is defined as follows,
+                  v (t+1) = µ(t) v (t) − α(t) (hθ(t) + hσξ),                     ξ ∼ N (0, 1)
+                      (t+1)        (t)        (t+1)        (t)        (t) (t)
+                  θ           =θ         +v           =θ         +µ v           − α(t) (hθ(t) + hσξ)
+                              = (1 − α(t) h)θ(t) + µ(t) v (t) + hσξ.
+
+A.1.1    DYNAMICS OF THE EXPECTATION
+We calculate the mean of the velocity v (t+1) ,
+                             h       i      h                    i
+                           E v (t+1) = E µ(t) v (t) − α(t) hθ(t)
+                                                h i             h i
+                                       = µ(t) E v (t) − α(t) hE θ(t) .                                 (10)
+
+
+                                                                 13
+Published as a conference paper at ICLR 2018
+
+
+
+
+We calculate the mean of the parameter θ(t+1) ,
+                                  h      i   h i      h       i
+                                 E θ(t+1) = E θ(t) + E v (t+1) .                                (11)
+
+Let’s assume the following initial conditions:
+                                             h     i
+                                            E v (0) = 0
+                                             h     i
+                                            E θ(0) = E0 .
+
+                                           
+Then Eq.(10) and Eq.(11) describes how E θ(t) , E v (t) changes over time t.
+
+
+A.1.2    DYNAMICS OF THE VARIANCE
+
+We calculate the variance of the velocity v (t+1) ,
+   h       i     h                     i
+  V v (t+1) = V µ(t) v (t) − α(t) hθ(t) + (α(t) hσ)2
+                         h i                 h i                                   
+             = (µ(t) )2 V v (t) + (α(t) h)2 V θ(t) − 2µ(t) α(t) h · Cov θ(t) , v (t) + (α(t) hσ)2 .
+                                                                                                (12)
+
+The variance of the parameter θ(t+1) is given by,
+          h      i   h i      h       i                                h i
+         V θ(t+1) = V θ(t) + V v (t+1) + 2 µ(t) Cov θ(t) , v (t) − α(t) hV θ(t) .               (13)
+
+We also need to derive how the covariance of θ and v changes over time:
+                                                               
+            Cov θ(t+1) , v (t+1) = Cov (θ(t) + v (t+1) ), v (t+1)
+                                                           h      i
+                                  = Cov θ(t) , v (t+1) + V v (t+1)
+                                                                  h i     h       i
+                                  = µ(t) Cov θ(t) , v (t) − α(t) hV θ(t) + V v (t+1) .          (14)
+
+Let’s assume the following initial conditions:
+                                                 h      i
+                                              V v (0) = 0
+                                                 h      i
+                                              V θ(0) = V0
+                                                       
+                                        Cov θ(0) , v (0) = 0.
+
+Combining Eq.(12-14), we obtain the following dynamics (from t = 0, . . . , T − 1):
+           h        i           h i                  h i                                
+        V v (t+1) = (µ(t) )2 V v (t) + (α(t) h)2 V θ(t) − 2µ(t) α(t) h · Cov θ(t) , v (t) + (α(t) hσ)2
+           h        i    h i        h         i                             h i
+        V θ(t+1) = V θ(t) + V v (t+1) + 2 µ(t) Cov θ(t) , v (t) − α(t) hV θ(t)
+                                                  h i      h       i
+Cov θ(t+1) , v (t+1) = µ(t) Cov θ(t) , v (t) − α(t) hV θ(t) + V v (t+1) .
+
+
+                                                      14
+Published as a conference paper at ICLR 2018
+
+
+
+
+A.2      G REEDY OPTIMALITY
+
+A.2.1     U NIVARIATE CASE
+
+The loss at time step t is,
+
+          1
+             h        i2   h        i
+ (t+1)           (t+1)         (t+1)
+L        = h E θ          +V θ
+          2
+          1 h h i           h i              h i2    h i               h i                 h i
+         = h E θ(t) + µ(t) E v (t) − (α(t) h)E θ(t) + V θ(t) + (µ(t) )2 V v (t) + (α(t) h)2 V θ(t)
+          2                                                              h i i
+         − 2µ(t) α(t) h · Cov θ(t) , v (t) + (α(t) hσ)2 + 2 µ(t) Cov θ(t) , v (t) − α(t) hV θ(t)
+           1 h                 h i              h i2                     h i               h i
+         = h (1 − α(t) h)E θ(t) + µ(t) E v (t)            + (1 − α(t) h)2 V θ(t) + (µ(t) )2 V v (t)
+           2                                             i
+         + 2µ(t) (1 − α(t) h)Cov θ(t) , v (t) + (α(t) hσ)2
+                               h i            h i               h i            h i
+           1 h                            2                                2
+         = h (1 − α(t) h)2 E θ(t) + V θ(t) + (µ(t) )2 E v (t) + V v (t)
+           2
+                              h i h i                                         i
+         + 2µ(t) (1 − α(t) h) E θ(t) E v (t) + Cov θ(t) , v (t) + (α(t) hσ)2 .
+
+
+                                      2                                          
+For simplicity, we denote A(·) = E [·] + V [·], and notice that E θ(t) v (t) = E θ(t) E v (t) +
+                
+Cov θ(t) , v (t) , hence,
+
+           1 h                                                                  h          i            i
+L(t+1) =     h (1 − α(t) h)2 A(θ(t) ) + (µ(t) )2 A(v (t) ) + 2µ(t) (1 − α(t) h)E θ(t) v (t) + (α(t) hσ)2 .
+           2
+                                                                                                      (15)
+In order to find the optimal learning rate and momentum for minimizing L(t+1) , we take the
+derivative with respect to α(t) and µ(t) , and set it to 0:
+
+                                                                             h        i
+                 ∇α(t) L(t+1) = (1 − α(t) h)A(θ(t) ) · (−h) − µ(t) hE θ(t) v (t) + α(t) (hσ)2 = 0
+                                                     h          i
+         α(t) h(A(θ(t) ) + σ 2 ) = A(θ(t) ) + µ(t) E θ(t) v (t)
+                                                                    h        i
+                 ∇µ(t) L(t+1) = µ(t) A(v (t) ) + (1 − α(t) h)E θ(t) v (t) = 0
+                                                             
+                           (t)∗     (1 − α(t) h)E θ(t) v (t)
+                          µ      =−
+                                             A(v (t) )
+                                                                       
+          (t)      (t)       2        (t)     (1 − α(t) h)E θ(t) v (t) h (t) (t) i
+         α h(A(θ ) + σ ) = A(θ ) −                                        E θ v
+                                                       A(v (t) )
+                                                                          2
+                                          A(θ(t) )A(v (t) ) − E θ(t) v (t)
+                          α(t)∗ =                                            2  .
+                                   h A(v (t) )(A(θ(t) ) + σ 2 ) − E θ(t) v (t)
+
+
+A.2.2     HIGH DIMENSION CASE
+
+
+The loss is the sum of losses along all directions:
+
+            X1         h                                                        h         i            i
+                                         (t)             (t)                      (t) (t)
+L(t+1) =             hi (1−α(t) hi )2 A(θi )+(µ(t) )2 A(vi )+2µ(t) (1−α(t) hi )E θi vi +(α(t) hi σi )2
+             i
+                 2
+
+
+                                                    15
+Published as a conference paper at ICLR 2018
+
+
+
+
+Now we obtain optimal learning rate and momentum by setting the derivative to 0,
+               X h                                            h         i            i
+                                      (t)                       (t) (t)
+∇α(t) L(t+1) =    hi (1 − α(t) hi )A(θi ) · (−hi ) − µ(t) hi E θi vi + α(t) (hi σi )2 = 0
+                              i
+          X              (t)
+                                         X
+                                                      (t)
+                                                                         h
+                                                                           (t) (t)
+                                                                                   i
+    (t)
+α               (hi ) (A(θi ) + (σi )2 ) =
+                          3
+                                            (hi )2 A(θi ) + µ(t) (hi )2 E θi vi
+          i                                                  i
+                              X                                                         h          i
+              (t+1)                    (t)      (t)                                        (t) (t)
+∇µ(t) L                  =        hi µ       A(vi ) + hi (1 − α(t) hi )E                 θ i vi = 0
+                              i
+                 P                               h           i
+                                      (t)            (t) (t)
+                         i hi (1 −  α     hi )E    θ i  v i
+µ(t)∗ = −                        P            (t)
+                                   i hi A(vi )
+                                                                                                 
+          X                             X            X        h         i       h         i
+                           (t)
+                (hi ) (A(θi ) + (σi ) )           (t)               (t) (t)            (t) (t)
+α   (t)               3               2
+                                             hj A(vj ) −         2
+                                                            (hj ) E θj vj      (hi ) E θi vi  =
+                                                                                    2
+
+          i                                                      j                               j
+                                                                                                                               
+                 X                              X                             X               h        i        h         i
+                          (hi )2 A(θi(t) )             hj A(vj ) −
+                                                                     (t)                          (t) (t)
+                                                                                            hj E θj vj
+                                                                                                                      (t) (t)
+                                                                                                            (hi )2 E θi vi 
+                     i                              j                                   j
+                              P                (t)
+                                                        Ph
+                                                             (t) (t)
+                                                                     i
+                                                                     (t)
+                                                                               h    
+                                                                                 (t) (t)
+                                                                                         i P
+                                  i   (hi )2 A(θi )                    (hi )2 E θi vi
+                                                             j hj A(vj )
+                                                            θj v j                      −        j hj E
+α(t)∗ = P                          P             P            h         i        h          i .
+                       (t)                      (t)                   (t) (t)              (t) (t)
+            (hi )3 (A(θi ) + (σi )2 )                    j (hj ) E θj vj        (hi )2 E θi vi
+                                                                2
+         i                              j hj A(vj ) −
+
+
+A.3       U NIVARIATE O PTIMALITY IN SGD
+
+We now consider a dynamic programming approach to solve the problem. We formalize the
+optimization problem of {αi } as follows. We first denote Lmin as the minimum expected loss at
+the last time step T (i.e., under the optimal learning rate).
+                                                                             h         i
+                     Lmin =            min         Eξ(t) ,ξ(t+1) ,...,ξ(T −1) L(θ(T ) ) .
+                                               α(t) ,α(t+1) ,...,α(T −1)
+
+Recall that the loss can be expressed in terms of the expectation and variance of θ. Denote A(t) =
+                                                                 (T )
+(E θ(t) )2 + V θ(t) . The final loss can be expressed in terms of Amin , obtained by using optimal
+learning rate schedule:
+                                               1 (T )
+                                      Lmin = hAmin + σ 2 .
+                                               2
+As in Theorem 1, we derive the dynamics for SGD without momentum:
+                θ(t) = (1 − α(t−1) h)θ(t−1) + α(t−1) hσξ (t−1)
+  h i h i                             h     i               h     i              
+⇒ E θ(t) , V θ(t) = (1 − α(t−1) h)E θ(t−1) , (1 − α(t−1) h)2 V θ(t−1) + (α(t−1) hσ)2 .
+
+Thus, we can find a recurrence relation of the sequence A(t) :
+                       h          i        h        i2 
+ (t)        (t−1) 2          (t−1) 2           (t−1)                                     (T −1)
+A = (1−α          h) (E θ            ) +V θ               +(α(t−1) hσ)2 = (1−α(t−1) h)2 Amin +(α(t−1) hσ)2 .
+
+              (T )
+Since Amin is a function of α(T −1)∗ . We can obtain optimal learning rate α(T −1)∗ by taking the
+derivative of Lmin w.r.t. α(T −1) and setting it to zero:
+                                                                               (T −1)
+                                                 dLmin     1 dAmin
+                                                         = h (T       =0
+                                                dα(T −1)   2 dα −2)
+                                                             (T )
+                                                           dAmin
+                                                      ⇒            =0
+                                                          dα(T −1)
+                                                                          (T −1)
+                                                                       Amin
+                                                      ⇒ α(T −1)∗ =     (T −1)
+                                                                                   .
+                                                                    h(Amin + σ 2 )
+
+
+                                                                               16
+Published as a conference paper at ICLR 2018
+
+
+
+
+                     (T )                   (T −1)
+Thus we can write Amin in terms of Amin          and the optimal α(T −1)∗ :
+                                                   !2                               !2
+                                          (T −1)                         (T −1)
+                    (T )                 Amin            (T −1)        Amin
+                  Amin =         1 − (T −1)            Amin +         (T −1)
+                                                                                  σ
+                                      Amin + σ 2                    Amin + σ 2
+                                               !2                               !2
+                                                                    (T −1)
+                                       σ2           (T −1)        Amin
+                            =      (T −1)
+                                                  Amin +         (T −1)
+                                                                              σ
+                                 Amin + σ 2                     Amin + σ 2
+                                  (T −1)
+                                 Amin σ 2
+                            =    (T −1)
+                                                 .
+                                Amin      + σ2
+Therefore,
+                                            1 (T )
+                                   Lmin =     hA    + σ2
+                                            2 min              !
+                                                     (T −1)
+                                            1     Amin σ 2
+                                           = h     (T −1)
+                                                                 + σ2 .
+                                            2    A        + σ2
+                                                        min
+                                                                          −k
+We now generalize the above derivation. First rewrite Lmin in terms of ATmin and calculate the
+optimal learning rate at time step T − k.
+Theorem 4. For all T ∈ N, and k ∈ N, 1 ≤ k ≤ T , we have,
+                                                        !
+                                             (T −k)
+                                   1       Amin σ 2
+                            Lmin = h        (T −k)
+                                                          + σ2 .                               (16)
+                                   2     kA        + σ2 min
+
+Therefore, the optimal learning α(t) at timestep t is given as,
+                                                              A(t)
+                                            α(t)∗ =                     .                      (17)
+                                                       h(A(t) + σ 2 )
+
+Proof. The form of Lmin can be easily proven by induction on k, and use the identity that,
+                                              ab
+                                           ( a+b )b             ab
+                                              ab
+                                                       =                .
+                                          k( a+b )+b       (k + 1)a + b
+
+The optimal learning rate then follows immediately by taking the derivative of Lmin w.r.t. α(T −k−1)
+and setting it to zero. Note that the subscript min is omitted from A(t) in Eq.(17) as we assume all
+A(t) are obtained using optimal α∗ , and hence minimum.
+
+
+
+
+                                                        17
+

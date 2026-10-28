@@ -1,10 +1,24 @@
 # Greek OCR toolkit
 
-## 1. What this repository is
+## 1. Greek OCR: data, tools and models
 
-This is the private toolkit for the Greek OCR programme, especially printed polytonic Greek. The owner's standard (8 October 2026) is that every tool sits behind a typed API with tests. The Python package is `greekocr`; the command-line tool has the same name. Source identities, inputs and outputs are bound by hashes and receipts.
+**Greek OCR reads Greek (modern/monotonic and polytonic), Latin, Cyrillic, mixed Greek–Latin text, numbers and page furniture.** This repository contains the code and evidence for building its line datasets, reviewing corrections, training recognizers and using them through Docling. Results and limits are tied to their recorded populations; a supported script is not a claim of equal accuracy on every book.
 
-The repository has two separate aspects: **A — development of OCR and our segmenters**, and **B — creation of training data for OCR**. B uses frozen tool versions from A; developing a segmenter and admitting training rows are separate work. A PDF text layer is another OCR observation, and agreement between readers is not human ground truth.
+These are the release targets in pipeline order. **Publication is in preparation:** HF paths below describe the planned public layout; final file/commit pins, model scores and the collection URL are pending. The [version register](VERSIONS.md) records counted rounds, aliases and unresolved historical counts. `v0.n (n unresolved)` is an explicit provenance gap, not a published tag.
+
+1. These are the source pages and line boxes: [Greek OCR Lines — pages and geometry](https://huggingface.co/datasets/fffoivos/greek-ocr-lines/tree/main/tables), part of the line dataset (legacy **v0.4 / v4**, combined release version pending). Source metadata should identify the exact book, edition, volume and page; raw Google responses are excluded from the public snapshot.
+2. This is our segmenter (**v0.3**, three A-lineage generations): [pixel-first implementation](greekocr/pages/), [R7/R8 lineage and evidence](docs/A_ocr_development/MODEL_GENERATIONS.md). The B crop policy is separately **v0.13 / 0.9-s5**, with [its tool binding](docs/harvest/line_pipeline/tool_versions.json).
+3. This is how we filter and compose the lines: [content gate **v0.3**, repair **v0.2**, composer **v0.3**, final eligibility **v0.3**](greekocr/harvest/line_pipeline.py), [census **v0.7** and inventory **v0.1**](greekocr/harvest/line_pipeline_census.py). [The pipeline graph](docs/B_training_data/c_pipeline/pipeline.mmd) shows the order and retained HOLD/DROP evidence.
+4. These are the corrected Google lines: [Greek OCR Lines — real lines](https://huggingface.co/datasets/fffoivos/greek-ocr-lines/tree/main/data/real), the same dataset release (legacy **v0.4**, new combined version pending). Raw and corrected label variants remain distinct. These are machine-produced/corrected labels with recorded review, rather than a claim that every row is human transcription.
+5. These are the correction tools: [SF7 **v0.7**, RU1 **v0.3**, N1 **v0.3**, dashes **v0.1**](docs/B_training_data/b_tools/README.md). SF7's recorded candidate status, N1's assisted scope and dash tags' lack of a general repair release remain explicit in the register.
+6. This is how we reviewed: [review code](greekocr/adjudicate/), [line-by-line review contract](docs/B_training_data/d_review/HUMAN_REVIEW_SHEETS.md) and [recorded revision method](docs/B_training_data/d_review/README.md). Review is a method spanning the component versions above; it is not assigned an invented independent generation.
+7. This is the latest dataset of synthetic lines we have produced: [Greek OCR Lines — synthetic lines](https://huggingface.co/datasets/fffoivos/greek-ocr-lines/tree/main/data/synthetic), **v0.n (n unresolved)**, current codec-v2.1 clone with **190,486 train rows** consumed by Stage C. Synthetic lines have their own files/configuration, separate from real lines. [The generator and recipe interface](greekocr/synth/) and [Rust linefactory](greekocr/_vendor/factory/) are **v0.n (generator count unresolved)**. The release retains configured distributions, applied operation names/order and available origin fields; missing per-operation parameters/seeds remain documented gaps.
+8. This is how we trained: [the maintained trainer](greekocr/train/), [the sealed producing implementation](docs/programme_20261025/TRAIN_FULL_v1/stage_c_package/), [consolidation mapping](greekocr/train/CONSOLIDATION.md) and [export/parity commands](scripts/release_v0_export/COMMANDS.md). The release builder is **v0.n (n unresolved)**; its [public-file inventory tools](scripts/release_v0_publish/) prepare the reviewable snapshot. A future release commit contains the producing source; it did not retroactively train these models.
+9. This is the model we have trained: [Greek OCR](https://huggingface.co/fffoivos/greek-ocr), working **v0.10** (historical uncertainties in the register), compact widths **×1 / ×1.5 / ×2**, codec v2.1 / 266 classes / NFD head. [MODELS.json](MODELS.json) binds attempts **014 h14 / 013 / 013**, original packages/configs and pending final weights/scores. The retired ×1 h13 lane is excluded. Three-model completion and real-weight export parity remain pending.
+10. This is how to use the models with Docling: [the plugin](greekocr/deploy/docling_plugin/) loads the SHA-bound release directory through `greekocr.train`, uses strict state loading and returns NFC text. [Release format and commands](scripts/release_v0_export/COMMANDS.md) describe model **v0.10**; plugin integration is not a separately counted training generation.
+11. These are the [known gaps](docs/programme_20261028/RELEASE_v0/GAPS.md), gathered for checkpoint triage into [GitHub issues labelled `gap`](https://github.com/fffoivos/greek-ocr-toolkit/issues?q=is%3Aissue+label%3Agap). The HF collection is **Greek OCR — URL pending**; it will connect the pinned dataset and model commits.
+
+The repository has two aspects: **A — OCR and segmenter development**, and **B — training-data creation**. B consumes frozen A tools. Python package and CLI: `greekocr`. Source identities, inputs and outputs are bound by hashes and receipts.
 
 ## 2. Map by the owner's taxonomy
 
@@ -27,11 +41,11 @@ All paths below are relative to the repository root. Code keeps its existing imp
 
 ## 3. Current versions
 
-The [tool manifest](docs/harvest/line_pipeline/tool_versions.json) records named method generations, component hashes and release status. The pipeline identifier comes from `greekocr/harvest/line_pipeline.py`; the codec is `greekocr/_vendor/codec/v2.json`. Versions do not measure accuracy or establish adoption.
+The [tool manifest](docs/harvest/line_pipeline/tool_versions.json) records named method generations, component hashes and release status. The pipeline identifier comes from `greekocr/harvest/line_pipeline.py`; the release codec is `greekocr/train/codec/v2.1.json` (266 classes). Versions do not measure accuracy or establish adoption.
 
 | Component | Version | Meaning |
 |---|---|---|
-| Line pipeline | 0.3.2 | Current orchestration identifier. |
+| Line pipeline | 0.3.3 | Current orchestration identifier; previous 0.3.2 remains an alias in historical bindings. |
 | Segmentation filter | 0.13 (label 0.9-s5) | S4 measurement with one inclusive length band, 0.30–2.00, for all rows; accepted segmentation remains frozen. Band adoption is a recorded coordinator decision. |
 | Content gate | 0.3 | Scripts and raw-text length checks before segmentation. |
 | Final eligibility | 0.3 | Content, confidence, codec, CTC and split checks; aligned cell exemption. |

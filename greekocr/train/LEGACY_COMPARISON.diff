@@ -1,0 +1,1327 @@
+--- greekocr/_vendor/train/ckpt_io.py (pre-consolidation)
++++ docs/programme_20261025/TRAIN_FULL_v1/stage_c_package/vendor/train/ckpt_io.py
+@@ -98,7 +98,7 @@
+             f"{ckpt_path} is not a train.py checkpoint (no 'model' key) — expected a best.pt/last.pt "
+             f"wrapper dict or a .safetensors; got a bare state-dict or unexpected object."
+         )
+-    meta = {k: ck[k] for k in ("arch", "head", "codec_version", "n_classes", "seed") if k in ck}
++    meta = {k: ck[k] for k in ("arch", "head", "codec_version", "n_classes", "seed", "width_mult") if k in ck}
+     return ck["model"], meta
+ 
+ 
+@@ -110,7 +110,7 @@
+     your own custody, never on untrusted files. Binds codec_sha256 if `codec_path` is given."""
+     ck = torch.load(pt_path, map_location="cpu", weights_only=False)  # trusted local custody only
+     meta = build_meta(
+-        arch=ck.get("arch", "compact"),
++        arch=ck.get("arch", "compact"), width_mult=ck.get("width_mult", 1.0),
+         head=ck.get("head", "nfd"),
+         codec_version=ck.get("codec_version", ""),
+         n_classes=ck.get("n_classes", 0),
+--- greekocr/_vendor/train/data.py (pre-consolidation)
++++ docs/programme_20261025/TRAIN_FULL_v1/stage_c_package/vendor/train/data.py
+@@ -231,7 +231,7 @@
+     a strip's reading (eval preds) is deterministic regardless of batch composition (matches
+     pipeline/recognize.py). Applies to eval + future training; frozen S16 preds were produced without
+     it (see the WP-A cert F6 masked-eval note)."""
+-    from greekocr._vendor.train.model import DET_PAD_MARGIN  # local import to avoid ordering issues; single source in model.py
++    from model import DET_PAD_MARGIN  # local import to avoid ordering issues; single source in model.py
+     b = len(samples)
+     canvas_w = max(s["width"] for s in samples) + DET_PAD_MARGIN
+     canvas = np.empty((b, STRIP_HEIGHT, canvas_w), dtype=np.uint8)
+--- greekocr/_vendor/train/eval_cer.py (pre-consolidation)
++++ docs/programme_20261025/TRAIN_FULL_v1/stage_c_package/vendor/train/eval_cer.py
+@@ -23,8 +23,8 @@
+ 
+ import torch
+ 
+-from greekocr._vendor.train.cer import Codec, cer_line, greedy_decode_line, levenshtein, load_codec
+-from greekocr._vendor.train.model import amp_dtype_for, autocast_ctx, build_model, masked_forward
++from cer import Codec, cer_line, greedy_decode_line, levenshtein, load_codec
++from model import amp_dtype_for, autocast_ctx, build_model, masked_forward
+ 
+ 
+ @torch.no_grad()
+@@ -37,6 +37,7 @@
+     track_worst: int = 0,
+     per_script: bool = False,
+     arm=None,  # S15e(a): {"head","prec_codec","th"} for arms A/C; None/nfd = single-head greedy
++    reference_codec=None,  # optional larger literal reference vocabulary, same metric
+     line_callback=None,  # optional readout observer; exact scorer inputs, loader order
+ ) -> dict:
+     """Greedy-decode CER over a loader. Returns corpus CER, blank_rate, optional extras.
+@@ -74,12 +75,12 @@
+             if head == "nfd":
+                 hyp = greedy_decode_line(ids, codec)
+             elif head == "precomposed":
+-                from greekocr._vendor.train.heads import decode_precomposed
++                from heads import decode_precomposed
+                 hyp = decode_precomposed(lp_cpu[i, :L], arm["prec_codec"])
+             else:  # two
+-                from greekocr._vendor.train.heads import decode_two_head
++                from heads import decode_two_head
+                 hyp = decode_two_head(base_lp[i, :L], marks_lg[i, :L], arm["th"])
+-            ref = codec.decode(batch["labels"][i])  # gt from label_ids, never re-encoded
++            ref = (reference_codec or codec).decode(batch["labels"][i])  # gt from label_ids, never re-encoded
+             e = levenshtein(ref, hyp)
+             if line_callback is not None:
+                 line_callback(ref, hyp, e)
+@@ -119,7 +120,7 @@
+ def load_checkpoint(ckpt_path: str, codec: Codec, device: torch.device):
+     # WP-A ii: SAFE load (no pickle) via ckpt_io -> (state_dict, metadata). A legacy resume-.pt with
+     # no .safetensors sibling raises with conversion instructions rather than unpickling.
+-    from greekocr._vendor.train import ckpt_io
++    import ckpt_io
+     sd, meta = ckpt_io.load_model_weights(ckpt_path)
+     if meta.get("codec_version") != codec.version:
+         raise ValueError(
+@@ -128,7 +129,8 @@
+     if int(meta.get("n_classes", -1)) != codec.n_classes:
+         raise ValueError(f"checkpoint n_classes {meta.get('n_classes')} != codec {codec.n_classes}")
+     # arch is stored in the checkpoint since --arch landed; older checkpoints are compact
+-    model, _ = build_model(n_classes=codec.n_classes, arch=meta.get("arch", "compact"), verbose=True)
++    model, _ = build_model(n_classes=codec.n_classes, arch=meta.get("arch", "compact"), verbose=True,
++                           width_mult=float(meta.get("width_mult", 1.0)))
+     model.load_state_dict(sd)
+     model.to(device)
+     return model, meta
+@@ -156,7 +158,7 @@
+     device = torch.device(args.device)
+ 
+     codec = load_codec(args.codec)
+-    from greekocr._vendor.train.data import StripDataset, make_loader  # after arg parsing: fast --help
++    from data import StripDataset, make_loader  # after arg parsing: fast --help
+ 
+     try:
+         ds = StripDataset(
+--- greekocr/_vendor/train/heads.py (pre-consolidation)
++++ docs/programme_20261025/TRAIN_FULL_v1/stage_c_package/vendor/train/heads.py
+@@ -37,8 +37,8 @@
+ import torch.nn as nn
+ import torch.nn.functional as F
+ 
+-from greekocr._vendor.train.cer import Codec, collapse_ctc, load_codec  # noqa: F401 (load_codec used by callers)
+-from greekocr._vendor.train.model import ENC_DIM, SVTRv2CTC
++from cer import Codec, collapse_ctc, load_codec  # noqa: F401 (load_codec used by callers)
++from model import ENC_DIM, SVTRv2CTC
+ 
+ # S15e(d) — FROZEN P1 arm-C hyperparameters (pinned in docs/prereg_t1.md Changelog 2026-07-08,
+ # pre-results). Not tuned per result: λ = marks-BCE weight in two_head_loss; thresh = marks sigmoid
+@@ -234,6 +234,7 @@
+     codec: Codec,
+     prec_codec_path: str = None,
+     verbose: bool = True,
++    width_mult: float = 1.0,
+ ) -> nn.Module:
+     """Dispatch a recognizer for a P1 head arm.
+ 
+@@ -243,10 +244,12 @@
+ 
+     Arms A/C fix the encoder to `compact` (P1 varies only the head, 04 §4.4).
+     """
++    if width_mult != 1.0 and (head != "nfd" or arch != "compact"):
++        raise ValueError("width_mult requires compact with the NFD CTC head")
+     if head == "nfd":
+-        from greekocr._vendor.train.model import build_model
+-
+-        m, _ = build_model(n_classes=codec.n_classes, arch=arch, verbose=verbose)
++        from model import build_model
++
++        m, _ = build_model(n_classes=codec.n_classes, arch=arch, verbose=verbose, width_mult=width_mult)
+         return m
+     if arch != "compact":
+         raise ValueError(f"arm {head!r} uses the compact encoder only (P1 fixes it); got arch={arch!r}")
+--- greekocr/_vendor/train/mix.py (pre-consolidation)
++++ docs/programme_20261025/TRAIN_FULL_v1/stage_c_package/vendor/train/mix.py
+@@ -40,6 +40,9 @@
+ 
+ 
+ def committed_recipes(repo=ROOT):
++    exported = exported_source(repo)
++    if exported is not None:
++        return {digest: name for name, digest in exported['recipes'].items()}
+     # ls-files identifies eligible paths; cat-file binds their COMMITTED HEAD blobs.
+     result = {}
+     for name in git(repo, 'ls-files', '-z', 'factory/*.json').decode().split('\0'):
+@@ -55,6 +58,40 @@
+     return result
+ 
+ 
++def exported_source(repo=ROOT):
++    """Opt-in git-free wave1c deployment; recipe hashes come from its manifest."""
++    import os
++    root = Path(repo).resolve()
++    if (root/'.git').exists() or os.environ.get('E4_ROOT') != str(root):
++        return None
++    receipt = _object(root/'DEPLOY_RECEIPT.json')
++    manifest = root/receipt.get('manifest_path', 'out/e4/wave1c_prep/DEPLOY_SHA256.txt')
++    if not manifest.resolve().is_relative_to(root):
++        raise MixError('deployment manifest escapes root')
++    if (receipt.get('state') != 'DEPLOYED' or receipt.get('root') != str(root)
++        or not re.fullmatch('[0-9a-f]{40}', receipt.get('commit', ''))
++        or receipt.get('manifest_sha256') != sha256(manifest)):
++        raise MixError('invalid E4 deployment source receipt')
++    recipes = {}
++    for line in manifest.read_text().splitlines():
++        digest, name = line.split('  ', 1)
++        p = Path(name)
++        if p.parent == Path('factory') and p.suffix == '.json':
++            if sha256(root/p) != digest:
++                raise MixError('changed exported recipe: '+name)
++            obj = _object(root/p)
++            if 'content_marginals' in obj and 'target_total' in obj:
++                recipes[name] = digest
++    if not recipes:
++        raise MixError('no manifest-bound exported recipes')
++    return dict(commit=receipt['commit'], recipes=recipes)
++
++
++def source_head(repo=ROOT):
++    exported = exported_source(repo)
++    return exported['commit'] if exported is not None else git(repo, 'rev-parse', 'HEAD').decode().strip()
++
++
+ def shard_inventory(directory):
+     return {str(p.relative_to(directory)): sha256(p)
+             for p in sorted(Path(directory).rglob('shard-*.parquet'))}
+@@ -76,14 +113,18 @@
+     return (base / value).resolve()
+ 
+ 
+-def validate(path, *, repo=ROOT, role='train'):
+-    """Return a resolved copy of a validated manifest, without importing data libraries."""
++def validate_metadata(path, *, repo=ROOT, role='train'):
++    """Resolve all mix metadata; enumerate shard paths without reading their bytes.
++
++    Full shard digests remain the responsibility of validate() in compute jobs.
++    This shared path includes checks that used to follow shard hashing.
++    """
+     path = Path(path).resolve()
+     if role not in ('train', 'val', 'eval', 'transfer', 'reserved', 'test'):
+         raise MixError(f'unknown mix role: {role}')
+     mix = _object(path)
+     required = {'components', 'seed', 'codec_version', 'created_by', 'notes'}
+-    allowed = required | {'schema_version'}
++    allowed = required | {'schema_version', 'matched_replay', 'codec_recovery', 'label_versions', 's1_selection'}
+     if required - mix.keys() or mix.keys() - allowed:
+         raise MixError(f'mix fields: missing={sorted(required-mix.keys())}, unknown={sorted(mix.keys()-allowed)}')
+     if mix.get('schema_version', 1) != 1:
+@@ -174,15 +215,79 @@
+             raise MixError(f'{prefix}: unknown kind {c.get("kind")!r}')
+         if not isinstance(hashes, dict) or not hashes:
+             raise MixError(f'{prefix}: nonempty shard_sha256 inventory required')
+-        actual = shard_inventory(directory)
+-        if actual != hashes:
++        actual = {str(p.relative_to(directory)) for p in directory.rglob('shard-*.parquet')}
++        if actual != set(hashes):
+             raise MixError(f'{prefix}: shard hash mismatch or inventory mismatch in {directory}')
+         # Retain the exact identities that passed custody validation, for both kinds.
+         resolved['components'][i]['shard_sha256'] = copy.deepcopy(hashes)
+         resolved['components'][i]['build_info_sha256'] = sha256(directory / 'build_info.json')
+     if abs(math.fsum(fractions) - 1.0) > 1e-6:
+         raise MixError(f'fractions sum to {math.fsum(fractions):.12g}, expected 1 (±1e-6)')
++    if 'codec_recovery' in mix:
++        if 'matched_replay' in mix or mix['codec_version'] != 'v2':
++            raise MixError('codec recovery requires v2 without matched replay')
++        spec = mix['codec_recovery']
++        if not isinstance(spec, dict) or set(spec) != {'path', 'sha256'}:
++            raise MixError('codec_recovery requires path and sha256')
++        resolved['codec_recovery']['path'] = str(_path(path.parent, spec['path'], 'codec_recovery.path'))
++        from bench.e4_recovery import load
++        plan = load(resolved['codec_recovery'])
++        if plan['seed'] != mix['seed'] or len(plan['old_counts']) != len(components):
++            raise MixError('codec recovery component/seed mismatch')
++    if 'matched_replay' in mix:
++        spec = mix['matched_replay']
++        if not isinstance(spec, dict) or set(spec) != {'path', 'sha256'}:
++            raise MixError('matched_replay requires path and sha256')
++        resolved['matched_replay']['path'] = str(_path(path.parent, spec['path'], 'matched_replay.path'))
++        plan = replay_plan(resolved['matched_replay'])
++        if (plan['replay_component'] != len(components)-1 or plan['base_components'] != len(components)-1
++                or plan['seed'] != mix['seed'] or components[-1]['kind'] != 'real'
++                or abs(components[-1]['fraction']-.1) > 1e-9):
++            raise MixError('matched replay component/seed contract mismatch')
++        expected = [c['fraction'] / .8 if c['kind'] == 'real' else c['fraction'] for c in components[:-1]]
++        if plan['base_fractions'] != expected:
++            # Accept only floating point rounding at the .8 inverse.
++            if len(expected) != len(plan['base_fractions']) or any(abs(x-y)>1e-12 for x,y in zip(expected,plan['base_fractions'])):
++                raise MixError('matched replay base fractions mismatch')
++    if 'label_versions' in mix:
++        if role != 'train' or mix['codec_version'] not in ('v2', 'v2.1'):
++            raise MixError('label_versions is a v2/v2.1 train-only overlay')
++        from bench.e4_wave1c import check_overlay
++        spec = copy.deepcopy(mix['label_versions'])
++        for key in ('registry', 'codec'):
++            spec[key] = str(_path(path.parent, spec[key], 'label_versions.' + key))
++        check_overlay(spec)
++        resolved['label_versions'] = spec
++    if 's1_selection' in mix:
++        if role != 'train' or mix['codec_version'] != 'v2.1' or any(k in mix for k in ('matched_replay','codec_recovery','label_versions')):
++            raise MixError('s1_selection requires raw v2.1 train pools')
++        selection = mix['s1_selection']
++        if set(selection) != {'subset','provenance'} or set(selection['subset']) != {'path','sha256','rows'}:
++            raise MixError('invalid s1_selection schema')
++        resolved['s1_selection']['subset']['path'] = str(_path(path.parent, selection['subset']['path'], 's1 subset'))
+     return resolved
++
++
++def validate(path, *, repo=ROOT, role='train'):
++    """Validate metadata and full shard bytes. Jobs retain full custody checks."""
++    resolved = validate_metadata(path, repo=repo, role=role)
++    for i, c in enumerate(resolved['components']):
++        directory = Path(c.get('build_dir', c.get('shard_dir')))
++        if shard_inventory(directory) != c['shard_sha256']:
++            raise MixError(f'component {i}: shard hash mismatch or inventory mismatch in {directory}')
++    return resolved
++
++
++def replay_plan(spec):
++    import gzip
++    path = Path(spec['path'])
++    if sha256(path) != spec['sha256']:
++        raise MixError('matched replay draw manifest hash mismatch')
++    with gzip.open(path, 'rt') as f:
++        plan = json.load(f)
++    if plan.get('schema') != 'e4-matched-replay-v1':
++        raise MixError('unsupported matched replay draw schema')
++    return plan
+ 
+ 
+ def build(components, out, *, seed, codec_version, created_by, notes='', repo=ROOT, role='train'):
+@@ -239,18 +344,38 @@
+         if c['fraction'] > 0 and not rows:
+             raise MixError(f'component {i}: no {split} rows')
+         groups.append(rows)
++    if 's1_selection' in mix:
++        if split != 'train': raise MixError('S1 selection is train-only')
++        from bench.s1_scaling import select_rows
++        groups = select_rows(groups, mix['components'], mix['s1_selection'])
++    if 'label_versions' in mix and split == 'train':
++        from bench.e4_wave1c import substitute
++        groups, _ = substitute(groups, mix['components'], mix['label_versions'])
+     return groups
+ 
+ 
+-def assemble(groups, fractions, seed, epoch=0, max_rows=None):
++def assemble(groups, fractions, seed, epoch=0, max_rows=None, *, exact_rows=False, replay=None, recovery=None):
+     """Weighted concatenation: N=sum(active pool sizes); largest-remainder quotas.
+ 
+     Shuffle each pool using (seed, epoch, component), take its quota, cycling new
+     permutations when oversampling. Pool membership is redrawn each training epoch.
+     """
++    if recovery is not None:
++        if replay is not None:raise MixError('cannot combine replay and codec recovery')
++        from bench.e4_recovery import substitute
++        return substitute(groups, fractions, seed, epoch, max_rows, exact_rows, recovery)
++    if replay is not None:
++        from bench.e4_replay import apply_plan
++        plan = replay_plan(replay)
++        if (seed != plan['seed'] or max_rows != plan['epoch_rows'] or not exact_rows
++                or str(epoch) not in plan['epochs'] or len(groups) != plan['base_components']+1):
++            raise MixError('matched replay requires its exact seed, epoch, pool count and row budget')
++        rows, _ = assemble(groups[:-1], plan['base_fractions'], seed, epoch, max_rows, exact_rows=True)
++        rows = apply_plan(rows, groups[-1], plan['epochs'][str(epoch)], plan['replay_component'],plan['scanned_components'])
++        return rows, [sum(r['_component']==i for r in rows) for i in range(len(groups))]
+     n = sum(len(g) for g, f in zip(groups, fractions) if f > 0)
+     if max_rows is not None:
+-        n = min(n, max_rows)
++        n = max_rows if exact_rows else min(n, max_rows)
+     if n < 1:
+         raise MixError('assembled set is empty')
+     exact = [n * f / math.fsum(fractions) for f in fractions]
+@@ -267,7 +392,7 @@
+             indices = list(range(len(group)))
+             rng.shuffle(indices)
+             chosen.extend(indices[:count-len(chosen)])
+-        rows.extend(dict(group[j], _component=i) for j in chosen)
++        rows.extend(dict(group[j], _component=i, _pool_index=j) for j in chosen)
+     return rows, counts
+ 
+ 
+@@ -295,9 +420,9 @@
+ def provenance(path, mix, assembled, *, repo=ROOT):
+     report = {'schema_version': 1, 'mix': _object(path), 'mix_sha256': sha256(path),
+             'resolved_mix': mix,
+-            'git_head': git(repo, 'rev-parse', 'HEAD').decode().strip(),
++            'git_head': source_head(repo),
+             'recipe_sha256s': sorted({c['recipe_sha256'] for c in mix['components'] if c['kind']=='synthetic'}),
+-            'sampling': 'per-epoch weighted concatenation; largest-remainder quotas; shuffled pool cycles; seed:epoch:component',
++            'sampling': ('expanded old plus recovered pools at fixed original component/class/source quotas; seeded shuffled cycles' if 'codec_recovery' in mix else 'exact matched substitutions; ordered draw digests; unchanged base draws' if 'matched_replay' in mix else 'per-epoch weighted concatenation; largest-remainder quotas; shuffled pool cycles; seed:epoch:component'),
+             'epochs': {str(epoch): {role: {'marginals': marginals(rows),
+                                          'component_counts': {str(i): sum(r['_component']==i for r in rows) for i in range(len(mix['components']))}}
+                                     for role, rows in roles.items()} for epoch, roles in assembled.items()}}
+--- greekocr/_vendor/train/mix.schema.json (pre-consolidation)
++++ docs/programme_20261025/TRAIN_FULL_v1/stage_c_package/vendor/train/mix.schema.json
+@@ -160,6 +160,42 @@
+           }
+         ]
+       }
++    },
++    "matched_replay": {
++      "type": "object",
++      "required": [
++        "path",
++        "sha256"
++      ],
++      "additionalProperties": false,
++      "properties": {
++        "path": {
++          "type": "string",
++          "minLength": 1
++        },
++        "sha256": {
++          "type": "string",
++          "pattern": "^[0-9a-f]{64}$"
++        }
++      }
++    },
++    "codec_recovery": {
++      "type": "object",
++      "required": [
++        "path",
++        "sha256"
++      ],
++      "additionalProperties": false,
++      "properties": {
++        "path": {
++          "type": "string",
++          "minLength": 1
++        },
++        "sha256": {
++          "type": "string",
++          "pattern": "^[0-9a-f]{64}$"
++        }
++      }
+     }
+   }
+ }
+--- greekocr/_vendor/train/model.py (pre-consolidation)
++++ docs/programme_20261025/TRAIN_FULL_v1/stage_c_package/vendor/train/model.py
+@@ -16,9 +16,9 @@
+ 
+ Topology (pinned):
+   stem   : Conv(1->48, 3x3, s2)+BN+GELU -> Conv(48->64, 3x3, s2)+BN+GELU   -> [B,  64, 12, ceil(W/4)]
+-  stage1 : 3 x LocalBlock(64)
++  stage1 : 3 x LocalBlock(c1)
+   down1  : Conv(64->128, 3x3, stride (2,1))+BN+GELU                        -> [B, 128,  6, ceil(W/4)]
+-  stage2 : 6 x LocalBlock(128)
++  stage2 : 6 x LocalBlock(c2)
+   down2  : Conv(128->256, 3x3, stride (2,1))+BN+GELU                       -> [B, 256,  3, ceil(W/4)]
+   stage3 : + sinusoidal 2D positional encoding (added once), then
+            3 x GlobalBlock(256): pre-LN transformer block, MHSA 8 heads over the
+@@ -41,7 +41,7 @@
+ import torch.nn as nn
+ import torch.nn.functional as F
+ 
+-from greekocr._vendor.train.cer import load_codec
++from cer import load_codec
+ 
+ STRIP_HEIGHT = 48  # data_contracts §2
+ STRIDE = 4  # T = ceil(W / STRIDE) — the frozen stride contract
+@@ -149,12 +149,17 @@
+ 
+ class SVTRv2CTC(nn.Module):
+     def __init__(self, n_classes: int, with_head: bool = True, attn_window: Optional[int] = None,
+-                 height_collapse: bool = False) -> None:
++                 height_collapse: bool = False, width_mult: float = 1.0) -> None:
+         super().__init__()
+         if n_classes < 2:
+             raise ValueError(f"n_classes must be >= 2 (blank + atoms), got {n_classes}")
+         if attn_window is not None and attn_window < 1:
+             raise ValueError(f"attn_window must be >= 1 or None, got {attn_window}")
++        if width_mult not in (1.0, 1.5, 2.0, 3.0):
++            raise ValueError("width_mult must be 1.0, 1.5, 2.0 or 3.0")
++        self.width_mult = float(width_mult)
++        c0, c1, c2, c3 = (int(c * width_mult) for c in (48, 64, 128, 256))
++        self.enc_dim = c3
+         self.n_classes = n_classes
+         # Arm A32 (S19-BKO): local windowed attention along T. attn_window=w -> each query attends
+         # only to keys within radius w//2 along the T axis (H stays fully connected; H=3). ZERO extra
+@@ -162,21 +167,21 @@
+         self.attn_window = attn_window
+         self._winmask_cache: dict = {}  # (h, t) -> cpu fp32 [h*t, h*t] additive band mask
+ 
+-        self.stem = nn.Sequential(ConvBNAct(1, 48, stride=2), ConvBNAct(48, 64, stride=2))
+-        self.stage1 = nn.Sequential(*[LocalBlock(64) for _ in range(3)])
+-        self.down1 = ConvBNAct(64, 128, stride=(2, 1))
+-        self.stage2 = nn.Sequential(*[LocalBlock(128) for _ in range(6)])
+-        self.down2 = ConvBNAct(128, 256, stride=(2, 1))
++        self.stem = nn.Sequential(ConvBNAct(1, c0, stride=2), ConvBNAct(c0, c1, stride=2))
++        self.stage1 = nn.Sequential(*[LocalBlock(c1) for _ in range(3)])
++        self.down1 = ConvBNAct(c1, c2, stride=(2, 1))
++        self.stage2 = nn.Sequential(*[LocalBlock(c2) for _ in range(6)])
++        self.down2 = ConvBNAct(c2, c3, stride=(2, 1))
+         # Arm B+A64 (S19-BKO): LEARNED height collapse H=3 -> 1 (Conv2d kernel (3,1), no T-mixing) BEFORE
+         # stage3, so global attention runs over T tokens (not 3*T) — 3x fewer tokens. Combined with
+         # attn_window=64 this is the Diaz-2021 "collapse then windowed 1-D attention" topology. Adds
+         # params (~197k); compact/A32 keep height_collapse=False and mean-pool H after stage3.
+-        self.hcollapse = nn.Conv2d(256, 256, kernel_size=(3, 1)) if height_collapse else None
+-        self.stage3 = nn.ModuleList([GlobalBlock(256, n_heads=8, mlp_ratio=4) for _ in range(3)])
+-        self.norm = nn.LayerNorm(256)
++        self.hcollapse = nn.Conv2d(c3, c3, kernel_size=(3, 1)) if height_collapse else None
++        self.stage3 = nn.ModuleList([GlobalBlock(c3, n_heads=8, mlp_ratio=4) for _ in range(3)])
++        self.norm = nn.LayerNorm(c3)
+         # arm B (nfd) owns the head here; the P1 A/C arms build headless (with_head=False)
+         # and attach their own head to encode() (heads.py). See docs/architecture/04 §4.4.
+-        self.head = nn.Linear(256, n_classes) if with_head else None
++        self.head = nn.Linear(c3, n_classes) if with_head else None
+ 
+         self._pe_cache: dict = {}  # (h, w) -> cpu fp32 [1, h*w, C]
+ 
+@@ -184,7 +189,7 @@
+         key = (h, w)
+         pe = self._pe_cache.get(key)
+         if pe is None:
+-            pe = sincos_pos_embed_2d(h, w, 256).unsqueeze(0)  # [1, h*w, 256] cpu fp32
++            pe = sincos_pos_embed_2d(h, w, self.enc_dim).unsqueeze(0)  # [1, h*w, 256] cpu fp32
+             self._pe_cache[key] = pe
+         return pe.to(device=device, dtype=dtype)
+ 
+@@ -292,7 +297,7 @@
+     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+     if root not in sys.path:
+         sys.path.insert(0, root)  # train/ scripts run with sys.path[0]=train/; add repo root
+-    from greekocr._vendor.rec.svtrv2_model import SVTRv2RCTC
++    from rec.svtrv2_model import SVTRv2RCTC
+ 
+     return SVTRv2RCTC(n_classes, variant=variant)
+ 
+@@ -321,6 +326,7 @@
+     n_classes: Optional[int] = None,
+     arch: str = "compact",
+     verbose: bool = True,
++    width_mult: float = 1.0,
+ ):
+     """Build the recognizer. Exactly one of codec_path / n_classes decides the head size.
+ 
+@@ -337,7 +343,10 @@
+         raise ValueError("need --codec (or explicit n_classes) to size the head")
+     if arch not in ARCHS:
+         raise ValueError(f"unknown arch {arch!r}; choices: {', '.join(ARCH_CHOICES)}")
+-    model = ARCHS[arch](n_classes)
++    if width_mult != 1.0 and arch != "compact":
++        raise ValueError("width_mult is supported only for compact")
++    model = (SVTRv2CTC(n_classes, width_mult=width_mult) if arch == "compact"
++             else ARCHS[arch](n_classes))
+     if verbose:
+         n = count_params(model)
+         print(f"[model] arch={arch}: n_classes={n_classes}, params={n:,} ({n / 1e6:.2f}M)")
+@@ -363,5 +372,6 @@
+     ap = argparse.ArgumentParser(description="Build the model and print its parameter count.")
+     ap.add_argument("--codec", required=True, help="codec vN JSON (data_contracts §1)")
+     ap.add_argument("--arch", choices=ARCH_CHOICES, default="compact")
++    ap.add_argument("--width-mult", type=float, choices=(1.0, 1.5, 2.0, 3.0), default=1.0)
+     args = ap.parse_args()
+-    build_model(codec_path=args.codec, arch=args.arch)
++    build_model(codec_path=args.codec, arch=args.arch, width_mult=args.width_mult)
+--- greekocr/_vendor/train/train.py (pre-consolidation)
++++ docs/programme_20261025/TRAIN_FULL_v1/stage_c_package/vendor/train/train.py
+@@ -45,7 +45,7 @@
+ if __package__:
+     from .mix import MixError, validate, load_rows, assemble, provenance
+ else:
+-    from greekocr._vendor.train.mix import MixError, validate, load_rows, assemble, provenance
++    from mix import MixError, validate, load_rows, assemble, provenance
+ 
+ ARCH_CHOICES = ("compact", "a32", "b_a64", "svtrv2", "svtrv2_small")
+ HEAD_CHOICES = ("nfd", "precomposed", "two")
+@@ -57,11 +57,12 @@
+     import numpy as np
+     import torch
+     import torch.nn as nn
+-    from greekocr._vendor.train import ckpt_io
+-    from greekocr._vendor.train.cer import load_codec
+-    from greekocr._vendor.train.ctc_health import CtcHealth
+-    from greekocr._vendor.train.heads import build_arm
+-    from greekocr._vendor.train.model import amp_dtype_for, autocast_ctx, build_model, ceil_div, count_params, masked_forward
++    import ckpt_io
++    from cer import load_codec
++    from ctc_health import CtcHealth
++    from heads import build_arm
++    from model import (amp_dtype_for, autocast_ctx, build_model, ceil_div, count_params,
++                       masked_forward)
+     globals().update({k: v for k, v in locals().items() if not k.startswith("_")})
+ 
+ PATIENCE = 6
+@@ -92,18 +93,23 @@
+     if any(x.split("=", 1)[0] in ("--train-dir", "--val-dir", "--transfer-dev") for x in supplied):
+         p.error("loose data directories are retired; use --mix mix.json (optional --transfer-mix)")
+     p.add_argument("--mix", help="validated mix.json: the only training/validation data input")
++    p.add_argument("--val-mix", default=None,
++                   help="optional eval-role shared validation; concatenate split=val exactly once")
+     p.add_argument("--transfer-mix", default=None, help="optional provenanced reserved-evaluation mix.json")
+     p.add_argument("--selection-metric", choices=["auto", "val_cer"], default="auto",
+                    help="val_cer keeps transfer monitoring out of checkpoint selection")
+     p.add_argument("--transfer-final-only", action="store_true",
+                    help="bind transfer provenance without epoch evaluation; final best is evaluated by readout")
+     p.add_argument("--epoch-rows", type=int, help="cap assembled TRAIN rows each epoch (equal mixture exposure)")
++    p.add_argument("--repeat-to-epoch-rows", action="store_true",
++                   help="cycle pools to exactly epoch-rows, including budgets larger than the source pool")
+     p.add_argument("--pack-bucket-tails", action="store_true",
+                    help="combine width-bucket tails: exactly ceil(epoch rows / bs) batches")
+     p.add_argument("--codec", help="codec vN JSON (data_contracts §1)")
+     p.add_argument("--arch", choices=ARCH_CHOICES, default="compact",
+                    help="architecture (iteration_2_plan §A/B): compact = arm M (default), "
+                         "svtrv2 = vendored OpenOCR R-base, svtrv2_small = R-small")
++    p.add_argument("--width-mult", type=float, choices=(1.0, 1.5, 2.0, 3.0), default=1.0)
+     p.add_argument("--head", choices=HEAD_CHOICES, default="nfd",
+                    help="P1 head arm (04 §4.4): nfd = arm B incumbent (default), "
+                         "precomposed = arm A (NFC codec), two = arm C (base CTC + marks sigmoid). "
+@@ -116,6 +122,7 @@
+     p.add_argument("--bs", type=int, default=256)
+     p.add_argument("--accum", type=int, default=1, help="gradient accumulation steps")
+     p.add_argument("--lr", type=float, default=6.5e-4)
++    p.add_argument("--beta1", type=float, default=0.9, help="AdamW beta1; beta2 stays 0.999")
+     p.add_argument("--wd", type=float, default=0.05)
+     # WP-A iv: optimizer recipe deltas for FUTURE runs. Defaults reproduce the S16 recipe EXACTLY so
+     # S19-BKO Arm 0 (masked rerun) isolates the mask delta; opt in for T1'-era runs.
+@@ -131,14 +138,23 @@
+     p.add_argument("--pin-memory", action="store_true", help="pin host memory for the train loader (cuda)")
+     p.add_argument("--device", choices=["cuda", "mps", "cpu"], default=None, help="default: auto-detect")
+     p.add_argument("--smoke", action="store_true", help="cap 2000 rows, 2 epochs, bs 32")
++    p.add_argument("--segment", action="store_true", help="S1 optimizer-boundary atomic continuation")
+     p.add_argument("--resume", metavar="CKPT", default=None,
+                    help="resume from a checkpoint (restores model+opt+sched+global_step+RNG; S15e(b))")
+     p.add_argument("--init-from", metavar="CKPT", default=None,
+                    help="strict weights-only initialization; fresh optimizer/scheduler/step/RNG")
+     p.add_argument("--selftest", action="store_true", help="no data: model forward/backward check")
+     args = p.parse_args(argv)
++    if not 0 <= args.beta1 < 1:
++        p.error("--beta1 must lie in [0,1)")
++    if args.width_mult != 1.0 and (args.arch != "compact" or args.head != "nfd"):
++        p.error("--width-mult requires compact with --head nfd")
+     if args.epoch_rows is not None and args.epoch_rows < 1:
+         p.error("--epoch-rows must be positive")
++    if args.repeat_to_epoch_rows and args.epoch_rows is None:
++        p.error('--repeat-to-epoch-rows requires --epoch-rows')
++    if args.segment and (args.init_from or args.resume or args.accum != 1):
++        p.error("--segment requires scratch initialization, accum=1, and automatic segment.pt recovery")
+     if args.init_from and args.resume:
+         p.error("--init-from and --resume are mutually exclusive")
+ 
+@@ -147,6 +163,8 @@
+             p.error("training data requires --mix mix.json")
+         # BEFORE Torch imports, seed setting, filesystem outputs, or CUDA detection.
+         validate(args.mix, role='train')
++        if args.val_mix:
++            validate(args.val_mix, role='eval')
+         if args.transfer_mix:
+             validate(args.transfer_mix, role='transfer')
+         missing = [n for n, v in [("--codec", args.codec), ("--out-dir", args.out_dir)] if not v]
+@@ -271,7 +289,7 @@
+ def _selftest_head() -> None:
+     """P1 head arms (04 §4.4): the heads.py battery (build/forward/decode/loss on a synthetic codec)
+     plus a real-dimension forward-shape check on the shipped codec/v1.json."""
+-    from greekocr._vendor.train import heads
++    import heads
+ 
+     heads._selfcheck()  # arm A + C: build, forward, decode round-trips, arm-C dual loss + backward
+     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+@@ -524,6 +542,10 @@
+                     'selection_metric', 'transfer_final_only'):
+             if key not in ck['args'] or ck['args'][key] != getattr(args, key):
+                 raise MixError(f"resume checkpoint argument mismatch: {key}")
++        if ck['args'].get('width_mult', 1.0) != args.width_mult:
++            raise MixError("resume checkpoint argument mismatch: width_mult")
++        if ck['args'].get('repeat_to_epoch_rows', False) != args.repeat_to_epoch_rows:
++            raise MixError('resume checkpoint argument mismatch: repeat_to_epoch_rows')
+         for key in ('model', 'opt', 'sched', 'rng', 'best'):
+             if not isinstance(ck[key], dict):
+                 raise MixError(f"resume checkpoint {key} must be an object")
+@@ -623,7 +645,7 @@
+         if not isinstance(receipt, dict) or not isinstance(receipt.get('epochs'), dict):
+             raise MixError("invalid resume provenance epochs")
+         current = plan['provenance']
+-        for key in ('mix_sha256', 'mix', 'resolved_mix', 'recipe_sha256s', 'training_schedule', 'transfer'):
++        for key in ('mix_sha256', 'mix', 'resolved_mix', 'recipe_sha256s', 'training_schedule', 'transfer', 'validation'):
+             old, new = receipt.get(key), current.get(key)
+             if key == 'transfer' and isinstance(old, dict) and isinstance(new, dict):
+                 old = {k: v for k, v in old.items() if k != 'git_head'}
+@@ -640,7 +662,7 @@
+         snapshot = binding.get('receipt')
+         if not isinstance(snapshot, dict) or not isinstance(snapshot.get('epochs'), dict):
+             raise MixError("resume checkpoint lacks provenance snapshot")
+-        for key in ('mix_sha256', 'mix', 'resolved_mix', 'recipe_sha256s', 'training_schedule', 'transfer'):
++        for key in ('mix_sha256', 'mix', 'resolved_mix', 'recipe_sha256s', 'training_schedule', 'transfer', 'validation'):
+             if snapshot.get(key) != receipt.get(key):
+                 raise MixError(f"resume checkpoint receipt changed: {key}")
+         for epoch in range(1, ck['epoch'] + 1):
+@@ -737,7 +759,34 @@
+         receipt['epochs'].setdefault(epoch, roles)
+ 
+ 
++def shared_validation(args, mix):
++    """E3's val contract: no quotas, repeats, synthetic rows or train fractions."""
++    shared = validate(args.val_mix, role='eval')
++    if shared['codec_version'] != mix['codec_version']:
++        raise MixError('validation mix codec_version mismatch')
++    rows = [dict(r, _component=i) for i, pool in enumerate(load_rows(shared, 'val')) for r in pool]
++    ids = [r['line_id'] for r in rows]
++    if (not rows or len(ids) != len(set(ids))
++            or any(c['kind'] != 'real' for c in shared['components'])):
++        raise MixError('shared validation requires unique real val rows')
++    return rows
++
++
++def training_provenance(args, mix, assembled):
++    report = provenance(args.mix, mix, assembled)
++    if getattr(args, 'val_mix', None):
++        shared = validate(args.val_mix, role='eval')
++        report['validation'] = dict(path=str(args.val_mix), sha256=sha256_file(args.val_mix),
++                                    resolved_mix=shared, split='val', assembly='concatenate_once')
++        for epoch, roles in assembled.items():
++            if 'val' in roles:
++                report['epochs'][str(epoch)]['val'] = provenance(args.val_mix, shared,
++                    {epoch: {'val': roles['val']}})['epochs'][str(epoch)]['val']
++    return report
++
++
+ def train(args: argparse.Namespace) -> int:
++    invocation_started = time.perf_counter()
+     mix = validate(args.mix, role='train')
+     transfer_mix = validate(args.transfer_mix, role='transfer') if args.transfer_mix else None
+     _runtime()
+@@ -746,9 +795,12 @@
+         raise MixError("--codec version differs from mix codec_version")
+     ck = load_resume(args)
+     start_epoch = 1  # Donor epoch is untrusted until the complete preflight.
+-    from greekocr._vendor.train.data import ManifestDataset, make_loader
++    from data import ManifestDataset, make_loader
+     keep = {"greek_mono", "greek_poly"} if args.greek_only else None
+-    groups = {role: load_rows(mix, role) for role in ('train', 'val')}
++    groups = {role: load_rows(mix, role) for role in ('train', 'val')
++              if role != 'val' or not args.val_mix}
++    if args.val_mix:
++        groups['val'] = [shared_validation(args, mix)]
+     if keep:
+         groups = {role: [[r for r in group if r['script_class'] in keep] for group in pools]
+                   for role, pools in groups.items()}
+@@ -757,7 +809,13 @@
+ 
+     def dataset(role, epoch):
+         cap = args.epoch_rows if role == 'train' and args.epoch_rows is not None else max_rows
+-        rows, _ = assemble(groups[role], fractions, mix['seed'], epoch, cap)
++        if role == 'val' and args.val_mix:
++            rows = groups['val'][0]
++        else:
++            rows, _ = assemble(groups[role], fractions, mix['seed'], epoch, cap,
++                               exact_rows=role == 'train' and args.repeat_to_epoch_rows,
++                               replay=mix.get('matched_replay') if role == 'train' else None,
++                               recovery=mix.get('codec_recovery') if role == 'train' else None)
+         return ManifestDataset(rows, codec.version, codec.n_classes - 1, role)
+ 
+     train_ds, val_ds = dataset('train', start_epoch), dataset('val', 0)
+@@ -780,10 +838,12 @@
+                                  pack_bucket_tails=args.pack_bucket_tails)
+         horizons.append(len(sampler))
+     assembled = {} if ck is not None else {1: {'train': train_ds.rows, 'val': val_ds.rows}}
+-    receipt = provenance(args.mix, mix, assembled)
++    receipt = training_provenance(args, mix, assembled)
+     receipt['training_schedule'] = dict(epoch_rows=args.epoch_rows,
+         pack_bucket_tails=args.pack_bucket_tails, epoch_batches=horizons,
+         selection_metric=args.selection_metric)
++    if args.repeat_to_epoch_rows:
++        receipt['training_schedule']['repeat_to_epoch_rows'] = True
+     if transfer_mix:
+         receipt['transfer'] = provenance(args.transfer_mix, transfer_mix,
+                                           {0: {'reserved': transfer_ds.rows}})
+@@ -795,6 +855,10 @@
+         candidate.replace(path)
+ 
+     set_seeds(args.seed)
++    if args.segment:
++        torch.backends.cudnn.deterministic=True
++        torch.backends.cudnn.benchmark=False
++        torch.use_deterministic_algorithms(True)
+     if args.device is None:
+         args.device = "cuda" if torch.cuda.is_available() else (
+             "mps" if torch.backends.mps.is_available() else "cpu")
+@@ -806,7 +870,10 @@
+         print("ERROR: --device mps but MPS is unavailable", file=sys.stderr)
+         return 1
+     amp_dtype = amp_dtype_for(device)
+-    loss_device = torch.device("cpu") if device.type == "mps" else device
++    # Native CUDA CTC backward is nondeterministic for variable-length batches.
++    # Segment mode keeps fp32 CTC on CPU (differentiable device transfer), while
++    # the model and optimizer stay on the requested device. No label/pad changes.
++    loss_device = torch.device("cpu") if device.type == "mps" or args.segment else device
+     print(f"[setup] codec={codec.version} device={device.type} data_seed={mix['seed']}")
+     train_loader, train_sampler = make_loader(train_ds, args.bs, seed=mix['seed'], shuffle=True,
+                                               num_workers=args.workers, pin_memory=args.pin_memory,
+@@ -820,14 +887,15 @@
+           + (f", transfer-dev={len(transfer_ds)} rows" if transfer_ds is not None else ""))
+     print(f"[setup] model-select/early-stop on {select_metric} (patience {PATIENCE})")
+ 
+-    model = build_arm(args.head, args.arch, codec)  # prints param count
++    model = build_arm(args.head, args.arch, codec, width_mult=args.width_mult)  # prints param count
+     init_from = (initialize_weights(model, args.init_from, arch=args.arch, head=args.head,
+                                     codec=codec) if args.init_from else None)
+     model.to(device)
+     # Per-arm training context (S15e(a)): arm A (precomposed) transcodes NFD->NFC precomposed CTC
+     # targets; arm C (two) splits NFD->base+marks for two_head_loss; arm B (nfd) uses the batch's NFD
+     # targets directly. All decode to NFD for the shared strict scorer.
+-    from greekocr._vendor.train.heads import build_precomposed_index, build_two_head_codec, nfd_ids_to_base_marks, nfd_ids_to_precomposed_ids, two_head_loss
++    from heads import (build_precomposed_index, build_two_head_codec, nfd_ids_to_base_marks,
++                       nfd_ids_to_precomposed_ids, two_head_loss)
+     arm_prec_codec = arm_prec_index = arm_th = None
+     if args.head == "precomposed":
+         arm_prec_codec = load_codec(f"codec/precomposed_{codec.version}.json")
+@@ -839,7 +907,7 @@
+     # WP-A iv: opt-in optimizer recipe deltas (defaults reproduce S16 exactly).
+     opt_params = (no_decay_param_groups(model, args.wd) if args.no_decay_norm_bias
+                   else model.parameters())
+-    opt = torch.optim.AdamW(opt_params, lr=args.lr, weight_decay=args.wd)
++    opt = torch.optim.AdamW(opt_params, lr=args.lr, weight_decay=args.wd, betas=(args.beta1, 0.999))
+     steps_per_epoch = len(train_sampler)
+     opt_steps_per_epoch = ceil_div(steps_per_epoch, args.accum)
+     total_opt_steps = sum(ceil_div(n, args.accum) for n in horizons)
+@@ -852,7 +920,7 @@
+     print(f"[optim] AdamW wd={args.wd} no_decay_norm_bias={args.no_decay_norm_bias} | "
+           f"OneCycleLR pct_start={PCT_START} cycle_momentum={not args.no_cycle_momentum}")
+ 
+-    from greekocr._vendor.train.eval_cer import evaluate  # shared greedy-decode CER pass
++    from eval_cer import evaluate  # shared greedy-decode CER pass
+ 
+     build_info = {"mix": {"path": args.mix, "sha256": sha256_file(args.mix)},
+                   "data_provenance": str(Path(args.out_dir) / 'data_provenance.json')}
+@@ -866,6 +934,7 @@
+             "model": model.state_dict(),
+             "opt": opt.state_dict(),
+             "epoch": epoch,
++            "width_mult": args.width_mult,
+             "arch": args.arch,  # load-time dispatch (eval_cer.load_checkpoint)
+             "head": args.head,  # P1 arm (nfd/precomposed/two)
+             "codec_version": codec.version,
+@@ -873,6 +942,7 @@
+             "n_classes": codec.n_classes,
+             "seed": args.seed,  # S15e-cert F2: top-level so dump_preds groups by the real seed (not 0)
+             "args": vars(args),
++            "trainer_execution": trainer_execution,
+             "data_provenance": {
+                 "mix_sha256": receipt['mix_sha256'],
+                 "transfer_mix_sha256": receipt.get('transfer', {}).get('mix_sha256'),
+@@ -903,6 +973,7 @@
+         st_meta = ckpt_io.build_meta(
+             arch=args.arch, head=args.head, codec_version=codec.version,
+             n_classes=codec.n_classes, codec_path=args.codec, seed=args.seed, epoch=epoch,
++            width_mult=args.width_mult,
+         )
+         ckpt_io.save_safetensors(model.state_dict(), st_meta,
+                                  os.path.splitext(path)[0] + ".safetensors")
+@@ -917,6 +988,7 @@
+             "best_epoch": best["epoch"],
+             "best_metric": best["metric"],
+             "select_metric": select_metric,
++            "width_mult": args.width_mult,
+             "arch": args.arch,
+             "head": args.head,  # P1 arm (nfd/precomposed/two)
+             "codec_version": codec.version,
+@@ -948,7 +1020,7 @@
+         donor_epoch = ck.get('epoch') if isinstance(ck, dict) else None
+         next_report = {}
+         if type(donor_epoch) is int and 1 <= donor_epoch <= args.epochs:
+-            next_report = provenance(args.mix, mix, {donor_epoch + 1: {
++            next_report = training_provenance(args, mix, {donor_epoch + 1: {
+                 'train': dataset('train', donor_epoch + 1).rows, 'val': val_ds.rows}})
+         plan = dict(args=args, codec=codec, model=model, opt=opt, sched=sched,
+                     total_steps=total_opt_steps, epoch_steps=[ceil_div(n, args.accum) for n in horizons],
+@@ -966,11 +1038,31 @@
+     else:
+         receipt = continue_provenance(args, receipt, None)
+ 
++    segment = None
++    if args.segment:
++        from s1_segment import Segment
++        segment = Segment(args, sys.modules[__name__], model, opt, sched, receipt)
++        if segment.saved:
++            saved=segment.saved
++            start_epoch=saved['epoch'] if saved['bad_epochs']<PATIENCE else args.epochs+1
++            global_step=saved['global_step']
++            best=saved['best'];bad_epochs=saved['bad_epochs'];receipt=saved['receipt']
++    # Read flags in the process that executes the forwards, after segment setup.
++    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++    from bench.o5_runtime import runtime_binding as execution_binding
++    trainer_execution = dict(execution_binding(device.type), ctc_device=loss_device.type,
++                             workers=args.workers, pin_memory=args.pin_memory)
+     os.makedirs(args.out_dir, exist_ok=True)
+     write_provenance()  # full donor state passed; append session atomically
+     csv_path = os.path.join(args.out_dir, "train_log.csv")
+     csv_new = not os.path.exists(csv_path)
+     csv_f = open(csv_path, "a", newline="", encoding="utf-8")
++    timing = None
++    if os.environ.get("S1_RUNTIME_QUALIFICATION") == "1":
++        if not args.segment or not os.environ.get("SLURM_JOB_ID"):
++            raise MixError("S1 timing requires a segment compute allocation")
++        from s1_timing import RuntimeTiming
++        timing = RuntimeTiming(torch, device, args.out_dir, global_step, invocation_started)
+     csv_w = csv.writer(csv_f)
+     if csv_new:
+         csv_w.writerow(["epoch", "step", "train_loss", "lr", "val_cer", "transfer_cer",
+@@ -981,6 +1073,9 @@
+     # compound-abort so an infeasible-alignment run (which zero_infinity would silently zero) fails
+     # loud instead of training on no signal. Counters reset per run session (not restored on resume).
+     ctc_health = CtcHealth()
++    if segment and segment.saved:
++        ctc_health.__dict__.update(segment.saved['health'])
++        ctc_health.rare_ids=set(ctc_health.rare_ids)
+     try:  # WP-A cert F5: warn ONCE if the weights-only sibling can't be written (silent no-op otherwise)
+         import safetensors  # noqa: F401
+     except ImportError:
+@@ -996,11 +1091,20 @@
+                 num_workers=args.workers, pin_memory=args.pin_memory,
+                 pack_bucket_tails=args.pack_bucket_tails)
+         train_sampler.set_epoch(epoch)
+-        epoch_report = provenance(args.mix, mix, {epoch: {'train': train_ds.rows, 'val': val_ds.rows}})
++        epoch_report = training_provenance(args, mix, {epoch: {'train': train_ds.rows, 'val': val_ds.rows}})
+         add_epoch_provenance(receipt, epoch_report)
+         write_provenance()
+         losses = []
+         skipped = 0
++        cursor=0
++        if segment and segment.saved and epoch==segment.saved['epoch']:
++            losses=list(segment.saved['losses']);skipped=segment.saved['skipped']
++            cursor=segment.saved['batch_position']
++        batch_plan=list(train_sampler) if segment else None
++        batch_plan_sha=hashlib.sha256(json.dumps(batch_plan).encode()).hexdigest() if segment else None
++        if segment and segment.saved and epoch==segment.saved['epoch'] and cursor:
++            if segment.saved['batch_plan_sha256']!=batch_plan_sha or cursor>len(batch_plan):
++                raise MixError('S1 segment draw plan mismatch')
+         pending = 0
+         opt.zero_grad(set_to_none=True)
+ 
+@@ -1014,7 +1118,9 @@
+             pending = 0
+             global_step += 1
+ 
+-        for batch in train_loader:
++        # Mid-epoch RNG includes the iterator base-seed; boundary RNG precedes it.
++        iterator=segment.iterator(train_loader,epoch,cursor) if segment else iter(train_loader)
++        for batch_number,batch in enumerate(iterator,start=cursor):
+             x = batch["images"].to(device)
+             in_lens = batch["input_lengths"].to(loss_device)
+             with autocast_ctx(device, amp_dtype):
+@@ -1052,6 +1158,7 @@
+                         ctc_health.check_abort()
+                 loss = ctc(lp, targets, in_lens, tgt_lens)
+             if not torch.isfinite(loss):
++                if segment:raise MixError('S1 segment nonfinite loss; retained checkpoint requires inspection')
+                 skipped += 1  # rare with zero_infinity; drop the whole accumulation group
+                 ctc_health.note_nan_batch()
+                 opt.zero_grad(set_to_none=True)
+@@ -1062,6 +1169,31 @@
+             pending += 1
+             if pending == args.accum:
+                 opt_step()
++            if timing:timing.update(global_step)
++            if segment:
++                segment.note(epoch,batch_number+1,batch_plan[batch_number],train_ds.rows,loss.item(),global_step)
++                stopping=segment.stop(global_step)
++                if stopping or global_step-segment.last_save>=100 or segment.full_due(global_step):
++                    checkpoint_tick = time.perf_counter()
++                    segment.save(epoch,batch_number+1,global_step,best,bad_epochs,losses,skipped,
++                                 ctc_health,receipt,batch_plan_sha)
++                    if timing:timing.checkpoint(time.perf_counter()-checkpoint_tick)
++                if stopping:
++                    if timing:
++                        validation = None
++                        epoch_checkpoint_seconds = None
++                        if global_step == 120:
++                            tick = time.perf_counter()
++                            val_res = evaluate(model, val_loader, codec, device, amp_dtype=amp_dtype, arm=arm_ctx)
++                            timing.sync()
++                            validation = dict(seconds=time.perf_counter()-tick, result=val_res)
++                            tick = time.perf_counter()
++                            save_ckpt(os.path.join(args.out_dir, "qualification.pt"), epoch)
++                            epoch_checkpoint_seconds = time.perf_counter()-tick
++                        timing.finish(global_step, trainer_execution, validation, epoch_checkpoint_seconds)
++                    csv_f.close();segment.close()
++                    print('[segment] durable checkpoint; planned yield exit 75',flush=True)
++                    return 75
+         if pending:  # flush a trailing partial accumulation group
+             opt_step()
+ 
+@@ -1099,6 +1231,13 @@
+         else:
+             bad_epochs += 1
+         save_ckpt(os.path.join(args.out_dir, "last.pt"), epoch)
++        if segment:
++            segment.save(epoch+1,0,global_step,best,bad_epochs,[],0,ctc_health,receipt,None)
++            segment.saved=None
++            if int(os.environ.get('S1_FORCE_SPLIT_EPOCH', '0')) == epoch:
++                csv_f.close();segment.close()
++                print('[segment] durable epoch-boundary checkpoint; planned yield exit 75',flush=True)
++                return 75
+ 
+         print(f"[epoch {epoch}/{args.epochs}] step={global_step} train_loss={train_loss:.4f} "
+               f"lr={lr_now:.2e} val_cer={val_cer:.4f}"
+@@ -1112,6 +1251,7 @@
+             break
+ 
+     csv_f.close()
++    if segment:segment.close()
+     if best["epoch"] > 0:  # best.pt exists iff at least one epoch completed
+         write_meta(best)
+     print(f"[done] best {select_metric}={best['metric']:.6f} @ epoch {best['epoch']} | "
+@@ -1121,6 +1261,28 @@
+ 
+ def main(argv=None) -> int:
+     try:
++        # Explicit E3 subprocess opt-in, before parser/model construction. No parity rerun.
++        if os.environ.get('E3_R01_INIT'):
++            sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++            # Keep the standalone script's flat imports: importing train.train here
++            # would resolve this same file as a module instead of the namespace.
++            _runtime()
++            from bench.e2_models import build_donor
++            import model as model_registry
++            path = Path(os.environ['E3_R01_INIT'])
++            donor = torch.load(path, map_location='cpu', weights_only=True)
++            if (donor.get('state_hash_version') != 2
++                    or donor.get('state_sha256') != checkpoint_state_sha256(donor)
++                    or donor.get('arch') != 'e2_r01' or donor.get('head') != 'nfd'
++                    or donor.get('n_classes') != 248
++                    or donor.get('donor_provenance_sha256') != sha256_file(path.parent/'donor_provenance.json')):
++                raise MixError('R01 donor digest/identity/provenance mismatch')
++            config = donor['config']
++            model_registry.ARCHS['e2_r01'] = lambda classes: build_donor('R01', config, classes)
++            del donor
++            global ARCH_CHOICES
++            if 'e2_r01' not in ARCH_CHOICES:
++                ARCH_CHOICES += ('e2_r01',)
+         args = parse_args(argv)
+         if args.selftest:
+             return run_selftest()
+--- greekocr/deploy/docling_plugin/recognizer/model.py (pre-consolidation)
++++ docs/programme_20261025/TRAIN_FULL_v1/stage_c_package/vendor/train/model.py
+@@ -16,9 +16,9 @@
+ 
+ Topology (pinned):
+   stem   : Conv(1->48, 3x3, s2)+BN+GELU -> Conv(48->64, 3x3, s2)+BN+GELU   -> [B,  64, 12, ceil(W/4)]
+-  stage1 : 3 x LocalBlock(64)
++  stage1 : 3 x LocalBlock(c1)
+   down1  : Conv(64->128, 3x3, stride (2,1))+BN+GELU                        -> [B, 128,  6, ceil(W/4)]
+-  stage2 : 6 x LocalBlock(128)
++  stage2 : 6 x LocalBlock(c2)
+   down2  : Conv(128->256, 3x3, stride (2,1))+BN+GELU                       -> [B, 256,  3, ceil(W/4)]
+   stage3 : + sinusoidal 2D positional encoding (added once), then
+            3 x GlobalBlock(256): pre-LN transformer block, MHSA 8 heads over the
+@@ -41,7 +41,7 @@
+ import torch.nn as nn
+ import torch.nn.functional as F
+ 
+-from .codec import load_codec
++from cer import load_codec
+ 
+ STRIP_HEIGHT = 48  # data_contracts §2
+ STRIDE = 4  # T = ceil(W / STRIDE) — the frozen stride contract
+@@ -149,12 +149,17 @@
+ 
+ class SVTRv2CTC(nn.Module):
+     def __init__(self, n_classes: int, with_head: bool = True, attn_window: Optional[int] = None,
+-                 height_collapse: bool = False) -> None:
++                 height_collapse: bool = False, width_mult: float = 1.0) -> None:
+         super().__init__()
+         if n_classes < 2:
+             raise ValueError(f"n_classes must be >= 2 (blank + atoms), got {n_classes}")
+         if attn_window is not None and attn_window < 1:
+             raise ValueError(f"attn_window must be >= 1 or None, got {attn_window}")
++        if width_mult not in (1.0, 1.5, 2.0, 3.0):
++            raise ValueError("width_mult must be 1.0, 1.5, 2.0 or 3.0")
++        self.width_mult = float(width_mult)
++        c0, c1, c2, c3 = (int(c * width_mult) for c in (48, 64, 128, 256))
++        self.enc_dim = c3
+         self.n_classes = n_classes
+         # Arm A32 (S19-BKO): local windowed attention along T. attn_window=w -> each query attends
+         # only to keys within radius w//2 along the T axis (H stays fully connected; H=3). ZERO extra
+@@ -162,21 +167,21 @@
+         self.attn_window = attn_window
+         self._winmask_cache: dict = {}  # (h, t) -> cpu fp32 [h*t, h*t] additive band mask
+ 
+-        self.stem = nn.Sequential(ConvBNAct(1, 48, stride=2), ConvBNAct(48, 64, stride=2))
+-        self.stage1 = nn.Sequential(*[LocalBlock(64) for _ in range(3)])
+-        self.down1 = ConvBNAct(64, 128, stride=(2, 1))
+-        self.stage2 = nn.Sequential(*[LocalBlock(128) for _ in range(6)])
+-        self.down2 = ConvBNAct(128, 256, stride=(2, 1))
++        self.stem = nn.Sequential(ConvBNAct(1, c0, stride=2), ConvBNAct(c0, c1, stride=2))
++        self.stage1 = nn.Sequential(*[LocalBlock(c1) for _ in range(3)])
++        self.down1 = ConvBNAct(c1, c2, stride=(2, 1))
++        self.stage2 = nn.Sequential(*[LocalBlock(c2) for _ in range(6)])
++        self.down2 = ConvBNAct(c2, c3, stride=(2, 1))
+         # Arm B+A64 (S19-BKO): LEARNED height collapse H=3 -> 1 (Conv2d kernel (3,1), no T-mixing) BEFORE
+         # stage3, so global attention runs over T tokens (not 3*T) — 3x fewer tokens. Combined with
+         # attn_window=64 this is the Diaz-2021 "collapse then windowed 1-D attention" topology. Adds
+         # params (~197k); compact/A32 keep height_collapse=False and mean-pool H after stage3.
+-        self.hcollapse = nn.Conv2d(256, 256, kernel_size=(3, 1)) if height_collapse else None
+-        self.stage3 = nn.ModuleList([GlobalBlock(256, n_heads=8, mlp_ratio=4) for _ in range(3)])
+-        self.norm = nn.LayerNorm(256)
++        self.hcollapse = nn.Conv2d(c3, c3, kernel_size=(3, 1)) if height_collapse else None
++        self.stage3 = nn.ModuleList([GlobalBlock(c3, n_heads=8, mlp_ratio=4) for _ in range(3)])
++        self.norm = nn.LayerNorm(c3)
+         # arm B (nfd) owns the head here; the P1 A/C arms build headless (with_head=False)
+         # and attach their own head to encode() (heads.py). See docs/architecture/04 §4.4.
+-        self.head = nn.Linear(256, n_classes) if with_head else None
++        self.head = nn.Linear(c3, n_classes) if with_head else None
+ 
+         self._pe_cache: dict = {}  # (h, w) -> cpu fp32 [1, h*w, C]
+ 
+@@ -184,7 +189,7 @@
+         key = (h, w)
+         pe = self._pe_cache.get(key)
+         if pe is None:
+-            pe = sincos_pos_embed_2d(h, w, 256).unsqueeze(0)  # [1, h*w, 256] cpu fp32
++            pe = sincos_pos_embed_2d(h, w, self.enc_dim).unsqueeze(0)  # [1, h*w, 256] cpu fp32
+             self._pe_cache[key] = pe
+         return pe.to(device=device, dtype=dtype)
+ 
+@@ -284,8 +289,36 @@
+     return sum(p.numel() for p in model.parameters())
+ 
+ 
+-ARCHS = {"compact": SVTRv2CTC}
+-ARCH_CHOICES = ("compact",)
++def _build_svtrv2(n_classes: int, variant: str) -> nn.Module:
++    """Lazy import of the vendored reference arm (rec/): the compact path stays free of it."""
++    import os
++    import sys
++
++    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++    if root not in sys.path:
++        sys.path.insert(0, root)  # train/ scripts run with sys.path[0]=train/; add repo root
++    from rec.svtrv2_model import SVTRv2RCTC
++
++    return SVTRv2RCTC(n_classes, variant=variant)
++
++
++# Registry: arch name -> constructor(n_classes). Same interface for every entry
++# (forward: [B,1,48,W] -> log-probs [B, ceil(W/4), n_classes]).
++ARCHS = {
++    "compact": SVTRv2CTC,
++    # Arm A32 (S19-BKO geometry bakeoff): the compact encoder with local windowed attention along T
++    # (w_t=32 -> radius 16). ZERO extra params vs compact; mask-parity preserved (SVTRv2CTC.forward
++    # still takes input_lengths). The ~20x attention-MAC cut is analytic (dense banded-mask impl is
++    # accuracy-faithful; the MAC axis is scored analytically per prereg_s19_bko §5-4).
++    "a32": lambda n_classes: SVTRv2CTC(n_classes, attn_window=32),
++    # Arm B+A64 (S19-BKO): learned height collapse (H=3->1) + windowed 1-D attention along T (w=64,
++    # radius 32). Attention runs over T tokens instead of 3*T; adds the collapse conv (~197k params).
++    # Mask-parity preserved (SVTRv2CTC.forward takes input_lengths; kpm/window built with h=1).
++    "b_a64": lambda n_classes: SVTRv2CTC(n_classes, attn_window=64, height_collapse=True),
++    "svtrv2": lambda n_classes: _build_svtrv2(n_classes, "base"),
++    "svtrv2_small": lambda n_classes: _build_svtrv2(n_classes, "small"),
++}
++ARCH_CHOICES = ("compact", "a32", "b_a64", "svtrv2", "svtrv2_small")
+ 
+ 
+ def build_model(
+@@ -293,6 +326,7 @@
+     n_classes: Optional[int] = None,
+     arch: str = "compact",
+     verbose: bool = True,
++    width_mult: float = 1.0,
+ ):
+     """Build the recognizer. Exactly one of codec_path / n_classes decides the head size.
+ 
+@@ -309,7 +343,10 @@
+         raise ValueError("need --codec (or explicit n_classes) to size the head")
+     if arch not in ARCHS:
+         raise ValueError(f"unknown arch {arch!r}; choices: {', '.join(ARCH_CHOICES)}")
+-    model = ARCHS[arch](n_classes)
++    if width_mult != 1.0 and arch != "compact":
++        raise ValueError("width_mult is supported only for compact")
++    model = (SVTRv2CTC(n_classes, width_mult=width_mult) if arch == "compact"
++             else ARCHS[arch](n_classes))
+     if verbose:
+         n = count_params(model)
+         print(f"[model] arch={arch}: n_classes={n_classes}, params={n:,} ({n / 1e6:.2f}M)")
+@@ -327,3 +364,14 @@
+     if dtype is None:
+         return contextlib.nullcontext()
+     return torch.autocast(device_type=device.type, dtype=dtype)
++
++
++if __name__ == "__main__":
++    import argparse
++
++    ap = argparse.ArgumentParser(description="Build the model and print its parameter count.")
++    ap.add_argument("--codec", required=True, help="codec vN JSON (data_contracts §1)")
++    ap.add_argument("--arch", choices=ARCH_CHOICES, default="compact")
++    ap.add_argument("--width-mult", type=float, choices=(1.0, 1.5, 2.0, 3.0), default=1.0)
++    args = ap.parse_args()
++    build_model(codec_path=args.codec, arch=args.arch, width_mult=args.width_mult)
+--- greekocr/deploy/docling_plugin/recognizer/inference.py (pre-consolidation)
++++ greekocr/deploy/docling_plugin/recognizer/inference.py
+@@ -14,16 +14,27 @@
+ import math
+ import importlib
+ import unicodedata
++from pathlib import Path
+ 
+ import numpy as np
+ import torch
+ 
+ from . import ckpt_io
+-from .codec import Codec, load_codec, greedy_decode_line
+-from .model import DET_PAD_MARGIN, build_model, masked_forward
++from greekocr.train.cer import Codec, load_codec, greedy_decode_line
++from greekocr.train.model import DET_PAD_MARGIN, build_model, masked_forward
+ 
+ class Recognizer:
+-    def __init__(self, ckpt_path: str, codec_path: str, device: str = "cpu") -> None:
++    def __init__(self, ckpt_path: str, codec_path: str | None = None, device: str = "cpu") -> None:
++        if Path(ckpt_path).is_dir():
++            from greekocr.train.export import load_release
++            self.model, self.codec, self.config = load_release(ckpt_path)
++            if codec_path is not None and ckpt_io.sha256_file(codec_path) != self.config['codec_sha256']:
++                raise ValueError('external codec differs from release codec')
++            self.model.to(device)
++            self.device = device
++            return
++        if codec_path is None:
++            raise ValueError('legacy checkpoint requires codec_path')
+         self.codec: Codec = load_codec(codec_path)
+         # Load (state_dict, metadata) via ckpt_io: prefer explicit/sibling safetensors;
+         # otherwise try the supplied resume .pt using torch's restricted weights-only loader.
+@@ -53,11 +64,11 @@
+             raise ValueError("checkpoint must use this codec's NFD CTC head and class count")
+         arch = meta.get("arch", "compact")
+         try:  # arch-registry signature (rec/ A/B lane); returns (model, codec)
+-            built = build_model(n_classes=n_classes, arch=arch, verbose=False)
++            built = build_model(n_classes=n_classes, arch=arch, width_mult=float(meta.get("width_mult", 1.0)), verbose=False)
+         except TypeError:  # pre-registry signature
+             built = build_model(n_classes=n_classes, verbose=False)
+         self.model = built[0] if isinstance(built, tuple) else built
+-        self.model.load_state_dict(sd)
++        self.model.load_state_dict(sd, strict=True)
+         self.model.eval().to(device)
+         self.device = device
+ 
+@@ -75,15 +86,26 @@
+             # tensor's implicit conv zero-pad or another strip's width, so the reading is deterministic
+             # regardless of batch composition / wmax. The mask (input_lengths) handles attention; this
+             # halo handles the conv boundary — together they make serving batch-invariant.
+-            canvas_w = max(ws) + DET_PAD_MARGIN
+-            batch = torch.zeros(len(idxs), 1, 48, canvas_w)
+-            for j, i in enumerate(idxs):
+-                s = strips[i]
+-                bg = float(np.median(s[:, -2:]))
+-                batch[j, 0, :, : s.shape[1]] = torch.from_numpy(s)
+-                batch[j, 0, :, s.shape[1] :] = bg  # ALWAYS fill the remainder with this strip's own bg
+-            batch = ((batch - 0.5) / 0.5).to(self.device)
+-            in_lens = torch.tensor([math.ceil(w / 4) for w in ws])
++            if hasattr(self, 'config'):
++                # Release parity uses the trainer's uint8 crop and collate path,
++                # including integer-rounded own-background padding.
++                from greekocr.train.data import collate_strips
++                samples = [dict(image=np.rint(strips[i]*255).astype(np.uint8),
++                                width=ws[j], label=np.array([], dtype=np.int64),
++                                script_class='inference') for j, i in enumerate(idxs)]
++                collated = collate_strips(samples)
++                batch = collated['images'].to(self.device)
++                in_lens = collated['input_lengths']
++            else:
++                canvas_w = max(ws) + DET_PAD_MARGIN
++                batch = torch.zeros(len(idxs), 1, 48, canvas_w)
++                for j, i in enumerate(idxs):
++                    s = strips[i]
++                    bg = float(np.median(s[:, -2:]))
++                    batch[j, 0, :, : s.shape[1]] = torch.from_numpy(s)
++                    batch[j, 0, :, s.shape[1] :] = bg  # ALWAYS fill the remainder with this strip's own bg
++                batch = ((batch - 0.5) / 0.5).to(self.device)
++                in_lens = torch.tensor([math.ceil(w / 4) for w in ws])
+             log_probs = masked_forward(self.model, batch, in_lens)  # [B, T, C] (mask-aware arches)
+             probs = log_probs.exp()
+             for j, i in enumerate(idxs):
+--- greekocr/deploy/docling_plugin/recognizer/VENDORED_FROM.json (pre-consolidation)
++++ greekocr/deploy/docling_plugin/recognizer/VENDORED_FROM.json
+@@ -1,45 +1,52 @@
+ {
+-  "source_repository": "/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr",
+-  "git_head": "78eba19ab0696bd00a0f4e99665bee0530a44665",
+-  "files": {
+-    "train/model.py": {
+-      "sha256": "f6a98d5f9a236a3fbbeae30b6a3f1c5691388fcc9a54a89800d785fcd745fabf",
+-      "destination": "model.py"
++  "historical_origin": {
++    "source_repository": "/Users/foivoskarounos-zamparloukos/Projects/greek-page-ocr",
++    "git_head": "78eba19ab0696bd00a0f4e99665bee0530a44665",
++    "files": {
++      "train/model.py": {
++        "sha256": "f6a98d5f9a236a3fbbeae30b6a3f1c5691388fcc9a54a89800d785fcd745fabf",
++        "destination": "model.py"
++      },
++      "train/ckpt_io.py": {
++        "sha256": "c32fe83bab4f7a5440ff54c041aa98243ab4c8d2ecd6539c6ced7081c3f5f101",
++        "destination": "ckpt_io.py"
++      },
++      "train/cer.py": {
++        "sha256": "4ac0bc16fa7380360eb30995184f00753b4394e436a2b3db3ec8fbbdafd5b331",
++        "destination": "codec.py"
++      },
++      "pipeline/strips.py": {
++        "sha256": "e9986428ed7d52319da6ffafa190fe5dd35bd6d5acb5806a57c2ff40ae58f898",
++        "destination": "strips.py"
++      },
++      "pipeline/recognize.py": {
++        "sha256": "17f79b55ccbc1b2324cfe8f78e0c00c17d57eb00511527dbc2e223b6a0f46e2d",
++        "destination": "inference.py"
++      },
++      "codec/v1.json": {
++        "sha256": "d1b7e2d40565e89e699f748692265e06e2d7028409b78d02d6df6f89b2e82a86",
++        "destination": "v1.json"
++      }
+     },
+-    "train/ckpt_io.py": {
+-      "sha256": "c32fe83bab4f7a5440ff54c041aa98243ab4c8d2ecd6539c6ced7081c3f5f101",
+-      "destination": "ckpt_io.py"
+-    },
+-    "train/cer.py": {
+-      "sha256": "4ac0bc16fa7380360eb30995184f00753b4394e436a2b3db3ec8fbbdafd5b331",
+-      "destination": "codec.py"
+-    },
+-    "pipeline/strips.py": {
+-      "sha256": "e9986428ed7d52319da6ffafa190fe5dd35bd6d5acb5806a57c2ff40ae58f898",
+-      "destination": "strips.py"
+-    },
+-    "pipeline/recognize.py": {
+-      "sha256": "17f79b55ccbc1b2324cfe8f78e0c00c17d57eb00511527dbc2e223b6a0f46e2d",
+-      "destination": "inference.py"
+-    },
+-    "codec/v1.json": {
+-      "sha256": "d1b7e2d40565e89e699f748692265e06e2d7028409b78d02d6df6f89b2e82a86",
+-      "destination": "v1.json"
++    "adaptations": [
++      "Package-relative imports; removed non-compact registry entries and CLI selftests.",
++      "Removed unsafe checkpoint conversion; weights-only loading allowlists NumPy resume-state constructors.",
++      "No sys.path mutation; NFC greedy CTC and own-background padding retained.",
++      "CP-C1 L1: document restricted resume .pt loading and replace removed-converter recovery instructions with trusted safetensors export guidance; loader policy unchanged."
++    ],
++    "vendored_sha256": {
++      "__init__.py": "06ce64f68d9fc069b064b4538b4fe6a54afa86037c48bdfb1ecfb2c8c6dab08c",
++      "ckpt_io.py": "3f44d8149d07052f0826c275eef838fb1b3f0dadcc413330c143efb5fa6c1e5b",
++      "codec.py": "e6e15ad7e3d78cff8d348fdb84a06a52cfc5d39c55d1567f292e0ecb37b5399c",
++      "inference.py": "32029d9142dbf0da37f7fb47d43e7b2a0e6dbaeaee1a941844497e7f6896bc45",
++      "model.py": "90bcb3f9c1f1d593062145a5d23582eea862c4e98ab783bd0fd6cedf6adfb8ae",
++      "strips.py": "e9986428ed7d52319da6ffafa190fe5dd35bd6d5acb5806a57c2ff40ae58f898",
++      "v1.json": "d1b7e2d40565e89e699f748692265e06e2d7028409b78d02d6df6f89b2e82a86"
+     }
+   },
+-  "adaptations": [
+-    "Package-relative imports; removed non-compact registry entries and CLI selftests.",
+-    "Removed unsafe checkpoint conversion; weights-only loading allowlists NumPy resume-state constructors.",
+-    "No sys.path mutation; NFC greedy CTC and own-background padding retained.",
+-    "CP-C1 L1: document restricted resume .pt loading and replace removed-converter recovery instructions with trusted safetensors export guidance; loader policy unchanged."
+-  ],
+-  "vendored_sha256": {
+-    "__init__.py": "06ce64f68d9fc069b064b4538b4fe6a54afa86037c48bdfb1ecfb2c8c6dab08c",
+-    "ckpt_io.py": "3f44d8149d07052f0826c275eef838fb1b3f0dadcc413330c143efb5fa6c1e5b",
+-    "codec.py": "e6e15ad7e3d78cff8d348fdb84a06a52cfc5d39c55d1567f292e0ecb37b5399c",
+-    "inference.py": "32029d9142dbf0da37f7fb47d43e7b2a0e6dbaeaee1a941844497e7f6896bc45",
+-    "model.py": "90bcb3f9c1f1d593062145a5d23582eea862c4e98ab783bd0fd6cedf6adfb8ae",
+-    "strips.py": "e9986428ed7d52319da6ffafa190fe5dd35bd6d5acb5806a57c2ff40ae58f898",
+-    "v1.json": "d1b7e2d40565e89e699f748692265e06e2d7028409b78d02d6df6f89b2e82a86"
+-  }
++  "maintained_model": "greekocr.train.model",
++  "maintained_codec": "greekocr.train.cer",
++  "release_loader": "greekocr.train.export.load_release",
++  "mapping": "greekocr/train/CONSOLIDATION.md",
++  "note": "Historical source retained as attribution; model.py and codec.py are compatibility pointers. inference.py now loads bound release directories."
+ }
