@@ -87,6 +87,9 @@ def _segments(row: dict) -> str:
 
 
 def _size(image: Any) -> tuple[int, int]:
+    if isinstance(image, dict) and 'sprite' in image:
+        x0, y0, x1, y1 = image['bbox']
+        return x1 - x0, y1 - y0
     if isinstance(image, Image.Image):
         return image.size
     source = (io.BytesIO(base64.b64decode(image.split(',', 1)[1]))
@@ -118,7 +121,9 @@ def render(lines: list[dict], spec: dict[str, Any]) -> str:
 
     Cards carry line_id, image, rows (name and text/segments), tags, optional
     zooms, clean_image, printed, slot, data attributes, tool_verdict, versions,
-    overlay_svg and display. Group order comes from spec.groups. Explicit doc_id
+    overlay_svg and display. An image may be a lossless sprite descriptor:
+    {sprite: local_path, src: relative_URL, bbox: [x0,y0,x1,y1]}.
+    Group order comes from spec.groups. Explicit doc_id
     wins; otherwise sheet_prefix gives prefix:line_id, or the legacy identity is
     line_id / line_id:s{slot}. variant defaults to decision.
     """
@@ -178,7 +183,19 @@ def render(lines: list[dict], spec: dict[str, Any]) -> str:
         if scale <= 0:
             raise ValueError('display dimensions must be positive')
         dw = max(1, int(w * scale))
-        img = f'<img src="{_uri(image)}" alt="{_e(line.get("alt", "line with detected marks"))}">'
+        if isinstance(image, dict) and 'sprite' in image:
+            with Image.open(image['sprite']) as sprite:
+                sw, sh = sprite.size
+            x0, y0, x1, y1 = image['bbox']
+            if not (0 <= x0 < x1 <= sw and 0 <= y0 < y1 <= sh):
+                raise ValueError('sprite crop outside raster')
+            src = _e(image['src'])
+            img = (f'<svg class="sprite" viewBox="{x0} {y0} {w} {h}" width="{w}" height="{h}" '
+                   f'role="img" aria-label="{_e(line.get("alt", "line crop"))}" '
+                   f'data-src="{src}" data-x="{x0}" data-y="{y0}" data-sw="{sw}" data-sh="{sh}">'
+                   f'<image href="{src}" width="{sw}" height="{sh}"></image></svg>')
+        else:
+            img = f'<img src="{_uri(image)}" alt="{_e(line.get("alt", "line with detected marks"))}">'
         clean = f' style="background-image:url({_uri(line["clean_image"])})"' if line.get('clean_image') is not None else ''
         out.append(f'<div class="zw"><div class="ov" style="width:{dw}px" data-w="{w}" data-dw="{dw}">' +
                    img + line.get('overlay_svg', '') + f'</div><div class="lens"{clean} hidden></div></div>')

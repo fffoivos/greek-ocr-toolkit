@@ -27,7 +27,6 @@ from collections import Counter
 from typing import Dict, Iterator, List, Optional, Sequence
 
 import numpy as np
-import pyarrow.parquet as pq
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, Sampler
@@ -69,6 +68,8 @@ class StripDataset(Dataset):
         allow_reserved: bool = False,
         keep_classes: Optional[set] = None,
     ) -> None:
+        import pyarrow.parquet as pq
+
         # keep_classes: if set, keep ONLY rows whose script_class is in it (P1 --greek-only filter,
         # prereg_t1 §2: the head-arm pilot trains on the Greek slice greek_mono+greek_poly).
         self.keep_classes = keep_classes

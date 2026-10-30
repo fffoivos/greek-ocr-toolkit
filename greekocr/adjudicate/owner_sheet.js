@@ -160,9 +160,10 @@
 (function () {
   const Z = 3;
   document.querySelectorAll('.zw').forEach(wrapper => {
-    const img = wrapper.querySelector('img'), lens = wrapper.querySelector('.lens');
+    const img = wrapper.querySelector('img,svg.sprite'), lens = wrapper.querySelector('.lens');
+    const sprite = img.matches('svg.sprite');
     // A caller-supplied clean raster must remain the magnifier source.
-    if (!lens.style.backgroundImage) lens.style.backgroundImage = 'url(' + img.src + ')';
+    if (!lens.style.backgroundImage) lens.style.backgroundImage = 'url(' + (sprite ? img.dataset.src : img.src) + ')';
     function show(event) {
       const rect = img.getBoundingClientRect(), x = event.clientX - rect.left, y = event.clientY - rect.top;
       if (x < 0 || y < 0 || x > rect.width || y > rect.height) { lens.hidden = true; return; }
@@ -171,8 +172,11 @@
       lens.style.left = Math.max(8, Math.min(window.innerWidth - width - 8, event.clientX - width / 2)) + 'px';
       lens.style.top = (rect.top >= height + 12 ? rect.top - height - 12 :
         Math.max(8, Math.min(window.innerHeight - height - 8, rect.bottom + 12))) + 'px';
-      lens.style.backgroundSize = rect.width * Z + 'px ' + rect.height * Z + 'px';
-      lens.style.backgroundPosition = (width / 2 - x * Z) + 'px ' + (height / 2 - y * Z) + 'px';
+      const factor = sprite ? rect.width / Number(img.closest('.ov').dataset.w) : 1;
+      lens.style.backgroundSize = (sprite ? Number(img.dataset.sw) * factor : rect.width) * Z + 'px ' +
+        (sprite ? Number(img.dataset.sh) * factor : rect.height) * Z + 'px';
+      lens.style.backgroundPosition = (width / 2 - (x + (sprite ? Number(img.dataset.x) * factor : 0)) * Z) + 'px ' +
+        (height / 2 - (y + (sprite ? Number(img.dataset.y) * factor : 0)) * Z) + 'px';
     }
     img.addEventListener('pointermove', event => { if (event.pointerType !== 'touch') show(event); });
     img.addEventListener('pointerleave', event => { if (event.pointerType !== 'touch') lens.hidden = true; });
